@@ -3,6 +3,7 @@ import Foundation
 @main
 enum CostSmokeTests {
     static func main() {
+        verifyCompressedCostRollouts()
         verifyArchivedSessionsAreIncludedOnce()
         verifyMovedThreadUsesCurrentProject()
         verifyTokenActivityGridGeometry()
@@ -10,6 +11,7 @@ enum CostSmokeTests {
         verifyCurrentAccountSelection()
         verifyRollingWindowsAndAccountScopes()
         verifyAccountTimelineSplitsExistingSession()
+        verifyLifetimeTokens()
         verifyAstraOfficialPricing()
         let service = CostService()
         let fetchStartedAt = Date()
@@ -75,6 +77,44 @@ enum CostSmokeTests {
             exit(0)
         }
         RunLoop.main.run()
+    }
+
+    private static func verifyCompressedCostRollouts() {
+        let manager = FileManager.default
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".tmp/cost-zstd-tests/\(UUID().uuidString)")
+        let live = root.appendingPathComponent(".codex/sessions")
+        let archive = root.appendingPathComponent(".codex/archived_sessions")
+        try! manager.createDirectory(at: live, withIntermediateDirectories: true)
+        try! manager.createDirectory(at: archive, withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: root) }
+        let fixture = URL(fileURLWithPath: "Tests/Fixtures/CompressedRollouts/user.jsonl.zst")
+        let zipped = live.appendingPathComponent("fixture.jsonl.zst")
+        try! manager.copyItem(at: fixture, to: zipped)
+        let first = CostService.scanCodex(homeDirectory: root, lookbackDays: nil)
+        check(first.count == 1 && first[0].input == 600 && first[0].cacheRead == 400 && first[0].output == 50, "compressed token fields retain model pricing semantics")
+        try! manager.copyItem(at: fixture, to: archive.appendingPathComponent("copy.jsonl.zst"))
+        try! RolloutReader.copyDecoded(from: fixture, to: live.appendingPathComponent("fixture.jsonl"))
+        let duplicated = CostService.scanCodex(homeDirectory: root, lookbackDays: nil)
+        check(duplicated.count == 1, "plain/compressed mirrors and archive duplicates count once")
+        let continuation = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"zstd-fixture\",\"cwd\":\"/tmp/ZstdFixture\"}}\n{\"type\":\"event_msg\",\"timestamp\":\"2026-10-16T12:00:02Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":200,\"output_tokens\":10}}}}\n"
+        try! Data(continuation.utf8).write(to: live.appendingPathComponent("fixture.jsonl"))
+        check(CostService.scanCodex(homeDirectory: root, lookbackDays: nil).count == 2, "compressed history and resumed plain events are unioned")
+        let corrupt = archive.appendingPathComponent("bad.jsonl.zst")
+        try! Data("bad".utf8).write(to: corrupt)
+        check(CostService.scanCodex(homeDirectory: root, lookbackDays: nil).count == 2, "invalid compressed file contributes no partial cost")
+    }
+
+    private static func verifyLifetimeTokens() {
+        let now = Date()
+        let old = TokenUsageEvent(provider: .codex, timestamp: now.addingTimeInterval(-400 * 86400),
+            model: "gpt-5.4", sessionID: "old", projectPath: "/example", input: 100, output: 20, cacheCreate: 0, cacheRead: 80)
+        let future = TokenUsageEvent(provider: .codex, timestamp: now.addingTimeInterval(86400),
+            model: "gpt-5.4", sessionID: "future", projectPath: "/example", input: 999, output: 0, cacheCreate: 0, cacheRead: 0)
+        let snapshot = CostService.summarize([old, future], projectNames: [:], accountContext: .init(accounts: [], accountIDByThread: [:], accountTimeline: []), now: now)
+        check(snapshot.aggregate.lifetimeTokens == 200, "lifetime includes old history and excludes future events")
+        check(snapshot.unknownAccount.lifetimeTokens == 200, "unattributed lifetime remains in unknown account scope")
+        let partial = CostService.summarize([old], projectNames: [:], accountContext: .init(accounts: [], accountIDByThread: [:], accountTimeline: []), now: now, includeActivity: false)
+        check(partial.aggregate.lifetimeTokens == nil, "fast partial scan does not claim a lifetime total")
     }
 
     private static func verifyAstraOfficialPricing() {
@@ -152,6 +192,22 @@ enum CostSmokeTests {
         check(UsagePeriod.month.activityDayCount == 30, "monthly activity follows the monthly summary period")
         check(UsagePeriod.day.emptyActivityTitle == "今日暂无活动", "daily empty-state copy")
         check(UsagePeriod.week.emptyActivityTitle == "近 7 日暂无活动", "weekly empty-state copy")
+        check([1, 7, 30].allSatisfy { TokenActivityLayout.usesBars(rangeDays: $0) }, "short ranges use bars, including the daily range")
+        check([90, 180].allSatisfy { !TokenActivityLayout.usesBars(rangeDays: $0) }, "long ranges retain heatmaps")
+        var hourCalendar = Calendar(identifier: .gregorian)
+        hourCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let hourNow = hourCalendar.date(from: DateComponents(year: 2026, month: 10, day: 16, hour: 9))!
+        check(TokenActivityLayout.observedHourCount(seriesCount: 24, now: hourNow, calendar: hourCalendar) == 10, "future hours are not treated as observed values")
+        check(TokenActivityLayout.observedHourCount(seriesCount: 0, now: hourNow, calendar: hourCalendar) == 0, "missing hourly series stays empty")
+        check(TokenActivityLayout.observedHourCount(seriesCount: 3, now: hourNow, calendar: hourCalendar) == 3, "short hourly input is not padded with fabricated observations")
+        check(TokenActivityLayout.visibleColumns(for: 1) == 1, "daily activity has no fifteen-cell empty reservation")
+        check(TokenActivityLayout.visibleColumns(for: 7) == 7, "weekly activity uses seven columns")
+        check(TokenActivityLayout.visibleColumns(for: 180) == 16, "long ranges retain the established grid")
+        check(TokenActivityLayout.visibleColumns(for: 0) == 1, "empty activity still has valid geometry")
+        check(TokenActivityLayout.activityDays(following: 7, independentDays: nil) == 7, "activity follows the summary by default")
+        check(TokenActivityLayout.activityDays(following: 7, independentDays: 90) == 90, "explicit independent range overrides summary")
+        check(TokenActivityLayout.activityDays(following: 30, independentDays: nil) == 30, "returning to follow mode uses the current period")
+        check(TokenActivityLayout.activityDays(following: 0, independentDays: nil) == 1, "invalid range does not produce invalid geometry")
         check(TokenActivityLayout.placeholderCount(for: 30) == 2, "30-day heatmap left padding")
         check(TokenActivityLayout.rowCount(for: 30) == 2, "30-day heatmap rows")
         check(TokenActivityLayout.placeholderCount(for: 90) == 6, "90-day heatmap left padding")

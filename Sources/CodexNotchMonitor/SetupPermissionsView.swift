@@ -377,6 +377,11 @@ struct SetupPermissionsView: View {
         setupCard {
             Text("权限与连接")
                 .font(MonitorDesktopTypography.cardTitle)
+            permissionRow(title: "原生任务监控", detail: "通过桌面连接与本地日志自动观察任务，无需安装 Hook；批准和回答请在 Codex 中操作。") {
+                Text(store.nativeActivityStatus)
+                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
+            }
+            setupDivider
             permissionRow(
                 title: "通知",
                 detail: "额度恢复、重置确认与需要处理的任务提醒。"
@@ -389,17 +394,20 @@ struct SetupPermissionsView: View {
                 }
             }
             setupDivider
-            permissionRow(
-                title: "任务状态连接",
-                detail: "通过 Codex Hooks 显示任务开始、等待批准与完成。"
-            ) {
-                HStack(spacing: 12) {
-                    Text(displayedHookStateTitle)
-                        .foregroundStyle(hookStateColor)
-                    hookPrimaryAction
+            DisclosureGroup("高级／兼容连接：Codex Hooks") {
+                permissionRow(title: "Hook 数据接入", detail: MonitorStore.hookDataEnabled
+                    ? "通过 Codex Hooks 补充任务事件。"
+                    : "当前使用桌面 IPC 与本地日志；以下操作仅管理已有 Hook 配置，不会恢复数据接入。") {
+                    HStack(spacing: 12) {
+                        Text(MonitorStore.hookDataEnabled ? displayedHookStateTitle : "已暂停接入")
+                            .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                        hookPrimaryAction
+                    }
                 }
+                hookFollowUp
             }
-            hookFollowUp
+            .font(MonitorDesktopTypography.body)
+
         }
     }
 

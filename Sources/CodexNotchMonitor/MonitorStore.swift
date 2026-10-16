@@ -61,11 +61,16 @@ final class MonitorStore: ObservableObject {
     }
 
     @Published private(set) var quotaState: QuotaState = .loading
+    @Published private(set) var accountUsage: AccountUsageSnapshot?
+    private var accountUsageRequestID: UUID?
     @Published private(set) var quotaResetCredits: QuotaResetCreditSummary?
     @Published private(set) var isConsumingQuotaResetCredit = false
     @Published private(set) var quotaResetOperationMessage: String?
     @Published private(set) var tasks: [MonitoredTask] = []
     @Published private(set) var activeProjects: [ActiveProjectState] = []
+    @Published private(set) var activitySessions: [ActivitySessionSnapshot] = []
+    private var activitySessionState = ActivitySessionState()
+    private var activityHookState = ActivityHookState()
     @Published var selectedProjectID: String?
     @Published private(set) var costSnapshot: CostSnapshot = .empty
     @Published private(set) var usageAccountOptions: [UsageAccountOption] = []
@@ -133,6 +138,8 @@ final class MonitorStore: ObservableObject {
 
     private let quotaService = QuotaService()
     private let sessionActivityService = SessionActivityService()
+    private let nativeActivityObserver = NativeActivityObserver()
+    @Published private(set) var nativeActivityStatus = "本地日志监控"
     @Published private(set) var turnTokenUsages: [String: TurnTokenUsage] = [:]
     private let costService = CostService()
     private let tiboRadarService = CodexResetRadarService()
@@ -165,6 +172,7 @@ final class MonitorStore: ObservableObject {
     private var isRefreshingQuota = false
     private var sessionTimer: Timer?
     private var isReadingSession = false
+    private var pendingSessionRefresh = false
     private var costTimer: Timer?
     private var costRequestID: UUID?
     private var tiboFeedTimer: Timer?
@@ -287,7 +295,8 @@ final class MonitorStore: ObservableObject {
         processPendingSidebarCleanups()
         processPendingProjectSessionRepairs()
         tiboRadar = tiboRadarService.cachedSnapshot
-        tiboFeed = tiboRadar?.evidenceFeed
+        tiboFeed = tiboRadar?.associationEvidenceFeed
+        if let tiboFeed { quotaResetMonitor.updateEvidence(tiboFeed) }
         tiboFeedFetchedAt = tiboRadarService.cachedAt
         quotaResetEvents = quotaResetMonitor.history
         quotaResetNotifier.refreshAuthorizationStatus { [weak self] status in
@@ -326,8 +335,10 @@ final class MonitorStore: ObservableObject {
                 self?.handleAccountStateChange(detectedAt: detectedAt)
             }
         }
-        eventTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.consumeHookEvents() }
+        if Self.hookDataEnabled {
+            eventTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.consumeHookEvents() }
+            }
         }
         quotaTimer = Timer.scheduledTimer(
             withTimeInterval: MonitorRefreshCadence.quota,
@@ -360,6 +371,7 @@ final class MonitorStore: ObservableObject {
 
     func refreshQuota() {
         guard !isRefreshingQuota else { return }
+        refreshAccountUsage()
         isRefreshingQuota = true
         let previous = quotaState.buckets
         if previous.isEmpty { quotaState = .loading }
@@ -377,7 +389,8 @@ final class MonitorStore: ObservableObject {
                 let evaluation = self.quotaResetMonitor.evaluate(
                     buckets: snapshot.buckets,
                     feed: self.tiboFeed,
-                    now: now
+                    now: now,
+                    accountID: UsageAccountSelection.currentAccountID(in: self.usageAccountOptions)
                 )
                 self.handleQuotaResetEvents(evaluation.events)
                 if evaluation.needsFeedRefresh {
@@ -390,8 +403,22 @@ final class MonitorStore: ObservableObject {
         }
     }
 
-    func consumeQuotaResetCredit() {
+    private func refreshAccountUsage() {
+        let requestID = UUID()
+        accountUsageRequestID = requestID
+        CodexAppServerClient.request(method: "account/usage/read", timeout: 10) { [weak self] result in
+            guard let self, self.accountUsageRequestID == requestID else { return }
+            self.accountUsage = (try? result.get()).flatMap { AccountUsageSnapshot.parse($0) }
+        }
+    }
+
+    func consumeQuotaResetCredit(expectedAccountFingerprint: String? = nil) {
         guard !isConsumingQuotaResetCredit else { return }
+        if let expectedAccountFingerprint,
+           observedAccount?.fingerprint != expectedAccountFingerprint || hasPendingAccountStateRefresh || isContinuityLoading {
+            quotaResetOperationMessage = "账号状态正在变化，请等待刷新后重新确认。"
+            return
+        }
         guard quotaResetCredits?.availableCount ?? 0 > 0 else {
             quotaResetOperationMessage = "当前没有可用的额度重置卡。"
             return
@@ -783,6 +810,9 @@ final class MonitorStore: ObservableObject {
     }
 
     private func handleAccountStateChange(detectedAt: Date) {
+        accountUsage = nil
+        accountUsageRequestID = nil
+        refreshAccountUsage()
         hasPendingAccountStateRefresh = true
         pendingAccountChangeDetectedAt = detectedAt
         schedulePendingAccountStateRefresh(after: 0)
@@ -2261,7 +2291,7 @@ final class MonitorStore: ObservableObject {
             let previousUsageContext = accountContinuityStore.usageAccountContext()
             let observation = try accountContinuityStore.observe(
                 account: account,
-                localSessionIDs: Set(snapshot.userThreads.map(\.id))
+                localSessionIDs: snapshot.ownershipObservationIDs
             )
             observedAccount = observation.account
             accountTransition = observation.transition
@@ -2305,12 +2335,12 @@ final class MonitorStore: ObservableObject {
             switch result {
             case let .success((radar, fetchedAt)):
                 self.tiboRadar = radar
-                self.tiboFeed = radar.evidenceFeed
+                self.tiboFeed = radar.associationEvidenceFeed
                 self.tiboFeedFetchedAt = fetchedAt
                 self.tiboFeedError = radar.evidenceFeed.monitor.status == "ok"
                     ? nil
                     : "数据源已标记延迟"
-                self.handleQuotaResetEvents(self.quotaResetMonitor.reconcile(feed: radar.evidenceFeed))
+                self.handleQuotaResetEvents(self.quotaResetMonitor.reconcile(feed: radar.associationEvidenceFeed))
             case let .failure(error):
                 // Preserve the last verified feed during transient outages.
                 self.tiboFeedError = error.localizedDescription
@@ -2354,7 +2384,12 @@ final class MonitorStore: ObservableObject {
         return result
     }
 
+    // Temporary native IPC/log trial. Retain Hook installation and its inbox;
+    // restore this gate only after the trial and a queued-event freshness review.
+    static let hookDataEnabled = false
+
     func consumeHookEvents() {
+        guard Self.hookDataEnabled else { return }
         let manager = FileManager.default
         guard let files = try? manager.contentsOfDirectory(
             at: AppPaths.eventInbox,
@@ -2376,21 +2411,42 @@ final class MonitorStore: ObservableObject {
         }
         if consumedEvent {
             refreshCodexSetup()
+            refreshSessionActivity()
         }
     }
 
     func refreshSessionActivity(completion: (() -> Void)? = nil) {
+        sessionActivityService.onChange = { [weak self] in self?.refreshSessionActivity() }
+        nativeActivityObserver.onChange = { [weak self] in self?.refreshSessionActivity() }
         guard !isReadingSession else {
+            pendingSessionRefresh = true
             completion?()
             return
         }
         isReadingSession = true
-        sessionActivityService.fetch { [weak self] snapshots, threadNames in
+        sessionActivityService.fetch(preferredSessionIDs: tasks.map(\.id)) { [weak self] snapshots, threadNames in
             guard let self else {
                 completion?()
                 return
             }
             self.isReadingSession = false
+            self.nativeActivityObserver.observe(snapshots)
+            let merged = self.nativeActivityObserver.merge(snapshots, names: threadNames, hooks: self.tasks)
+            let snapshots = merged.snapshots
+            let threadNames = merged.names
+            let activityHooks = merged.hooks
+            switch self.nativeActivityObserver.state {
+            case .connected:
+                self.nativeActivityStatus = "桌面已连接 · \(snapshots.filter { $0.nativePhase != nil }.count) 个会话"
+            case .connecting:
+                self.nativeActivityStatus = "本地日志 · 桌面连接中"
+            case .disconnected:
+                self.nativeActivityStatus = "本地日志 · 桌面未连接"
+            }
+            if self.pendingSessionRefresh {
+                self.pendingSessionRefresh = false
+                DispatchQueue.main.async { [weak self] in self?.refreshSessionActivity() }
+            }
             let usages = snapshots.reduce(into: [String: TurnTokenUsage]()) { result, snapshot in
                 if let usage = snapshot.turnTokenUsage { result[snapshot.sessionID] = usage }
             }
@@ -2400,7 +2456,7 @@ final class MonitorStore: ObservableObject {
             self.lastProjectCatalogState = catalog
             let discovered = ProjectActivityAggregator.projects(
                 snapshots: snapshots,
-                hookTasks: self.tasks,
+                hookTasks: activityHooks,
                 catalog: catalog,
                 threadNames: threadNames
             )
@@ -2413,6 +2469,15 @@ final class MonitorStore: ObservableObject {
             if self.activeProjects != activeProjects {
                 self.activeProjects = activeProjects
             }
+            self.activitySessionState.update(
+                projects: activeProjects, snapshots: snapshots, hookTasks: activityHooks,
+                usages: usages, now: Date(),
+                // Keep the bounded receipt through the popup plus two compact 3-second signals.
+                completionHold: ActivityIslandPreferences.load().expandedHold + 6, threadNames: threadNames
+            )
+            if self.activitySessions != self.activitySessionState.rows {
+                self.activitySessions = self.activitySessionState.rows
+            }
             if let selected = self.selectedProjectID,
                !self.activeProjects.contains(where: { $0.id == selected }) {
                 self.selectedProjectID = nil
@@ -2424,6 +2489,7 @@ final class MonitorStore: ObservableObject {
 
     private func apply(_ event: HookEvent) {
         let incoming = HookEventMapper.task(from: event)
+        guard activityHookState.accepts(incoming, replacing: tasks.first(where: { $0.id == incoming.id })) else { return }
         let previousPath = tasks.first(where: { $0.id == incoming.id })?.projectPath
         if let index = tasks.firstIndex(where: { $0.id == incoming.id }) {
             tasks[index] = incoming
@@ -2432,6 +2498,7 @@ final class MonitorStore: ObservableObject {
         }
         tasks.sort { $0.updatedAt > $1.updatedAt }
         if tasks.count > 8 { tasks = Array(tasks.prefix(8)) }
+        activityHookState.retain(sessionIDs: Set(tasks.map(\.id)))
         if previousPath != nil, previousPath != incoming.projectPath {
             refreshCost()
         }

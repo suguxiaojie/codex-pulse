@@ -16,7 +16,7 @@ enum CodexActivityVisualState {
     case unavailable
 }
 
-private extension Optional where Wrapped == TaskPhase {
+extension Optional where Wrapped == TaskPhase {
     var rippleGlowVisualState: CodexActivityVisualState {
         switch self {
         case nil: return .disconnectedCodex
@@ -32,13 +32,15 @@ private extension Optional where Wrapped == TaskPhase {
 }
 
 enum CodexActivityRippleGlowContract {
-    static let uniformFloatCount = 128
+    static let uniformFloatCount = 132
     static let sphereRadius: Float = 0.535
     static let contourDeformation: Float = 0
     static let approvedSpeedMultiplier: Float = 1.5
 }
 
 private enum RippleGlowUniformLayout {
+    static let completionAmount = 128
+    static let completionPhase = 129
     static let floatCount =
         CodexActivityRippleGlowContract.uniformFloatCount
     static let sizeX = 0
@@ -113,8 +115,8 @@ private struct RippleGlowConfiguration {
     let sharpness: Float
     let exposure: Float
 
-    func uniforms() -> [Float] {
-        var result = rippleGlowUniformSeed
+    func uniforms(completed: Bool = false) -> [Float] {
+        var result = rippleGlowUniformSeed + [completed ? 1 : 0, 0, 0, 0]
         result[RippleGlowUniformLayout.speed] =
             speed
             * CodexActivityRippleGlowContract.approvedSpeedMultiplier
@@ -312,7 +314,7 @@ private enum RippleGlowShaderResource {
             ) else {
                 throw RippleGlowRendererError.invalidShader
             }
-            return bundledSource
+            return try RippleGlowCompletionShader.compose(bundledSource)
         }
 
         let checkoutURL = URL(fileURLWithPath: #filePath)
@@ -330,8 +332,52 @@ private enum RippleGlowShaderResource {
         else {
             throw RippleGlowRendererError.missingShader
         }
-        return checkoutSource
+        return try RippleGlowCompletionShader.compose(checkoutSource)
     }
+}
+
+private enum RippleGlowCompletionShader {
+    static func compose(_ source: String) throws -> String {
+        let fields = "    metal::float4 paletteStop11_;"
+        let entry = "fragment fs_mainOutput fs_main("
+        let output = "metal::float4(_e2.xyz * fit, metal::clamp(alpha, 0.0, 1.0) * fit)"
+        guard source.contains(fields), source.contains(entry), source.contains(output) else {
+            throw RippleGlowRendererError.invalidShader
+        }
+        return source.replacingOccurrences(of: fields, with: fields + "\n    metal::float4 completion;")
+            .replacingOccurrences(of: entry, with: function + "\n" + entry)
+            .replacingOccurrences(of: output, with: "metal::float4(qvCompletionLight(_e2.xyz, uv_4 / rad_3, u) * fit, metal::clamp(alpha, 0.0, 1.0) * fit)")
+    }
+
+    private static let function = #"""
+    float qvCheckSegment(metal::float2 p, metal::float2 a, metal::float2 b) {
+        metal::float2 edge = b - a;
+        float t = metal::clamp(metal::dot(p - a, edge) / metal::dot(edge, edge), 0.0, 1.0);
+        return metal::length(p - a - edge * t);
+    }
+
+    metal::float3 qvCompletionLight(metal::float3 base, metal::float2 p, constant Uniforms& u) {
+        float amount = metal::clamp(u.completion.x, 0.0, 1.0);
+        if (amount < 0.001) return base;
+        float phase = u.completion.y;
+        // Eight seconds: flowing ridge, 0.8 s fade in, 4 s hold, 1 s fade out.
+        float check = metal::smoothstep(0.25, 0.35, phase)
+            * (1.0 - metal::smoothstep(0.85, 0.975, phase)) * amount;
+        // The fullscreen vertex UV has positive Y pointing up.
+        metal::float2 joint = metal::float2(-0.12, -0.28);
+        float distance = metal::min(
+            qvCheckSegment(p, metal::float2(-0.43, 0.02), joint),
+            qvCheckSegment(p, joint, metal::float2(0.44, 0.34)));
+        float antialias = metal::max(metal::fwidth(distance), 0.008);
+        float stroke = 1.0 - metal::smoothstep(0.075 - antialias, 0.075 + antialias, distance);
+        float glow = metal::exp(-distance * distance / 0.018) * 0.24;
+        float inside = 1.0 - metal::smoothstep(0.72, 0.94, metal::length(p));
+        // Crossfade the moving ridge into a quiet green sphere interior; retain the rim.
+        metal::float3 resting = u.colorA.xyz * (0.24 + 0.14 * (p.y + 1.0));
+        metal::float3 color = metal::mix(base, resting, check * inside);
+        return metal::mix(color, u.highlightColor.xyz, metal::min(stroke * 0.94 + glow, 1.0) * check * inside);
+    }
+    """#
 }
 
 private enum RippleGlowPipeline {
@@ -415,13 +461,14 @@ private final class RippleGlowRenderer: NSObject, MTKViewDelegate {
     private var transitionStartedAt = CACurrentMediaTime()
     private var lastFrameAt = CACurrentMediaTime()
     private var motionPhase: Float = 0
+    private var completionElapsed: Double = 0
     private var reduceMotion = false
 
     init(
         view: MTKView,
         initialState: CodexActivityVisualState
     ) throws {
-        guard rippleGlowUniformSeed.count
+        guard rippleGlowUniformSeed.count + 4
                 == RippleGlowUniformLayout.floatCount
         else {
             throw RippleGlowRendererError.invalidShader
@@ -449,7 +496,7 @@ private final class RippleGlowRenderer: NSObject, MTKViewDelegate {
         }
         commandQueue = queue
         activeState = initialState
-        let initialUniforms = initialState.rippleGlowConfiguration.uniforms()
+        let initialUniforms = initialState.rippleGlowConfiguration.uniforms(completed: initialState == .completed)
         transitionFrom = initialUniforms
         transitionTarget = initialUniforms
         super.init()
@@ -459,7 +506,7 @@ private final class RippleGlowRenderer: NSObject, MTKViewDelegate {
     func setState(_ state: CodexActivityVisualState, in view: MTKView) {
         guard activeState != state else { return }
         let now = CACurrentMediaTime()
-        let uniforms = state.rippleGlowConfiguration.uniforms()
+        let uniforms = state.rippleGlowConfiguration.uniforms(completed: state == .completed)
         if reduceMotion {
             transitionFrom = uniforms
             transitionTarget = uniforms
@@ -468,6 +515,7 @@ private final class RippleGlowRenderer: NSObject, MTKViewDelegate {
             transitionTarget = uniforms
         }
         transitionStartedAt = now
+        if state == .completed { completionElapsed = 0 }
         activeState = state
         if view.isPaused {
             view.needsDisplay = true
@@ -523,6 +571,8 @@ private final class RippleGlowRenderer: NSObject, MTKViewDelegate {
         uniforms[RippleGlowUniformLayout.sizeY] =
             Float(view.drawableSize.height)
         uniforms[RippleGlowUniformLayout.time] = motionPhase / speed
+        completionElapsed = (completionElapsed + frameDelta).truncatingRemainder(dividingBy: 8)
+        uniforms[RippleGlowUniformLayout.completionPhase] = reduceMotion ? 0.45 : Float(completionElapsed / 8)
 
         encoder.setRenderPipelineState(pipeline)
         uniforms.withUnsafeBytes { bytes in
@@ -644,12 +694,26 @@ final class RippleGlowHostView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    // QuotaView IslandActivityOrbHost geometry: the sphere fills its requested
+    // diameter, while only its tiny Metal canvas is supersampled.
     override func layout() {
         super.layout()
-        metalView.frame = bounds
+        let side = min(bounds.width, bounds.height) / CGFloat(CodexActivityRippleGlowContract.sphereRadius)
+        metalView.frame = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
         fallback.frame = bounds
+        if let window {
+            metalView.autoResizeDrawable = false
+            metalView.layer?.contentsScale = window.backingScaleFactor
+            metalView.layer?.minificationFilter = .linear
+            metalView.layer?.magnificationFilter = .linear
+            let pixels = metalView.convertToBacking(metalView.bounds).size
+            let size = CGSize(width: ceil(pixels.width) * 2, height: ceil(pixels.height) * 2)
+            if size.width > 0, size.height > 0, metalView.drawableSize != size { metalView.drawableSize = size }
+        }
         metalView.redrawIfPaused()
     }
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); needsLayout = true }
+    override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); needsLayout = true }
 
     func update(phase: TaskPhase?, animated: Bool) {
         metalView.setState(phase.rippleGlowVisualState)
@@ -706,7 +770,7 @@ enum RippleGlowRuntimeValidator {
         } catch {
             return "Metal shader validation failed: \(error.localizedDescription)"
         }
-        guard rippleGlowUniformSeed.count
+        guard rippleGlowUniformSeed.count + 4
                 == CodexActivityRippleGlowContract.uniformFloatCount
         else {
             return "Unexpected Ripple Glow uniform count: \(rippleGlowUniformSeed.count)"

@@ -72,13 +72,16 @@ cp "$project_dir/Resources/Info.plist" "$app_dir/Contents/Info.plist"
 cp \
   "$project_dir/Resources/CodexActivityRippleGlowShader.txt" \
   "$app_dir/Contents/Resources/CodexActivityRippleGlowShader.txt"
-cp \
-  "$project_dir/Resources/CodexActivityParticleOrbShader.txt" \
-  "$app_dir/Contents/Resources/CodexActivityParticleOrbShader.txt"
+# Retired selectable Particle Orb asset; existing build directories may contain it.
+rm -f "$app_dir/Contents/Resources/CodexActivityParticleOrbShader.txt"
 cp \
   "$project_dir/Resources/CoverAI-Logo.png" \
   "$app_dir/Contents/Resources/CoverAI-Logo.png"
 ditto "$project_dir/Resources/Fonts" "$app_dir/Contents/Resources/Fonts"
+cp "$project_dir/Resources/ThirdPartyNotices.txt" "$app_dir/Contents/Resources/ThirdPartyNotices.txt"
+for asset in "$project_dir"/Resources/DashboardReset*.svg "$project_dir"/Resources/IslandPreview-*.png "$project_dir/Resources/Island-Codex.svg"; do
+  cp "$asset" "$app_dir/Contents/Resources/"
+done
 chmod 755 "$app_dir/Contents/MacOS/CodexNotchMonitor" "$app_dir/Contents/Helpers/CodexMonitorHook"
 codesign --force --deep --sign - "$app_dir"
 

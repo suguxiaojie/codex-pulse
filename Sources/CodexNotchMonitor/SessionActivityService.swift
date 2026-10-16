@@ -1,15 +1,68 @@
 import Foundation
+import CryptoKit
 import SQLite3
+
+enum SessionEndReason: Equatable {
+    case completed
+    case cancelled
+    case failed
+    case ended
+
+    var phase: TaskPhase {
+        switch self {
+        case .completed: return .completed
+        case .failed: return .failed
+        case .cancelled, .ended: return .ended
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .completed: return "本轮工作已完成"
+        case .cancelled: return "本轮工作已取消"
+        case .failed: return "本轮工作失败"
+        case .ended: return "会话已结束"
+        }
+    }
+}
+
+struct SessionActivityEvidence: Equatable {
+    let lifecycleState: Bool?
+    let hasRunningTool: Bool
+    let fileModifiedAt: Date
+    let endReason: SessionEndReason?
+    let endedAt: Date?
+}
 
 struct LocalSessionSnapshot: Equatable {
     let sessionID: String
     let turnID: String?
     let cwd: String
     let model: String?
-    let isActive: Bool
+    var isActive: Bool
     let updatedAt: Date
     let activities: [SessionActivityItem]
     var turnTokenUsage: TurnTokenUsage? = nil
+    var evidence: SessionActivityEvidence? = nil
+    var reasoningEffort: String? = nil
+    var startedAt: Date? = nil
+    var sessionTotalTokens: Int? = nil
+    var latestAssistantSummary: String? = nil
+    var nativePhase: TaskPhase? = nil
+    var sessionKind: CodexActivitySessionKind = .unknown
+
+    func evaluated(at now: Date) -> Self {
+        guard let evidence else { return self }
+        var result = self
+        result.isActive = SessionActivityFreshnessPolicy.isActive(
+            lifecycleState: evidence.lifecycleState,
+            hasRunningTool: evidence.hasRunningTool,
+            updatedAt: updatedAt,
+            fileModifiedAt: evidence.fileModifiedAt,
+            now: now
+        )
+        return result
+    }
 }
 
 enum SessionActivityFreshnessPolicy {
@@ -37,14 +90,24 @@ enum SessionActivityFreshnessPolicy {
 }
 
 /// Reads only structural fields from Codex's local JSONL transcript. Prompt,
-/// response, reasoning, and tool payloads are intentionally never retained.
+/// private reasoning and raw tool payloads are never retained. Only a bounded,
+/// sanitized public assistant summary is retained for the task presentation.
 final class SessionActivityService {
     private let queue = DispatchQueue(label: "CodexNotchMonitor.SessionActivity", qos: .utility)
     private let decoder = JSONDecoder()
+    private let fractionalDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private let dateFormatter = ISO8601DateFormatter()
+    var onChange: (() -> Void)?
+    private var watchedFiles: [URL: DispatchSourceFileSystemObject] = [:]
+    private var pendingChange: DispatchWorkItem?
     /// Recent activity and completion markers live at the transcript tail.
     /// Keeping this bounded prevents one growing Codex thread from producing a
-    /// large JSON parse spike on every fallback refresh; lifecycle Hooks remain
-    /// the primary real-time state source.
+    /// large JSON parse spike on every refresh. Desktop IPC and file changes
+    /// provide native updates; lifecycle Hooks remain an optional fallback.
     private let maximumTailBytes: UInt64 = 8 * 1_024 * 1_024
     private let maximumCandidateFiles = 24
     private let activeRecencyInterval: TimeInterval = 24 * 60 * 60
@@ -53,24 +116,94 @@ final class SessionActivityService {
     private var discoveredURLs: [URL] = []
     private var lastDiscoveryAt = Date.distantPast
 
+    // Incremental cursor and complete-line consumption adapted from QuotaView's
+    // CodexLocalRolloutActivityClient (d16307f, MIT). Keep the existing public
+    // summary/token decoder; never retain raw transcript history in the cursor.
+    private struct RolloutCursor {
+        var offset: UInt64 = 0
+        var inode: UInt64 = 0
+        var modified = Date.distantPast
+        var prefixCount = 0
+        var prefixDigest = Data()
+        var pending = Data()
+        var discarding = false
+        var sessionID: String = ""
+        var turnID: String? = nil
+        var cwd: String = ""
+        var model: String? = nil
+        var isActive: Bool? = nil
+        var endReason: SessionEndReason? = nil
+        var endedAt: Date? = nil
+        var reasoningEffort: String? = nil
+        var startedAt: Date? = nil
+        var sessionTotalTokens: Int? = nil
+        var latestAssistantSummary: String? = nil
+        var latestTimestamp: Date = .distantPast
+        var activities: [SessionActivityItem] = []
+        var activityIndices: [String: Int] = [:]
+        var tokenState: TurnTokenState = TurnTokenState()
+        var sessionKind: CodexActivitySessionKind = .unknown
+    }
+    private var rolloutCursors: [URL: RolloutCursor] = [:]
+
     private struct CachedSnapshot {
         let modificationDate: Date
         let fileSize: UInt64
         let snapshot: LocalSessionSnapshot?
     }
 
-    func fetch(completion: @escaping ([LocalSessionSnapshot], [String: String]) -> Void) {
+    func fetch(preferredSessionIDs: [String] = [], completion: @escaping ([LocalSessionSnapshot], [String: String]) -> Void) {
         queue.async { [self] in
-            let urls = recentSessionFiles()
+            var seen = Set<URL>()
+            let urls = (Self.preferredSessionFiles(sessionIDs: preferredSessionIDs) + recentSessionFiles())
+                .filter { seen.insert($0).inserted }
+            updateWatchedFiles(urls)
             let now = Date()
-            let snapshots = urls.compactMap(cachedSnapshot).filter {
+            let snapshots = urls.compactMap { cachedSnapshot(for: $0, now: now) }.filter {
                 now.timeIntervalSince($0.updatedAt) < activeRecencyInterval
             }
             let threadNames = CodexThreadNameCatalog.loadNames()
             let retained = Set(urls)
             cache = cache.filter { retained.contains($0.key) }
+            rolloutCursors = rolloutCursors.filter { retained.contains($0.key) }
             DispatchQueue.main.async { completion(snapshots, threadNames) }
         }
+    }
+
+    // QuotaView CodexLocalRolloutDiscovery prioritizes exact SQLite identities
+    // before directory discovery. Only existing, confined rollout files qualify.
+    static func preferredSessionFiles(sessionIDs: [String], codexHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")) -> [URL] {
+        guard !sessionIDs.isEmpty else { return [] }
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(codexHome.appendingPathComponent("state_5.sqlite").path, &database,
+                             SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK, let database else {
+            if let database { sqlite3_close(database) }; return []
+        }
+        defer { sqlite3_close(database) }
+        sqlite3_busy_timeout(database, 20)
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "SELECT rollout_path FROM threads WHERE id = ? LIMIT 1", -1, &statement, nil) == SQLITE_OK,
+              let statement else { return [] }
+        defer { sqlite3_finalize(statement) }
+        let root = codexHome.appendingPathComponent("sessions").resolvingSymlinksInPath().path + "/"
+        var result: [URL] = []
+        for id in Set(sessionIDs.prefix(8)) where !id.isEmpty && id.utf8.count <= 128 {
+            sqlite3_reset(statement); sqlite3_clear_bindings(statement)
+            _ = id.withCString { sqlite3_bind_text(statement, 1, $0, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)) }
+            guard sqlite3_step(statement) == SQLITE_ROW, let path = sqlite3_column_text(statement, 0) else { continue }
+            let url = URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath()
+            guard url.path.hasPrefix(root), url.pathExtension == "jsonl",
+                  (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+            guard let handle = try? FileHandle(forReadingFrom: url) else { continue }
+            let header = try? handle.read(upToCount: 65536)
+            try? handle.close()
+            guard let header, let line = header.split(separator: 0x0A).first,
+                  let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  object["type"] as? String == "session_meta",
+                  let metadata = object["payload"] as? [String: Any], metadata["id"] as? String == id else { continue }
+            result.append(url)
+        }
+        return result
     }
 
     private func recentSessionFiles() -> [URL] {
@@ -103,88 +236,177 @@ final class SessionActivityService {
         return discoveredURLs
     }
 
-    private func cachedSnapshot(for url: URL) -> LocalSessionSnapshot? {
-        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-        let modified = values?.contentModificationDate ?? .distantPast
-        let size = UInt64(max(0, values?.fileSize ?? 0))
-        if let cached = cache[url], cached.modificationDate == modified, cached.fileSize == size {
-            return cached.snapshot
+    func cachedSnapshot(for url: URL, now: Date = Date()) -> LocalSessionSnapshot? {
+        // URL resource values can cache metadata across refreshes, including
+        // after deletion. A fresh stat must gate reuse of parsed evidence.
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            cache.removeValue(forKey: url)
+            rolloutCursors.removeValue(forKey: url)
+            return nil
         }
-        let snapshot = readSnapshot(from: url)
+        let modified = attributes[.modificationDate] as? Date ?? .distantPast
+        let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        if let cached = cache[url], cached.modificationDate == modified, cached.fileSize == size {
+            return cached.snapshot?.evaluated(at: now)
+        }
+        var snapshot = readSnapshot(from: url)
+        if let old = cache[url]?.snapshot, var current = snapshot, old.sessionID == current.sessionID {
+            current.sessionTotalTokens = [old.sessionTotalTokens, current.sessionTotalTokens].compactMap { $0 }.max()
+            snapshot = current
+        }
         cache[url] = CachedSnapshot(
             modificationDate: modified,
             fileSize: size,
             snapshot: snapshot
         )
-        return snapshot
+        return snapshot?.evaluated(at: now)
     }
 
     private func modificationDate(of url: URL) -> Date {
-        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return attributes?[.modificationDate] as? Date ?? .distantPast
     }
 
     func readSnapshot(from url: URL) -> LocalSessionSnapshot? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
 
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
         let end = (try? handle.seekToEnd()) ?? 0
-        let start = end > maximumTailBytes ? end - maximumTailBytes : 0
-        try? handle.seek(toOffset: start)
-        guard var data = try? handle.readToEnd(), !data.isEmpty else { return nil }
-
-        // A bounded tail can begin in the middle of one JSON object.
-        if start > 0, let newline = data.firstIndex(of: 0x0A) {
-            data.removeSubrange(data.startIndex...newline)
+        let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+        var cursor = rolloutCursors[url] ?? RolloutCursor()
+        let modified = attributes[.modificationDate] as? Date ?? .distantPast
+        try? handle.seek(toOffset: 0)
+        let prefix = (try? handle.read(upToCount: cursor.prefixCount)) ?? Data()
+        let rewritten = cursor.prefixCount > 0 && Data(SHA256.hash(data: prefix)) != cursor.prefixDigest
+        if cursor.inode != inode || end < cursor.offset || end - cursor.offset > maximumTailBytes
+            || rewritten || (end == cursor.offset && cursor.modified != modified) {
+            cursor = RolloutCursor()
         }
+        if cursor.offset == 0 {
+            cursor.sessionID = Self.sessionIDFromFilename(url)
+            cursor.latestTimestamp = modificationDate(of: url)
+            // Recover only structural session metadata when the bounded tail
+            // no longer contains the header.
+            try? handle.seek(toOffset: 0)
+            if let header = try? handle.read(upToCount: 65536), let line = header.split(separator: 0x0A).first,
+               let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+               object["type"] as? String == "session_meta", let payload = object["payload"] as? [String: Any] {
+                cursor.sessionID = payload["id"] as? String ?? cursor.sessionID
+                cursor.cwd = payload["cwd"] as? String ?? ""
+                cursor.sessionKind = CodexActivitySessionKind.classify(metadata: payload)
+            }
+            cursor.offset = end > maximumTailBytes ? end - maximumTailBytes : 0
+            cursor.discarding = cursor.offset > 0
+        }
+        cursor.inode = inode
+        cursor.modified = modified
+        if cursor.prefixCount == 0 {
+            cursor.prefixCount = min(256, Int(end))
+            try? handle.seek(toOffset: 0)
+            cursor.prefixDigest = Data(SHA256.hash(data: (try? handle.read(upToCount: cursor.prefixCount)) ?? Data()))
+        }
+        try? handle.seek(toOffset: cursor.offset)
+        let incoming: Data
+        do { incoming = try handle.read(upToCount: Int(maximumTailBytes)) ?? Data() }
+        catch { return nil }
+        cursor.offset += UInt64(incoming.count)
+        cursor.pending.append(incoming)
+        var lines: [Data] = []
+        consumeCompleteLines(from: &cursor.pending, discarding: &cursor.discarding) { lines.append($0) }
+        // Some compatible writers omit the final newline. Accept only a whole
+        // JSON object; incomplete writes remain buffered for the next read.
+        if !cursor.discarding, !cursor.pending.isEmpty,
+           (try? JSONSerialization.jsonObject(with: cursor.pending)) is [String: Any] {
+            lines.append(cursor.pending); cursor.pending.removeAll(keepingCapacity: true)
+        }
+        var sessionID = cursor.sessionID
+        var turnID = cursor.turnID
+        var cwd = cursor.cwd
+        var model = cursor.model
+        var isActive = cursor.isActive
+        var endReason = cursor.endReason
+        var endedAt = cursor.endedAt
+        var reasoningEffort = cursor.reasoningEffort
+        var startedAt = cursor.startedAt
+        var sessionTotalTokens = cursor.sessionTotalTokens
+        var latestAssistantSummary = cursor.latestAssistantSummary
+        var latestTimestamp = cursor.latestTimestamp
+        var activities = cursor.activities
+        var activityIndices = cursor.activityIndices
+        var tokenState = cursor.tokenState
+        var sessionKind = cursor.sessionKind
 
-        var sessionID = Self.sessionIDFromFilename(url)
-        var turnID: String?
-        var cwd = ""
-        var model: String?
-        var isActive: Bool?
-        var latestTimestamp = modificationDate(of: url)
-        var activities: [SessionActivityItem] = []
-        var activityIndices: [String: Int] = [:]
-        var tokenState = TurnTokenState()
-
-        for line in data.split(separator: 0x0A) {
+        for line in lines {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                   let type = object["type"] as? String,
                   let payload = object["payload"] as? [String: Any]
             else { continue }
 
-            tokenState.consume(type: type, payload: payload)
-
             var eventTimestamp = latestTimestamp
             if let timestamp = object["timestamp"] as? String,
-               let parsed = Self.parseDate(timestamp) {
+               let parsed = parseDate(timestamp) {
                 eventTimestamp = parsed
-                latestTimestamp = max(latestTimestamp, parsed)
             }
+
+            if let value = Self.cumulativeTokens(type: type, payload: payload, sessionID: sessionID) {
+                sessionTotalTokens = max(sessionTotalTokens ?? 0, value)
+            }
+            let previousTurn = tokenState.turnID
+            let incomingTurn = payload["turn_id"] as? String
+            let eventType = payload["type"] as? String
+            let beginsTurn = type == "turn_context" || (type == "event_msg" && eventType == "task_started")
+            if tokenState.pendingStart, type == "event_msg",
+               ["task_complete", "turn_aborted"].contains(eventType ?? "") { continue }
+            if !beginsTurn, let incomingTurn, let turnID, incomingTurn != turnID { continue }
+            let followsLegacyStart = tokenState.pendingStart
+            tokenState.consume(type: type, payload: payload)
+            if beginsTurn, let incomingTurn, tokenState.turnID != incomingTurn { continue }
+            if tokenState.turnID != previousTurn {
+                turnID = tokenState.turnID
+                isActive = followsLegacyStart ? true : nil
+                endReason = nil
+                endedAt = nil
+                if !followsLegacyStart { startedAt = nil }
+                latestAssistantSummary = nil
+                activities.removeAll()
+                activityIndices.removeAll()
+            }
+            latestTimestamp = max(latestTimestamp, eventTimestamp)
 
             switch type {
             case "session_meta":
+                sessionKind = CodexActivitySessionKind.classify(metadata: payload)
                 sessionID = (payload["id"] as? String) ?? (payload["session_id"] as? String) ?? sessionID
                 if let value = payload["cwd"] as? String { cwd = value }
             case "turn_context":
-                if let value = payload["turn_id"] as? String { turnID = value }
                 if let value = payload["cwd"] as? String { cwd = value }
                 if let value = payload["model"] as? String { model = value }
+                reasoningEffort = (payload["effort"] as? String) ?? (payload["reasoning_effort"] as? String)
             case "event_msg":
                 switch payload["type"] as? String {
                 case "task_started":
-                    isActive = true
-                    if let value = payload["turn_id"] as? String { turnID = value }
+                    if !tokenState.isTerminated {
+                        isActive = true
+                        endReason = nil
+                        endedAt = nil
+                        if startedAt == nil { startedAt = eventTimestamp }
+                    }
                 case "task_complete", "turn_aborted":
                     let completedTurn = payload["turn_id"] as? String
                     if turnID == nil || completedTurn == nil || completedTurn == turnID {
                         isActive = false
+                        if endReason == nil {
+                            endReason = eventType == "task_complete" ? .completed : .cancelled
+                            endedAt = eventTimestamp
+                        }
                     }
                 case "agent_message":
-                    guard payload["phase"] as? String == "commentary",
+                    guard ["commentary", "final"].contains(payload["phase"] as? String ?? "commentary"),
                           let message = payload["message"] as? String,
                           let summary = Self.progressSummary(message)
                     else { break }
+                    latestAssistantSummary = summary
                     for index in activities.indices where activities[index].kind == .progress {
                         activities[index].isRunning = false
                     }
@@ -199,10 +421,17 @@ final class SessionActivityService {
                 }
             case "response_item":
                 switch payload["type"] as? String {
-                case "custom_tool_call":
+                case "message":
+                    guard payload["role"] as? String == "assistant",
+                          ["commentary", "final"].contains((payload["channel"] as? String) ?? (payload["phase"] as? String) ?? "final") else { break }
+                    let text = (payload["content"] as? [[String: Any]] ?? []).compactMap { part -> String? in
+                        ["output_text", "text"].contains(part["type"] as? String ?? "") ? part["text"] as? String : nil
+                    }.joined(separator: "\n")
+                    if let summary = Self.progressSummary(text) { latestAssistantSummary = summary }
+                case "custom_tool_call", "function_call":
                     let callID = (payload["call_id"] as? String) ?? "tool-\(eventTimestamp.timeIntervalSince1970)"
                     let name = payload["name"] as? String ?? "tool"
-                    let input = payload["input"] as? String ?? ""
+                    let input = (payload["input"] as? String) ?? (payload["arguments"] as? String) ?? ""
                     if let last = activities.indices.last, activities[last].kind == .progress {
                         activities[last].isRunning = false
                     }
@@ -214,7 +443,7 @@ final class SessionActivityService {
                         updatedAt: eventTimestamp
                     ))
                     activityIndices[callID] = activities.count - 1
-                case "custom_tool_call_output":
+                case "custom_tool_call_output", "function_call_output":
                     guard let callID = payload["call_id"] as? String,
                           let index = activityIndices[callID],
                           activities.indices.contains(index)
@@ -229,6 +458,27 @@ final class SessionActivityService {
             }
         }
 
+        if activities.count > 128 {
+            activities = Array(activities.suffix(128))
+            activityIndices = Dictionary(activities.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { _, new in new })
+        }
+        cursor.sessionID = sessionID
+        cursor.turnID = turnID
+        cursor.cwd = cwd
+        cursor.model = model
+        cursor.isActive = isActive
+        cursor.endReason = endReason
+        cursor.endedAt = endedAt
+        cursor.reasoningEffort = reasoningEffort
+        cursor.startedAt = startedAt
+        cursor.sessionTotalTokens = sessionTotalTokens
+        cursor.latestAssistantSummary = latestAssistantSummary
+        cursor.latestTimestamp = latestTimestamp
+        cursor.activities = activities
+        cursor.activityIndices = activityIndices
+        cursor.tokenState = tokenState
+        cursor.sessionKind = sessionKind
+        rolloutCursors[url] = cursor
         // If a very large transcript tail no longer contains task_started, recent
         // writes are still a useful startup fallback. An explicit completion marker
         // always wins and prevents a recently completed turn appearing active.
@@ -255,8 +505,23 @@ final class SessionActivityService {
             turnTokenUsage: tokenState.turnID.map {
                 TurnTokenUsage(sessionID: sessionID, turnID: $0, total: tokenState.total,
                                isCompleted: tokenState.isCompleted)
-            }
+            },
+            evidence: SessionActivityEvidence(
+                lifecycleState: isActive, hasRunningTool: hasRunningTool,
+                fileModifiedAt: fileModifiedAt, endReason: endReason, endedAt: endedAt
+            ), reasoningEffort: reasoningEffort, startedAt: startedAt,
+            sessionTotalTokens: sessionTotalTokens, latestAssistantSummary: latestAssistantSummary, sessionKind: sessionKind
         )
+    }
+
+    private func consumeCompleteLines(from data: inout Data, discarding: inout Bool, body: (Data) -> Void) {
+        while let newline = data.firstIndex(of: 0x0A) {
+            let line = Data(data[..<newline])
+            data.removeSubrange(data.startIndex...newline)
+            if !discarding, line.count <= 1_048_576 { body(line) }
+            discarding = false
+        }
+        if data.count > 1_048_576 { data.removeAll(keepingCapacity: true); discarding = true }
     }
 
     static func sessionIDFromFilename(_ url: URL) -> String {
@@ -273,10 +538,69 @@ final class SessionActivityService {
         return stem.split(separator: "-").suffix(5).joined(separator: "-")
     }
 
-    private static func parseDate(_ value: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    private func parseDate(_ value: String) -> Date? {
+        fractionalDateFormatter.date(from: value) ?? dateFormatter.date(from: value)
+    }
+
+    func observeChanges(at urls: [URL], completion: (() -> Void)? = nil) {
+        queue.async { [weak self] in
+            self?.updateWatchedFiles(urls)
+            if let completion { DispatchQueue.main.async(execute: completion) }
+        }
+    }
+    private func updateWatchedFiles(_ urls: [URL]) {
+        let retained = Set(urls.prefix(maximumCandidateFiles))
+        for url in Array(watchedFiles.keys) where !retained.contains(url) {
+            watchedFiles.removeValue(forKey: url)?.cancel()
+        }
+        for url in retained where watchedFiles[url] == nil {
+            let descriptor = open(url.path, O_EVTONLY)
+            guard descriptor >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
+                eventMask: [.write, .rename, .delete], queue: queue)
+            source.setCancelHandler { close(descriptor) }
+            source.setEventHandler { [weak self, weak source] in
+                guard let self else { return }
+                if source?.data.intersection([.rename, .delete]).isEmpty == false {
+                    self.watchedFiles.removeValue(forKey: url)?.cancel()
+                }
+                self.pendingChange?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    DispatchQueue.main.async { [weak self] in self?.onChange?() }
+                }
+                self.pendingChange = work
+                self.queue.asyncAfter(deadline: .now() + 0.15, execute: work)
+            }
+            watchedFiles[url] = source; source.resume()
+        }
+    }
+    deinit {
+        pendingChange?.cancel()
+        watchedFiles.values.forEach { $0.cancel() }
+    }
+
+    // Field guards match QuotaView's pinned CodexLocalRolloutLineDecoder.
+    // Cumulative totals already include cached input and reasoning output.
+    static func cumulativeTokens(type: String, payload: [String: Any], sessionID: String) -> Int? {
+        if type == "event_msg", payload["type"] as? String == "token_count",
+           let info = payload["info"] as? [String: Any],
+           let usage = info["total_token_usage"] as? [String: Any],
+           let total = TurnTokenState.count(usage["total_tokens"]) {
+            if let last = info["last_token_usage"] as? [String: Any] {
+                guard let count = TurnTokenState.count(last["total_tokens"]), total >= count else { return nil }
+            }
+            return total
+        }
+        if type == "token_usage_record", payload["thread_id"] as? String == sessionID,
+           let thread = payload["thread_token_usage"] as? [String: Any],
+           let turn = payload["turn_token_usage"] as? [String: Any],
+           let usage = payload["usage"] as? [String: Any],
+           let total = TurnTokenState.count(thread["total_tokens"]),
+           let direct = TurnTokenState.count(turn["total_tokens"]),
+           let last = TurnTokenState.count(usage["total_tokens"]), total >= direct, direct >= last {
+            return total
+        }
+        return nil
     }
 
     private static func progressSummary(_ message: String) -> String? {
@@ -284,8 +608,8 @@ final class SessionActivityService {
             .replacingOccurrences(of: "`", with: "")
             .split(whereSeparator: { $0.isNewline })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty && !$0.hasPrefix("-") })
-        return cleaned.map { truncate($0, limit: 92) }
+            .first(where: { !$0.isEmpty })
+        return cleaned.map { sanitize($0, limit: 512) }
     }
 
     private static func activityKind(for toolName: String, input: String) -> SessionActivityKind {
@@ -303,6 +627,11 @@ final class SessionActivityService {
     }
 
     static func toolSummary(name: String, input: String) -> String {
+        if name != "exec", let data = input.data(using: .utf8),
+           let arguments = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let title = arguments["title"] as? String, !title.isEmpty {
+            return sanitize(title)
+        }
         switch name {
         case "exec":
             if let title = extractTitle(from: input) {
@@ -414,7 +743,7 @@ final class SessionActivityService {
         return URL(fileURLWithPath: String(command[valueRange])).lastPathComponent
     }
 
-    private static func sanitize(_ value: String) -> String {
+    private static func sanitize(_ value: String, limit: Int = 88) -> String {
         var output = value
             .replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
             .replacingOccurrences(of: "\n", with: " ")
@@ -426,7 +755,7 @@ final class SessionActivityService {
             output = secretPattern.stringByReplacingMatches(in: output, range: range, withTemplate: "$1=••••")
         }
         output = output.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        return truncate(output.trimmingCharacters(in: .whitespacesAndNewlines), limit: 88)
+        return truncate(output.trimmingCharacters(in: .whitespacesAndNewlines), limit: limit)
     }
 
     private static func truncate(_ value: String, limit: Int) -> String {
@@ -489,18 +818,20 @@ enum ProjectActivityAggregator {
     ) -> [ActiveProjectState] {
         let catalog = catalog ?? CodexProjectCatalog.loadState()
         let projectNames = catalog.namesByPath
-        let latestHooks = Dictionary(grouping: hookTasks, by: \.id).compactMapValues {
+        let latestHooks = Dictionary(grouping: hookTasks.filter { $0.hookEventName != "SessionStart" }, by: \.id).compactMapValues {
             $0.max(by: { $0.updatedAt < $1.updatedAt })
         }
         var sessions: [String: ActiveSessionState] = [:]
 
-        for snapshot in snapshots where snapshot.isActive {
-            let runningTool = snapshot.activities
-                .filter { $0.kind != .progress }
-                .max(by: { $0.updatedAt < $1.updatedAt })?
-                .isRunning == true
-            var phase: TaskPhase = runningTool ? .usingTool : .working
-            if let hook = latestHooks[snapshot.sessionID], hook.phase.isActive,
+        for snapshot in snapshots where snapshot.isActive && [.user, .unknown].contains(snapshot.sessionKind) {
+            let hook = snapshot.nativePhase == nil ? latestHooks[snapshot.sessionID].flatMap {
+                snapshot.turnID?.isEmpty == false && $0.turnID == snapshot.turnID ? $0 : nil
+            } : nil
+            if let hook, hook.confirmsTurnEnd,
+               !hook.phase.isActive { continue }
+            let runningTool = snapshot.activities.contains { $0.kind != .progress && $0.isRunning }
+            var phase: TaskPhase = snapshot.nativePhase ?? (runningTool ? .usingTool : .working)
+            if let hook, hook.phase.isActive,
                hook.phase.attentionPriority < phase.attentionPriority {
                 phase = hook.phase
             }
@@ -514,46 +845,36 @@ enum ProjectActivityAggregator {
                 projectName: name,
                 projectPath: path,
                 model: snapshot.model,
-                toolName: latestHooks[snapshot.sessionID]?.toolName,
+                toolName: hook?.toolName,
                 phase: phase,
-                updatedAt: snapshot.updatedAt
+                updatedAt: snapshot.updatedAt,
+                reasoningEffort: snapshot.reasoningEffort, startedAt: snapshot.startedAt
             )
             sessions[snapshot.sessionID] = ActiveSessionState(task: task, activities: snapshot.activities)
         }
 
-        // Hooks bridge the short interval before a new transcript is visible.
+        // QuotaView's source/turn admission boundary: Hook evidence can enrich
+        // a verified user execution, never establish an unassociated card.
+        // Apply this to every phase, not only SessionStart/UserPromptSubmit.
         for hook in latestHooks.values where hook.phase.isActive && now.timeIntervalSince(hook.updatedAt) < 120 {
-            if snapshots.contains(where: {
-                $0.sessionID == hook.id && !$0.isActive && $0.turnID != nil
-                    && $0.turnID == hook.turnID && $0.updatedAt >= hook.updatedAt
-            }) { continue }
-            if let existing = sessions[hook.id] {
-                var task = existing.task
-                // session_meta.cwd is immutable history. A lifecycle hook can
-                // report the same live session after its project directory was
-                // renamed, so prefer the hook's current normalized path.
-                let assigned = catalog.assignmentsByThread[hook.id]
-                let hookPath = normalizedPath(assigned?.path ?? hook.projectPath, sessionID: hook.id)
-                if hookPath != task.projectPath {
-                    task.projectPath = hookPath
-                    task.projectName = assigned?.projectName
-                        ?? projectName(path: hookPath, projectNames: projectNames)
-                }
-                if hook.phase.attentionPriority <= existing.task.phase.attentionPriority {
-                    task.phase = hook.phase
-                    task.toolName = hook.toolName ?? task.toolName
-                    task.updatedAt = max(task.updatedAt, hook.updatedAt)
-                }
-                sessions[hook.id] = ActiveSessionState(task: task, activities: existing.activities)
-            } else {
-                var assignedTask = hook
-                assignedTask.threadName = threadNames[hook.id]
-                if let assigned = catalog.assignmentsByThread[hook.id] {
-                    assignedTask.projectPath = normalizedPath(assigned.path, sessionID: hook.id)
-                    assignedTask.projectName = assigned.projectName
-                }
-                sessions[hook.id] = ActiveSessionState(task: assignedTask, activities: [])
+            guard let turn = hook.turnID, !turn.isEmpty,
+                  let snapshot = snapshots.first(where: { $0.sessionID == hook.id && $0.turnID == turn }),
+                  snapshot.isActive, snapshot.nativePhase == nil,
+                  [.user, .unknown].contains(snapshot.sessionKind),
+                  let existing = sessions[hook.id], existing.task.turnID == turn else { continue }
+            var task = existing.task
+            let assigned = catalog.assignmentsByThread[hook.id]
+            let hookPath = normalizedPath(assigned?.path ?? hook.projectPath, sessionID: hook.id)
+            if hookPath != task.projectPath {
+                task.projectPath = hookPath
+                task.projectName = assigned?.projectName ?? projectName(path: hookPath, projectNames: projectNames)
             }
+            if hook.phase.attentionPriority <= existing.task.phase.attentionPriority {
+                task.phase = hook.phase
+                task.toolName = hook.toolName ?? task.toolName
+                task.updatedAt = max(task.updatedAt, hook.updatedAt)
+            }
+            sessions[hook.id] = ActiveSessionState(task: task, activities: existing.activities)
         }
 
         let grouped = Dictionary(grouping: sessions.values) { session in

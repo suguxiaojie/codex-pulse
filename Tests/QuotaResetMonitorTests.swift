@@ -18,7 +18,10 @@ struct QuotaResetMonitorTests {
         preservesConfirmedHistoryWithMatchingTimestamp()
         preservesHistoryWithoutCandidates()
         preservesHistoryWithDifferentChangesOrTimestamp()
-        print("Quota reset tests: 15/15 passed")
+        try automaticallyTagsExpiredEvidence()
+        try protectsAccountSwitchBaseline()
+        try refusesConflictingSourceTimes()
+        print("Quota reset tests: 18/18 passed")
     }
 
     static func firstSnapshotDoesNotNotify() throws {
@@ -347,6 +350,75 @@ struct QuotaResetMonitorTests {
             detectedAt: event.detectedAt,
             changes: event.changes
         )
+    }
+
+    static func automaticallyTagsExpiredEvidence() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("quota-auto-tag-\(UUID().uuidString)")
+        let stateURL = root.appendingPathComponent("state.json")
+        let monitor = QuotaResetMonitor(stateURL: stateURL)
+        let start = Date().addingTimeInterval(-10 * 86400)
+        _ = monitor.evaluate(buckets: [bucket(remaining: 44)], feed: nil, now: start)
+        _ = monitor.evaluate(buckets: [bucket(remaining: 100)], feed: nil, now: start.addingTimeInterval(60))
+        _ = monitor.evaluate(buckets: [bucket(remaining: 100)], feed: nil, now: start.addingTimeInterval(4 * 3600))
+        let original = monitor.history[0]
+        _ = monitor.reconcile(feed: feed(kind: .resetCompleted, announcedAt: start.addingTimeInterval(8 * 86400)), now: Date())
+        expect(monitor.confirmableRecoveries[0].communityEvidence.isEmpty, "后来无关公告不能匹配旧恢复")
+        _ = monitor.reconcile(feed: feed(kind: .bankedReset, announcedAt: start), now: Date())
+        expect(monitor.confirmableRecoveries[0].communityEvidence.isEmpty, "额度重置卡不得冒充已执行重置")
+        let events = monitor.reconcile(feed: feed(kind: .resetCompleted, announcedAt: start.addingTimeInterval(90)), now: Date())
+        expect(events.isEmpty, "历史自动标记不补发通知")
+        expect(monitor.history[0].communityAssociation?.id == "post-1", "有效线索自动持久化关联，无需人工分类")
+        expect(monitor.history[0].displayReason == .officialCompleted, "自动关联进入 Tibo 显示分类")
+        expect(monitor.confirmableRecoveries.isEmpty, "自动标记后不再出现在待确认列表")
+        expect(monitor.history[0].id == original.id && monitor.history[0].changes == original.changes && monitor.history[0].reason == original.reason, "保留原始记录、额度变化和判断")
+        let backupDir = root.appendingPathComponent("quota-reset-backups")
+        let backups = try FileManager.default.contentsOfDirectory(atPath: backupDir.path)
+        expect(backups.count == 1, "自动标记前创建一次备份")
+        let reloaded = QuotaResetMonitor(stateURL: stateURL)
+        expect(reloaded.history[0].communityAssociation != nil && reloaded.confirmableRecoveries.isEmpty, "重启后保留自动标记")
+        reloaded.updateEvidence(feed(kind: .resetCompleted, announcedAt: start.addingTimeInterval(90)))
+        expect(tryCount(backupDir) == 1, "相同线索不重复备份或标记")
+        _ = reloaded.setDisplayType(eventID: original.id, displayType: .manual)
+        reloaded.updateEvidence(feed(kind: .resetCompleted, announcedAt: start.addingTimeInterval(90)))
+        expect(reloaded.history[0].displayReason == .userConfirmed, "人工分类优先于自动关联")
+        expect(reloaded.history[0].reason == .unverified && reloaded.history[0].communityAssociation != nil, "人工改分类不删除原始证据")
+
+        let manualFirst = makeMonitor("manual-before-auto")
+        _ = manualFirst.evaluate(buckets: [bucket(remaining: 30)], feed: nil, now: start)
+        _ = manualFirst.evaluate(buckets: [bucket(remaining: 100)], feed: nil, now: start.addingTimeInterval(60))
+        _ = manualFirst.evaluate(buckets: [bucket(remaining: 100)], feed: nil, now: start.addingTimeInterval(4 * 3600))
+        let candidate = manualFirst.confirmableRecoveries[0]
+        _ = manualFirst.setDisplayType(eventID: candidate.historyEventID!, displayType: .manual)
+        manualFirst.updateEvidence(feed(kind: .resetCompleted, announcedAt: start.addingTimeInterval(90)))
+        expect(manualFirst.history[0].communityAssociation == nil && manualFirst.history[0].displayReason == .userConfirmed, "不覆盖既有人工分类")
+        expect(manualFirst.confirmUserReset(candidateID: candidate.id) == nil, "旧确认入口不得覆盖人工分类")
+    }
+
+    private static func tryCount(_ url: URL) -> Int { (try? FileManager.default.contentsOfDirectory(atPath: url.path).count) ?? -1 }
+
+    static func protectsAccountSwitchBaseline() throws {
+        let monitor = makeMonitor("account-change")
+        let now = Date()
+        _ = monitor.evaluate(buckets: [bucket(remaining: 10)], feed: nil, now: now, accountID: "account-a")
+        let result = monitor.evaluate(buckets: [bucket(remaining: 100)], feed: nil, now: now.addingTimeInterval(60), accountID: "account-b")
+        expect(result.events.isEmpty && monitor.confirmableRecoveries.isEmpty, "同套餐账号切换只建立新基线，不生成假恢复")
+    }
+
+    static func refusesConflictingSourceTimes() throws {
+        let monitor = makeMonitor("time-conflict")
+        let now = Date().addingTimeInterval(-3600)
+        _ = monitor.evaluate(buckets: [bucket(remaining: 50)], feed: nil, now: now)
+        var evidence = event(kind: .resetCompleted, announcedAt: now.addingTimeInterval(30))
+        evidence.timelineAt = iso(now.addingTimeInterval(30))
+        evidence.publishedAt = iso(now.addingTimeInterval(-4 * 3600))
+        let feed = TiboFeed(schemaVersion: 1, generatedAt: iso(now), lastSuccessfulCheckAt: nil,
+                            monitor: .init(status: "ok", errorCode: nil), events: [evidence])
+        let result = monitor.evaluate(buckets: [bucket(remaining: 100)], feed: feed, now: now.addingTimeInterval(60))
+        expect(result.events.isEmpty, "时间口径冲突不能直接确认 Tibo 重置")
+        expect(monitor.confirmableRecoveries[0].communityEvidence[0].hasDifferentSourceTimes, "保留冲突线索供查看")
+        let data = try JSONEncoder().encode(evidence)
+        let restored = try JSONDecoder().decode(TiboEvent.self, from: data)
+        expect(restored == evidence, "保存发布时间与时间轴时间")
     }
 
     static func makeMonitor(_ name: String) -> QuotaResetMonitor {

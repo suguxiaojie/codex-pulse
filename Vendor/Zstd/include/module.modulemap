@@ -1,0 +1,4 @@
+module CZstdDecoder {
+    header "zstd.h"
+    export *
+}

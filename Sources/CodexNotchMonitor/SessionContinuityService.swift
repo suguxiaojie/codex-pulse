@@ -30,6 +30,7 @@ enum CodexTranscriptRole: String, Equatable {
 struct CodexTranscriptMessage: Equatable {
     let role: CodexTranscriptRole
     let text: String
+    var phase: String? = nil
 }
 
 enum CodexTranscriptParser {
@@ -45,7 +46,7 @@ enum CodexTranscriptParser {
                 return CodexTranscriptMessage(role: .user, text: text)
             }
             if eventType == "agent_message" {
-                return CodexTranscriptMessage(role: .assistant, text: text)
+                return CodexTranscriptMessage(role: .assistant, text: text, phase: payload["phase"] as? String)
             }
             return nil
         }
@@ -70,7 +71,7 @@ enum CodexTranscriptParser {
             return part["text"] as? String
         }
         .joined(separator: "\n")
-        return normalized(text).map { CodexTranscriptMessage(role: role, text: $0) }
+        return normalized(text).map { CodexTranscriptMessage(role: role, text: $0, phase: payload["phase"] as? String) }
     }
 
     private static func normalized(_ text: String?) -> String? {
@@ -111,6 +112,11 @@ struct SessionContinuitySnapshot: Equatable {
     static let empty = SessionContinuitySnapshot(threads: [], unreadableFileCount: 0, checkedAt: .distantPast)
 
     var userThreads: [LocalThreadRecord] { threads.filter { $0.kind == .userConversation } }
+    // A newly supported historical storage format is not evidence that a
+    // conversation was created under the account currently being observed.
+    var ownershipObservationIDs: Set<String> {
+        Set(userThreads.filter { !RolloutReader.isCompressed($0.rolloutURL) }.map(\.id))
+    }
     var sessionCount: Int { userThreads.count }
     var archivedCount: Int { userThreads.filter(\.isArchived).count }
     var visibleCount: Int { userThreads.filter { $0.visibility == .visible }.count }
@@ -383,25 +389,47 @@ final class CodexThreadService {
     private func listThreadIDs(
         archived: Bool,
         useStateDBOnly: Bool,
+        cursor: String? = nil,
+        collectedIDs: Set<String> = [],
+        visitedCursors: Set<String> = [],
         completion: @escaping (Result<Set<String>, Error>) -> Void
     ) {
-        request(
-            "thread/list",
-            [
-                "archived": archived,
-                "limit": 1_000,
-                "modelProviders": [],
-                "sourceKinds": Self.continuitySourceKinds,
-                "useStateDbOnly": useStateDBOnly,
-            ],
-            useStateDBOnly ? 20 : 60
-        ) { result in
-            completion(result.map { payload in
+        var params: [String: Any] = [
+            "archived": archived,
+            "limit": 100,
+            "modelProviders": [],
+            "sourceKinds": Self.continuitySourceKinds,
+            "useStateDbOnly": useStateDBOnly,
+        ]
+        if let cursor { params["cursor"] = cursor }
+        request("thread/list", params, useStateDBOnly ? 20 : 60) { result in
+            switch result {
+            case let .failure(error): completion(.failure(error))
+            case let .success(payload):
                 let data = payload["data"] as? [[String: Any]] ?? []
-                return Set(data.compactMap { $0["id"] as? String })
-            })
+                let ids = collectedIDs.union(data.compactMap { $0["id"] as? String })
+                guard let next = payload["nextCursor"] as? String, !next.isEmpty else {
+                    completion(.success(ids))
+                    return
+                }
+                guard !visitedCursors.contains(next) else {
+                    completion(.failure(CodexAppServerClient.ProtocolError(
+                        message: "Codex 会话列表分页游标重复，未能确认完整索引"
+                    )))
+                    return
+                }
+                self.listThreadIDs(
+                    archived: archived,
+                    useStateDBOnly: useStateDBOnly,
+                    cursor: next,
+                    collectedIDs: ids,
+                    visitedCursors: visitedCursors.union([next]),
+                    completion: completion
+                )
+            }
         }
     }
+
 }
 
 final class SessionContinuityService {
@@ -523,26 +551,36 @@ final class SessionContinuityService {
 
     static func parseThreadEnvelope(at url: URL) -> ThreadEnvelope? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = (attributes[.size] as? NSNumber)?.intValue,
-              let handle = try? FileHandle(forReadingFrom: url)
+              let size = (attributes[.size] as? NSNumber)?.intValue
         else { return nil }
-        defer { try? handle.close() }
+        let handle = RolloutReader.isCompressed(url) ? nil : try? FileHandle(forReadingFrom: url)
+        if !RolloutReader.isCompressed(url) && handle == nil { return nil }
+        defer { try? handle?.close() }
 
         do {
             var accumulator = EnvelopeAccumulator()
             var bytesRead = 0
             let combinedLimit = headReadLimit + tailReadLimit
-            if size <= combinedLimit {
-                let data = try handle.read(upToCount: size) ?? Data()
+            if RolloutReader.isCompressed(url) {
+                let sample = try RolloutReader.headAndTail(at: url, headLimit: headReadLimit, tailLimit: tailReadLimit)
+                bytesRead = sample.head.count + sample.tail.count
+                if sample.total <= combinedLimit {
+                    parseEnvelopeLines(sample.head + sample.tail, droppingLeadingPartialLine: false, into: &accumulator)
+                } else {
+                    parseEnvelopeLines(sample.head, droppingLeadingPartialLine: false, into: &accumulator)
+                    parseEnvelopeLines(sample.tail, droppingLeadingPartialLine: true, into: &accumulator)
+                }
+            } else if size <= combinedLimit {
+                let data = try handle!.read(upToCount: size) ?? Data()
                 bytesRead = data.count
                 parseEnvelopeLines(data, droppingLeadingPartialLine: false, into: &accumulator)
             } else {
-                let head = try handle.read(upToCount: headReadLimit) ?? Data()
+                let head = try handle!.read(upToCount: headReadLimit) ?? Data()
                 bytesRead += head.count
                 parseEnvelopeLines(head, droppingLeadingPartialLine: false, into: &accumulator)
 
-                try handle.seek(toOffset: UInt64(size - tailReadLimit))
-                let tail = try handle.read(upToCount: tailReadLimit) ?? Data()
+                try handle!.seek(toOffset: UInt64(size - tailReadLimit))
+                let tail = try handle!.read(upToCount: tailReadLimit) ?? Data()
                 bytesRead += tail.count
                 parseEnvelopeLines(tail, droppingLeadingPartialLine: true, into: &accumulator)
             }
@@ -665,7 +703,7 @@ final class SessionContinuityService {
         var unreadable = 0
         var byID: [String: LocalThreadRecord] = [:]
 
-        let files = liveFiles.map({ ($0, false) }) + archivedFiles.map({ ($0, true) })
+        let files = RolloutReader.preferredFiles(liveFiles).map({ ($0, false) }) + RolloutReader.preferredFiles(archivedFiles).map({ ($0, true) })
         var activeCacheKeys = Set<String>()
         for (index, item) in files.enumerated() {
             let (file, archived) = item
@@ -754,7 +792,7 @@ final class SessionContinuityService {
             options: [.skipsHiddenFiles]
         ) else { return [] }
         return enumerator.compactMap { value -> URL? in
-            guard let url = value as? URL, url.pathExtension == "jsonl" else { return nil }
+            guard let url = value as? URL, RolloutReader.isRollout(url) else { return nil }
             return url
         }
     }

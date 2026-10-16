@@ -21,6 +21,7 @@ enum ContinuityTests {
         threadKindsFollowAppServerSourceSemantics()
         recoveryResultsClassifyZeroPartialAndCompleteOutcomes()
         threadDeleteUsesOfficialAppServerMethod()
+        threadListReadsEveryPage()
         threadIndexRepairRetriesUntilRequiredIDsVisible()
         continuityCountsOnlyUserConversations()
         projectGroupsContainTheirConversations()
@@ -28,9 +29,12 @@ enum ContinuityTests {
         try accountStateWatcherTracksOnlyAccountFileMetadata()
         try sidebarCleanupIsExactAndRecoverable()
         try sidebarCleanupQueuesWhileCodexRuns()
+        try compressedThreadPreviewAndExport()
         try responseItemMessagesAreRecognizedWithoutDuplicates()
         try largeThreadUsesBoundedHeadAndTailParsing()
         try readableSessionExportIsCompleteAndRedacted()
+        try exportReaderRespectsPhasesAndCodeSafety()
+        try readableImageExportPreservesAttachments()
         try portableBundlePreservesActiveAndArchivedSessions()
         try sessionImportValidatesMapsSkipsAndRollsBack()
         try duplicateImportGeneratesNewThreadID()
@@ -43,7 +47,7 @@ enum ContinuityTests {
         try projectTransferP1PreservesGitAndAttachments()
         try projectTransferLargeGitOutputDoesNotDeadlock()
         projectImportDirectoryDefaultsToCodexProjectsContainer()
-        print("Continuity tests: 36/36 passed")
+        print("Continuity tests: 37/37 passed")
     }
 
     private static func runLocalInventoryBenchmark() {
@@ -58,17 +62,53 @@ enum ContinuityTests {
                 includingPropertiesForKeys: [.isRegularFileKey]
             ) else { return [] }
             return enumerator.compactMap { value in
-                guard let url = value as? URL, url.pathExtension == "jsonl" else { return nil }
+                guard let url = value as? URL, RolloutReader.isRollout(url) else { return nil }
                 return url
             }
         }
         let startedAt = Date()
-        let envelopes = files.compactMap(SessionContinuityService.parseThreadEnvelope(at:))
+        let envelopes = RolloutReader.preferredFiles(files).compactMap(SessionContinuityService.parseThreadEnvelope(at:))
+        let unique = Dictionary(envelopes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let kinds = Dictionary(grouping: unique.values, by: { $0.kind.rawValue }).mapValues(\.count)
+        print("Continuity classification:", kinds, "unreadable:", files.count - envelopes.count, "unique:", unique.count)
         let bytesRead = envelopes.reduce(0) { $0 + $1.bytesRead }
         print(
             "Continuity benchmark: files=\(files.count), parsed=\(envelopes.count), "
                 + "boundedBytes=\(bytesRead), elapsed=\(String(format: "%.3f", Date().timeIntervalSince(startedAt)))s"
         )
+    }
+
+    private static func compressedThreadPreviewAndExport() throws {
+        let fixture = URL(fileURLWithPath: "Tests/Fixtures/CompressedRollouts/user.jsonl.zst")
+        let original = try Data(contentsOf: fixture)
+        guard let envelope = SessionContinuityService.parseThreadEnvelope(at: fixture) else { fatalError("compressed envelope unreadable") }
+        expect(envelope.id == "zstd-fixture" && envelope.kind == .userConversation, "压缩用户会话分类正确")
+        let sub = SessionContinuityService.parseThreadEnvelope(at: URL(fileURLWithPath: "Tests/Fixtures/CompressedRollouts/subagent.jsonl.zst"))
+        expect(sub?.kind == .subagent, "压缩内部线程不能计入用户会话")
+        let long = SessionContinuityService.parseThreadEnvelope(at: URL(fileURLWithPath: "Tests/Fixtures/CompressedRollouts/long.jsonl.zst"))
+        expect(long?.readableMessages.contains(where: { $0.contains("Tail user fixture") }) == true, "压缩长会话保留尾部用户消息")
+        expect((long?.bytesRead ?? Int.max) <= 1536 * 1024, "压缩预览保留字节有界")
+        let root = temporaryDirectory("compressed-export")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let thread = record(id: envelope.id, path: envelope.originalPath, rolloutURL: fixture)
+        let inventory = SessionContinuitySnapshot(threads: [thread], unreadableFileCount: 0, checkedAt: Date())
+        expect(inventory.sessionCount == 1 && inventory.ownershipObservationIDs.isEmpty, "新发现压缩历史计入库存，但不能猜测为当前账号新会话")
+        let markdown = root.appendingPathComponent("conversation.md")
+        _ = try SessionExportService().export(threads: [thread], projectName: "Fixture", format: .markdown, to: markdown)
+        expect((try! String(contentsOf: markdown, encoding: .utf8)).contains("Compressed user fixture"), "压缩会话支持可读导出")
+        let bundle = root.appendingPathComponent("conversation.codexmonitorbundle")
+        _ = try SessionExportService().export(threads: [thread], projectName: "Fixture", format: .portableBundle, to: bundle)
+        let unpacked = root.appendingPathComponent("unpacked")
+        try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
+        let unzip = Process(); unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        unzip.arguments = ["-x", "-k", bundle.path, unpacked.path]; try unzip.run(); unzip.waitUntilExit()
+        expect(unzip.terminationStatus == 0, "压缩来源的备份仍是有效归档")
+        let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: unpacked.appendingPathComponent("manifest.json"))) as! [String: Any]
+        let sessions = manifest["sessions"] as! [[String: Any]]
+        let path = sessions[0]["rolloutPath"] as! String
+        expect(path.hasSuffix(".jsonl") && !path.hasSuffix(".zst"), "仅在导出暂存目录生成兼容 JSONL")
+        expect(SessionContinuityService.parseThreadEnvelope(at: unpacked.appendingPathComponent(path))?.id == envelope.id, "导出后仍保留会话身份")
+        expect((try! Data(contentsOf: fixture)) == original, "读取和导出不修改压缩来源")
     }
 
     private static func projectImportDirectoryDefaultsToCodexProjectsContainer() {
@@ -219,6 +259,46 @@ enum ContinuityTests {
             }
         }
         expect(staleIndexWasRejected, "Codex 仍返回目标线程时不得伪报删除成功")
+    }
+
+    private static func threadListReadsEveryPage() {
+        for dbOnly in [true, false] {
+            var calls: [[String: Any]] = []
+            let service = CodexThreadService { _, params, _, completion in
+                calls.append(params)
+                let archived = params["archived"] as? Bool == true
+                if params["cursor"] == nil {
+                    completion(.success(["data": [["id": "shared"]], "nextCursor": "page-2"]))
+                } else {
+                    completion(.success(["data": [["id": archived ? "old" : "target"]]]))
+                }
+            }
+            var resultIDs = Set<String>()
+            service.listThreadIDs(useStateDBOnly: dbOnly) { result in
+                if case let .success(ids) = result { resultIDs = ids }
+            }
+            expect(resultIDs == ["shared", "old", "target"], "活动与归档分页均须完整读取并去重")
+            expect(calls.count == 4 && calls.allSatisfy {
+                $0["useStateDbOnly"] as? Bool == dbOnly &&
+                $0["sourceKinds"] as? [String] == CodexThreadService.continuitySourceKinds
+            }, "分页不得改变来源与数据库查询口径")
+        }
+        for failSecondPage in [false, true] {
+            var count = 0
+            var rejected = false
+            let service = CodexThreadService { _, _, _, completion in
+                count += 1
+                if failSecondPage && count == 2 {
+                    completion(.failure(CodexAppServerClient.ProtocolError(message: "page failed")))
+                } else {
+                    completion(.success(["data": [], "nextCursor": "same"]))
+                }
+            }
+            service.listThreadIDs(useStateDBOnly: true) { result in
+                if case .failure = result { rejected = true }
+            }
+            expect(rejected && count == 2, "分页失败或游标循环不得返回不完整成功结果")
+        }
     }
 
     private static func threadIndexRepairRetriesUntilRequiredIDsVisible() {
@@ -606,6 +686,96 @@ enum ContinuityTests {
         expect(legacyStore.usageAccountContext().accountTimeline.isEmpty, "旧状态在首次可靠观察前不应猜测时间线")
     }
 
+    private static func readableImageExportPreservesAttachments() throws {
+        let root = temporaryDirectory("readable-images")
+        defer { try? FileManager.default.removeItem(at: root) }
+        expect(SessionExportImages.sources(from: ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [["type": "input_image"]]]]) == [""], "缺少 URL 的图片记录保留不可用位置")
+        let original = try Data(contentsOf: URL(fileURLWithPath: "Resources/IslandPreview-Wallpaper.png"))
+        let embedded = "data:image/png;base64," + original.base64EncodedString()
+        let rollout = root.appendingPathComponent("images.jsonl")
+        let events: [[String: Any]] = [
+            ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [
+                ["type": "input_text", "text": "<image path=\"/tmp/deleted-image.png\"></image>\n## My request:\n检查图片 api_key=super-secret-value\n</image>"],
+                ["type": "input_image", "image_url": embedded]]]],
+            ["type": "event_msg", "payload": ["type": "agent_message", "message": "第一轮回复"]],
+            ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [
+                ["type": "input_image", "image_url": embedded]]]],
+            ["type": "event_msg", "payload": ["type": "agent_message", "message": "第二轮回复"]],
+            ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [
+                ["type": "input_text", "text": "缺失图片"], ["type": "input_image", "image_url": "/tmp/nonexistent-export-image.png"],
+                ["type": "input_image", "image_url": "data:image/png;base64,broken"],
+                ["type": "input_image", "image_url": "https://example.com/private-image.png"]]]],
+        ]
+        let repeated = Array(events.prefix(4)) + [events[0], ["type": "event_msg", "payload": ["type": "agent_message", "message": "重复提问仍是独立轮次"]]] + Array(events.suffix(1))
+        let contents = try repeated.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }.joined(separator: "\n")
+        try contents.write(to: rollout, atomically: true, encoding: .utf8)
+        let before = try Data(contentsOf: rollout)
+        let thread = record(id: "images", path: root.path, rolloutURL: rollout)
+        let mdURL = root.appendingPathComponent("带 空格.md"), htmlURL = root.appendingPathComponent("images.html")
+        _ = try SessionExportService().export(threads: [thread], projectName: "Images", format: .markdown, to: mdURL)
+        _ = try SessionExportService().export(threads: [thread], projectName: "Images", format: .html, to: htmlURL)
+        let md = try String(contentsOf: mdURL, encoding: .utf8), html = try String(contentsOf: htmlURL, encoding: .utf8)
+        expect(html.components(separatedBy: "class=\"image-thumbnail\"").count - 1 == 3, "重复问题跨轮次保留原图，图片独立提问不丢失")
+        expect(html.contains("data:image/png;base64,") && !html.contains("/tmp/deleted-image.png"), "优先恢复内嵌图片，不暴露失效临时路径")
+        expect(html.contains("原图文件已不存在") && html.contains("数据损坏") && html.contains("未下载原图"), "缺失损坏和远程引用有明确提示")
+        expect(!md.contains("super-secret-value") && !html.contains("super-secret-value"), "图片接入仍保留正文脱敏")
+        expect(!md.contains("</image>") && !html.contains("&lt;/image&gt;"), "图片信封闭合标记不进入用户正文")
+        let assets = root.appendingPathComponent("带 空格.assets")
+        let files = try FileManager.default.contentsOfDirectory(atPath: assets.path)
+        expect(files.count == 1 && md.components(separatedBy: "![引用图片").count - 1 == 3, "Markdown 相对素材按内容复用，同时保留各轮引用")
+        expect(md.contains("%20") && !md.contains("data:image"), "Markdown 素材路径编码且不写入 Base64 正文")
+        expect(html.contains("viewer.showModal()") && html.contains("ArrowRight") && html.contains("image-close"), "HTML 支持大图、切换与关闭")
+        let after = try Data(contentsOf: rollout)
+        expect(after == before, "图片导出不能改写原始会话")
+        // A conflicting asset must be preserved and reported, never overwritten.
+        let asset = assets.appendingPathComponent(files[0])
+        try Data("existing-user-data".utf8).write(to: asset)
+        var rejected = false
+        do { _ = try SessionExportService().export(threads: [thread], projectName: "Images", format: .markdown, to: mdURL) }
+        catch { rejected = true }
+        let conflictAfter = try Data(contentsOf: asset)
+        expect(rejected && conflictAfter == Data("existing-user-data".utf8), "同名素材冲突必须拒绝覆盖")
+    }
+
+    private static func exportReaderRespectsPhasesAndCodeSafety() throws {
+        let root = temporaryDirectory("export-reader")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rollout = root.appendingPathComponent("reader.jsonl")
+        let messages: [(String, String, String?)] = [
+            ("user", "检查格式\n第二行", nil),
+            ("assistant", "检查中 api_key=super-secret-value", "commentary"),
+            ("assistant", "结果 **包含 `code`** 与 NEXT\\_CHAT\\_HANDOFF.md\n\n- 父项\n  - 子项\n    1. 孙项\n- 末项\n\n| 项 | 值 |\n| --- | --- |\n| a | **通过** |\n\n````html\n<script>alert(1)</script>\n```\n````", "final_answer"),
+            ("user", "未完成的轮次", nil),
+            ("assistant", "仍在检查", "commentary"),
+        ]
+        let data = try messages.map { role, text, phase -> String in
+            var payload: [String: Any] = ["type": "message", "role": role,
+                "content": [["type": "output_text", "text": text]]]
+            if let phase { payload["phase"] = phase }
+            let bytes = try JSONSerialization.data(withJSONObject: ["type": "response_item", "payload": payload])
+            return String(decoding: bytes, as: UTF8.self)
+        }.joined(separator: "\n")
+        try data.write(to: rollout, atomically: true, encoding: .utf8)
+        let thread = record(id: "reader", path: root.path, rolloutURL: rollout, title: "Reader")
+        let service = SessionExportService()
+        let mdURL = root.appendingPathComponent("reader.md"), htmlURL = root.appendingPathComponent("reader.html")
+        _ = try service.export(threads: [thread], projectName: "Reader", format: .markdown, to: mdURL)
+        _ = try service.export(threads: [thread], projectName: "Reader", format: .html, to: htmlURL)
+        let md = try String(contentsOf: mdURL), html = try String(contentsOf: htmlURL)
+        expect(md.contains("> 检查格式\n> 第二行"), "Markdown 用户问题应使用多行引用")
+        expect(md.contains("<details><summary>Codex 过程更新"), "Markdown 过程默认折叠")
+        expect(md.contains("暂无最终回复") && !md.contains("super-secret-value"), "进度不能误报最终回复且脱敏继续有效")
+        expect(html.contains("<strong>包含 <code>code</code></strong>") && html.contains("NEXT_CHAT_HANDOFF.md"), "内联代码嵌套与转义下划线正确显示")
+        expect(html.contains("<ul><li>父项<ul><li>子项<ol><li>孙项</li></ol></li></ul></li><li>末项</li></ul>"), "正文嵌套列表保留层级")
+        expect(html.contains("class=\"sr-only\">用户问题") && html.contains("class=\"disclosure-icon\""), "用户正文不重复标签，折叠具有独立指示")
+        expect(html.contains("<table>") && html.contains("<strong>通过</strong>"), "HTML 正文渲染表格与单元格格式")
+        expect(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;\n```"), "长围栏内三反引号与脚本必须保持文本")
+        expect(!html.contains("<script>alert(1)</script>"), "导出消息不得执行脚本")
+        expect(html.contains("class=\"copy-code\"") && html.contains("document.execCommand('copy')"), "代码复制具有离线回退")
+        expect(!html.contains("link.scrollIntoView") && html.contains("panel.scrollTop +="), "目录高亮只滚动目录容器，窄屏不得将正文拉回顶部")
+        expect(html.contains("id=\"question-prev\"") && html.contains("prefers-reduced-motion"), "HTML 提供顺序导航与减少动态")
+    }
+
     private static func readableSessionExportIsCompleteAndRedacted() throws {
         let root = temporaryDirectory("readable-export")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -739,8 +909,8 @@ enum ContinuityTests {
         expect(markdown.contains("仅新格式用户消息"), "Markdown 应导出 response_item 用户消息")
         expect(markdown.contains("仅新格式助手消息"), "Markdown 应导出 response_item 助手消息")
         expect(
-            markdown.components(separatedBy: "新旧格式重复消息").count - 1 == 3,
-            "Markdown 中同一问题只能出现一次目录、一次标题和一次正文"
+            markdown.components(separatedBy: "新旧格式重复消息").count - 1 == 2,
+            "Markdown 中同一问题只能出现一次目录和一次正文，问题标题不重复摘要"
         )
         expect(!markdown.contains("开发者消息不得导出"), "Markdown 不应导出开发者消息")
         expect(!markdown.contains("recommended_plugins"), "Markdown 应隐藏平台插件列表")
@@ -749,8 +919,8 @@ enum ContinuityTests {
         expect(!markdown.contains("oai-mem-citation"), "Markdown 应隐藏内部引用元数据")
         expect(!markdown.contains("/tmp/reference.png"), "Markdown 应隐藏附件临时路径")
         expect(markdown.contains("### 用户问题目录"), "Markdown 应生成用户问题目录")
-        expect(markdown.contains("### 问题 1："), "Markdown 应按用户问题分轮")
-        expect(markdown.contains("#### Codex 最终回复"), "Markdown 应标记同一轮的最终回复")
+        expect(markdown.contains("### 问题 1\n"), "Markdown 应按用户问题分轮")
+        expect(markdown.contains("**Codex**"), "Markdown 应标记同一轮的最终回复")
         expect(markdown.contains("[返回问题目录]"), "Markdown 应提供返回目录链接")
         expect(markdownProgress.first?.completed == 0, "Markdown 导出应从 0 开始报告进度")
         let readingProgress = markdownProgress.filter { $0.stage == .reading }
@@ -820,7 +990,7 @@ enum ContinuityTests {
         expect(html.contains("aria-current', 'location'"), "当前问题导航应设置 aria-current")
         expect(html.contains("classList.add('flash')"), "点击问题导航应高亮目标消息")
         expect(html.contains("link.hidden = !!term"), "搜索应同步过滤问题导航")
-        expect(html.contains("<label class=\"search-label\" for=\"search\">"), "搜索框应有可访问标签")
+        expect(html.contains("<label class=\"search-label sr-only\" for=\"search\">"), "搜索框应有可访问标签")
         expect(html.contains("aria-live=\"polite\""), "搜索与当前位置变化应通过 aria-live 播报")
         expect(html.contains("id=\"search-prev\""), "HTML 搜索应支持上一条结果")
         expect(html.contains("id=\"search-next\""), "HTML 搜索应支持下一条结果")

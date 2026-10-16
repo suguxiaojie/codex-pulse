@@ -11,7 +11,9 @@ struct TurnTokenState: Equatable {
     private var baseline: Int?
     private var sawStart = false
     private var invalidated = false
-    private var pendingStart = false
+    private(set) var pendingStart = false
+    private var retiredTurns: [String] = []
+    private(set) var isTerminated = false
 
     mutating func consume(type: String, payload: [String: Any]) {
         if type == "turn_context" {
@@ -21,9 +23,15 @@ struct TurnTokenState: Equatable {
         guard type == "event_msg" else { return }
         switch payload["type"] as? String {
         case "task_started":
-            if payload["turn_id"] as? String == nil { pendingStart = true }
+            if payload["turn_id"] as? String == nil {
+                pendingStart = true
+                isCompleted = false
+                isTerminated = false
+                total = nil
+            }
             begin(payload["turn_id"] as? String, explicit: true)
         case "token_count":
+            guard !pendingStart else { return }
             guard let info = payload["info"] as? [String: Any],
                   let usage = info["total_token_usage"] as? [String: Any],
                   let value = Self.count(usage["total_tokens"])
@@ -46,29 +54,47 @@ struct TurnTokenState: Equatable {
                 total = value - baseline
             }
         case "task_complete":
-            if let id = payload["turn_id"] as? String, id == turnID { isCompleted = true }
+            guard !pendingStart else { return }
+            let id = payload["turn_id"] as? String
+            if turnID == nil, let id { begin(id, explicit: false) }
+            if !isTerminated, id == nil || id == turnID {
+                isCompleted = turnID != nil
+                isTerminated = true
+            }
         case "turn_aborted":
-            isCompleted = false
+            guard !pendingStart else { return }
+            let id = payload["turn_id"] as? String
+            if turnID == nil, let id { begin(id, explicit: false) }
+            if !isTerminated, id == nil || id == turnID {
+                isCompleted = false
+                isTerminated = true
+            }
         default: break
         }
     }
 
     private mutating func begin(_ id: String?, explicit: Bool) {
-        guard let id, !id.isEmpty else { return }
+        guard let id, !id.isEmpty, !retiredTurns.contains(id) else { return }
         if id == turnID {
-            sawStart = sawStart || explicit
+            sawStart = sawStart || explicit || pendingStart
+            pendingStart = false
             return
         }
         baseline = (explicit || pendingStart || turnID != nil) ? cumulative : nil
+        if let turnID {
+            retiredTurns.append(turnID)
+            if retiredTurns.count > 64 { retiredTurns.removeFirst() }
+        }
         turnID = id
         isCompleted = false
+        isTerminated = false
         total = nil
         sawStart = explicit || pendingStart
         pendingStart = false
         invalidated = false
     }
 
-    private static func count(_ value: Any?) -> Int? {
+    static func count(_ value: Any?) -> Int? {
         guard let number = value as? NSNumber,
               CFGetTypeID(number) != CFBooleanGetTypeID(),
               number.doubleValue.isFinite,

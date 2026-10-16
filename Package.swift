@@ -9,8 +9,10 @@ let package = Package(
         .executable(name: "CodexMonitorHook", targets: ["CodexMonitorHook"]),
     ],
     targets: [
+        .target(name: "CZstdDecoder", path: "Vendor/Zstd", exclude: ["README.md", "LICENSE"], publicHeadersPath: "include"),
         .executableTarget(
             name: "CodexNotchMonitor",
+            dependencies: ["CZstdDecoder"],
             path: "Sources/CodexNotchMonitor"
         ),
         .executableTarget(

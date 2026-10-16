@@ -36,6 +36,14 @@ struct TiboEvent: Codable, Identifiable, Equatable {
     let rationale: String
     let text: String
 
+    var publishedAt: String? = nil
+    var timelineAt: String? = nil
+    var publishedDate: Date? { publishedAt.flatMap(TiboFeedDate.parse) }
+    var hasDifferentSourceTimes: Bool {
+        guard let publishedDate, let timeline = timelineAt.flatMap(TiboFeedDate.parse) else { return false }
+        return abs(publishedDate.timeIntervalSince(timeline)) > 10 * 60
+    }
+
     var announcedDate: Date? { TiboFeedDate.parse(announcedAt) }
     var effectiveDate: Date? { effectiveAt.flatMap(TiboFeedDate.parse) }
 }

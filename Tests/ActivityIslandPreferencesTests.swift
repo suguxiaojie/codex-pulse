@@ -2,170 +2,66 @@ import Foundation
 
 @main
 struct ActivityIslandPreferencesTests {
-    private static var passed = 0
-    private static var failed = 0
-
+    static var count = 0
+    static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
+        count += 1
+        if !condition() { fatalError(message) }
+    }
     static func main() {
         let suite = "ActivityIslandPreferencesTests-\(UUID().uuidString)"
-        guard let defaults = UserDefaults(suiteName: suite) else { exit(2) }
+        let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-
-        let initial = ActivityIslandPreferences.load(from: defaults)
-        expect(initial == .defaults, "missing values use product defaults")
-        expect(initial.menuBarOverflow == .rotate, "overflow defaults to rotation")
+        expect(ActivityIslandPreferences.load(from: defaults) == .defaults, "missing preferences use upstream defaults")
+        expect(ActivityIslandPreferences.defaults.floatingUsageEnabled && ActivityIslandPreferences.defaults.usageCapsuleTone == .dark,
+            "floating capsule defaults match QuotaView")
+        defaults.set(false, forKey: ActivityIslandPreferenceKey.floatingUsageEnabled)
+        defaults.set("light", forKey: ActivityIslandPreferenceKey.usageCapsuleTone)
+        expect(!ActivityIslandPreferences.load(from: defaults).floatingUsageEnabled && ActivityIslandPreferences.load(from: defaults).usageCapsuleTone == .light,
+            "capsule toggle and tone persist independently")
+        defaults.set("unknown", forKey: ActivityIslandPreferenceKey.usageCapsuleTone)
+        expect(ActivityIslandPreferences.load(from: defaults).usageCapsuleTone == .dark, "invalid capsule tone falls back to dark")
+        defaults.removeObject(forKey: ActivityIslandPreferenceKey.floatingUsageEnabled)
+        defaults.removeObject(forKey: ActivityIslandPreferenceKey.usageCapsuleTone)
+        // Deliberately hostile legacy values must not affect the new island.
+        let retired: [String: Any] = ["enabled": false, "mode": "menuBar", "screen": "main", "position": "trailing",
+            "visualStyle": "particleOrb", "surfaceOpacity": 0.1, "surfaceScale": 0.25,
+            "compactHide": 120, "reduceMotion": true, "showCompletion": false]
+        for (key, value) in retired {
+            defaults.set(value, forKey: "activityIsland." + key)
+            expect(ActivityIslandPreferences.load(from: defaults) == .defaults, "retired \(key) no longer changes runtime preferences")
+        }
+        defaults.set("detailed", forKey: MenuBarPreferences.densityKey)
         defaults.set("compact", forKey: MenuBarOverflow.preferenceKey)
-        expect(ActivityIslandPreferences.load(from: defaults).menuBarOverflow == .compact, "static overflow persists")
-        defaults.set("invalid", forKey: MenuBarOverflow.preferenceKey)
-        expect(ActivityIslandPreferences.load(from: defaults).menuBarOverflow == .rotate, "unknown overflow falls back to rotation")
-        expect(initial.surfaceOpacity == 0.38, "surface opacity keeps the approved default")
-        expect(initial.showsFloatingIsland, "default mode shows the floating island")
-        expect(!initial.routesTaskStateToMenuBar, "default mode leaves task state out of the menu bar")
-
-        defaults.set(false, forKey: ActivityIslandPreferenceKey.enabled)
-        defaults.set(ActivityIslandMode.menuBar.rawValue, forKey: ActivityIslandPreferenceKey.mode)
-        defaults.set(MenuBarInformationDensity.detailed.rawValue, forKey: ActivityIslandPreferenceKey.menuBarDensity)
-        defaults.set(ActivityIslandScreenMode.main.rawValue, forKey: ActivityIslandPreferenceKey.screen)
-        defaults.set(ActivityIslandPosition.trailing.rawValue, forKey: ActivityIslandPreferenceKey.position)
-        defaults.set(ActivityIslandVisualStyle.particleOrb.rawValue, forKey: ActivityIslandPreferenceKey.visualStyle)
-        defaults.set(1.2, forKey: ActivityIslandPreferenceKey.surfaceOpacity)
-        defaults.set(2.0, forKey: ActivityIslandPreferenceKey.surfaceScale)
-        defaults.set(1, forKey: ActivityIslandPreferenceKey.expandedHold)
-        defaults.set(500, forKey: ActivityIslandPreferenceKey.compactHide)
-        defaults.set(true, forKey: ActivityIslandPreferenceKey.reduceMotion)
-        defaults.set(false, forKey: ActivityIslandPreferenceKey.showCompletion)
-        let customized = ActivityIslandPreferences.load(from: defaults)
-        expect(customized.enabled == false, "enabled persists")
-        expect(customized.mode == .menuBar, "presentation mode persists")
-        expect(customized.menuBarDensity == .detailed, "menu-bar density persists")
-        expect(customized.screen == .main, "screen choice persists")
-        expect(customized.position == .trailing, "position persists")
-        expect(customized.visualStyle == .particleOrb, "visual style persists")
-        expect(customized.surfaceOpacity == 0.90, "surface opacity clamps to maximum")
-        expect(customized.surfaceScale == 1.25, "surface scale clamps to maximum")
-        expect(customized.expandedHold == 5, "expanded hold clamps to minimum")
-        expect(customized.compactHide == 120, "compact hide clamps to maximum")
-        expect(customized.reduceMotion, "app reduce motion persists")
-        expect(customized.showCompletion == false, "completion preference persists")
-        expect(!customized.showsFloatingIsland, "menu-bar mode hides the floating island")
-        expect(!customized.routesTaskStateToMenuBar, "disabled master switch suppresses menu-bar task state")
-
-        defaults.set(true, forKey: ActivityIslandPreferenceKey.enabled)
-        defaults.set(0.08, forKey: ActivityIslandPreferenceKey.surfaceOpacity)
-        defaults.set(0.10, forKey: ActivityIslandPreferenceKey.surfaceScale)
-        let menuBarOnly = ActivityIslandPreferences.load(from: defaults)
-        expect(!menuBarOnly.showsFloatingIsland, "menu-bar mode never creates a floating island")
-        expect(menuBarOnly.routesTaskStateToMenuBar, "menu-bar mode routes live task state to the status item")
-        expect(menuBarOnly.surfaceOpacity == 0.10, "surface opacity clamps to minimum")
-        expect(menuBarOnly.surfaceScale == 0.25, "surface scale clamps to minimum")
-
-        var signalCount = 0
-        let observer = NotificationCenter.default.addObserver(
-            forName: .activityIslandPreferencesDidChange,
-            object: nil,
-            queue: nil
-        ) { _ in
-            signalCount += 1
-        }
-        ActivityIslandPreferenceSignal.post()
-        NotificationCenter.default.removeObserver(observer)
-        expect(signalCount == 1, "in-process preference signal is delivered immediately")
-        expect(
-            ActivityIslandPlacementPolicy.notchLift(safeAreaTop: 0) == 0,
-            "notchless display keeps the existing vertical position"
-        )
-        expect(
-            ActivityIslandPlacementPolicy.notchLift(safeAreaTop: 32) == 18,
-            "standard notched display uses the maximum safe lift"
-        )
-        expect(
-            ActivityIslandPlacementPolicy.notchLift(safeAreaTop: 20) == 10,
-            "smaller safe area preserves readable content clearance"
-        )
-        expect(
-            !ActivityIslandMotionPolicy.isReduced(
-                systemPreference: false,
-                appPreference: false
-            ),
-            "motion remains enabled when both preferences are off"
-        )
-        expect(
-            ActivityIslandMotionPolicy.isReduced(
-                systemPreference: true,
-                appPreference: false
-            ),
-            "system reduce motion disables activity-island movement"
-        )
-        expect(
-            ActivityIslandMotionPolicy.isReduced(
-                systemPreference: false,
-                appPreference: true
-            ),
-            "app reduce motion disables activity-island movement"
-        )
-        expect(
-            ActivityIslandScreenSelectionPolicy.targetDisplayID(
-                mode: .automatic,
-                activeDisplayID: 2,
-                primaryDisplayID: 1,
-                notchedDisplayIDs: [1],
-                availableDisplayIDs: [1, 2]
-            ) == 2,
-            "automatic screen follows the active display"
-        )
-        expect(
-            ActivityIslandScreenSelectionPolicy.targetDisplayID(
-                mode: .main,
-                activeDisplayID: 2,
-                primaryDisplayID: 1,
-                notchedDisplayIDs: [1],
-                availableDisplayIDs: [1, 2]
-            ) == 1,
-            "main screen stays on the system primary display"
-        )
-        expect(
-            ActivityIslandScreenSelectionPolicy.targetDisplayID(
-                mode: .notched,
-                activeDisplayID: 2,
-                primaryDisplayID: 2,
-                notchedDisplayIDs: [1],
-                availableDisplayIDs: [1, 2]
-            ) == 1,
-            "notched screen ignores the active secondary display"
-        )
-        expect(
-            ActivityIslandScreenSelectionPolicy.targetDisplayID(
-                mode: .main,
-                activeDisplayID: 2,
-                primaryDisplayID: 1,
-                notchedDisplayIDs: [],
-                availableDisplayIDs: [2]
-            ) == 2,
-            "main screen falls back when the primary display disconnects"
-        )
-        expect(
-            ActivityIslandScreenSelectionPolicy.targetDisplayID(
-                mode: .notched,
-                activeDisplayID: 2,
-                primaryDisplayID: 1,
-                notchedDisplayIDs: [],
-                availableDisplayIDs: [1, 2]
-            ) == 1,
-            "missing notched screen falls back to the system primary display"
-        )
-
-        if failed > 0 {
-            fputs("Activity Island preference tests failed: \(failed), passed: \(passed)\n", stderr)
-            exit(1)
-        }
-        print("Activity Island preference tests passed: \(passed)")
-    }
-
-    private static func expect(_ condition: @autoclosure () -> Bool, _ name: String) {
-        if condition() {
-            passed += 1
-        } else {
-            failed += 1
-            fputs("FAIL: \(name)\n", stderr)
-        }
+        defaults.set(true, forKey: MenuBarPreferences.activityKey)
+        let menu = MenuBarPreferences.load(from: defaults)
+        expect(menu.menuBarDensity == .automatic && menu.menuBarOverflow == .rotate && !menu.routesTaskStateToMenuBar,
+               "retired task and density preferences cannot change ring and percentage display")
+        expect(MenuBarInformationDensity.detailed.settingsValue == MenuBarInformationDensity.automatic.rawValue,
+               "legacy detailed selection maps to the single automatic settings option")
+        expect(!MenuBarInformationDensity.settingsCases.contains(.detailed) && MenuBarInformationDensity.settingsCases.count == 3,
+               "settings do not expose two choices with identical behavior")
+        expect(defaults.string(forKey: MenuBarPreferences.densityKey) == "detailed", "display alias does not rewrite the saved preference")
+        expect(ActivityIslandPreferences.load(from: defaults) == .defaults, "menu-bar settings cannot hide or scale the island")
+        defaults.set(true, forKey: ActivityIslandPreferenceKey.privacyMode)
+        defaults.set(false, forKey: ActivityIslandPreferenceKey.automaticPopup)
+        defaults.set("classic", forKey: ActivityIslandPreferenceKey.material)
+        defaults.set("sloshFlow", forKey: ActivityIslandPreferenceKey.progressEffect)
+        defaults.set(60.0, forKey: ActivityIslandPreferenceKey.expandedHold)
+        defaults.set(900.0, forKey: ActivityIslandPreferenceKey.expandedWidth)
+        defaults.set(2.0, forKey: ActivityIslandPreferenceKey.glassDegree)
+        let changed = ActivityIslandPreferences.load(from: defaults)
+        expect(changed.privacyMode && !changed.automaticPopup && changed.material == .classic && changed.progressEffect == .sloshFlow,
+               "all current configuration choices persist")
+        expect(changed.expandedHold == 10 && changed.expandedWidth == 680 && changed.glassDegree == 0.8, "upstream upper bounds enforced")
+        expect(MenuBarPreferences.load(from: defaults) == menu, "island configuration preserves other settings")
+        expect(ActivityIslandPreferences.normalizedWidth(.nan) == 680, "invalid width uses default")
+        expect(ActivityIslandPreferences.normalizedWidth(-1) == 560, "width lower bound enforced")
+        expect(ActivityIslandPreferences.normalizedDuration(.infinity) == 3, "invalid timing uses default")
+        expect(ActivityIslandPreferences.normalizedDuration(3.6) == 4, "timing uses whole seconds")
+        expect(ActivityIslandPreferences.normalizedDuration(-1) == 1, "timing lower bound enforced")
+        expect(ActivityIslandGlassDegree.normalized(.nan) == 0.45, "invalid glass degree uses default")
+        defaults.set("retired", forKey: ActivityIslandPreferenceKey.progressEffect)
+        expect(ActivityIslandPreferences.load(from: defaults).progressEffect == .dropField, "unknown effect uses upstream default")
+        print("Activity Island preference tests passed: \(count)")
     }
 }

@@ -57,14 +57,16 @@ private final class MonitorCenterGlassChromeView: NSView {
             xRadius: radius,
             yRadius: radius
         )
-        // Monitor Center intentionally keeps a dark information surface even
-        // on a light desktop. Its charts and evidence colors are authored for
-        // light text, so an appearance-adaptive white fill destroys contrast.
-        // This is a neutral fill only: it does not add backdrop blur or frost.
-        // Keep enough ambient context to read as glass, while preventing a
-        // light webpage behind the window from washing out cards and labels.
-        NSColor.black.withAlphaComponent(0.82).setFill()
+        // Preserve a subdued sidebar surface, but mask the reading area fully
+        // so text from windows behind the monitor cannot mix with its data.
+        NSColor.black.withAlphaComponent(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : 0.92).setFill()
         shape.fill()
+        NSGraphicsContext.saveGraphicsState()
+        shape.addClip()
+        NSColor(calibratedWhite: 0.055, alpha: 1).setFill()
+        NSBezierPath(rect: NSRect(x: MonitorCenterLayout.sidebarWidth, y: 0,
+            width: max(0, bounds.width - MonitorCenterLayout.sidebarWidth), height: bounds.height)).fill()
+        NSGraphicsContext.restoreGraphicsState()
         NSColor.white
             .withAlphaComponent(0.10)
             .setStroke()
@@ -76,17 +78,12 @@ private final class MonitorCenterGlassChromeView: NSView {
 @MainActor
 final class MonitorCenterWindowController: NSObject, NSWindowDelegate {
     private let store: MonitorStore
-    private let onOpenActivitySettings: () -> Void
     private var window: NSWindow?
     private var hostingView: NSHostingView<NotchView>?
     private var exportDirectoryPanel: NSOpenPanel?
 
-    init(
-        store: MonitorStore,
-        onOpenActivitySettings: @escaping () -> Void
-    ) {
+    init(store: MonitorStore) {
         self.store = store
-        self.onOpenActivitySettings = onOpenActivitySettings
         super.init()
         store.setExportDirectoryPresenter { [weak self] currentDirectory, completion in
             self?.presentExportDirectoryPanel(
@@ -100,17 +97,11 @@ final class MonitorCenterWindowController: NSObject, NSWindowDelegate {
     }
 
     func show(section: MonitorCenterSection) {
-        guard section != .settings else {
-            onOpenActivitySettings()
-            return
-        }
         let rootView = NotchView(
             store: store,
             onToggle: {},
             onOpenCenter: { [weak self] requestedSection in
-                if requestedSection == .settings {
-                    self?.onOpenActivitySettings()
-                }
+                self?.route(to: requestedSection)
             },
             surface: .center,
             initialSection: section
@@ -253,7 +244,7 @@ final class MonitorCenterWindowController: NSObject, NSWindowDelegate {
         fallback.material = .underWindowBackground
         fallback.blendingMode = .behindWindow
         fallback.state = .active
-        fallback.alphaValue = 0.62
+        fallback.alphaValue = 1
         fallback.wantsLayer = true
         fallback.layer?.cornerRadius = 24
         fallback.layer?.cornerCurve = .continuous

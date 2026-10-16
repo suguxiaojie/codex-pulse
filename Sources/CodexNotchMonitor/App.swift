@@ -11,8 +11,8 @@ struct CodexNotchMonitorApp: App {
         Settings {
             MonitorSettingsView(store: appDelegate.store)
                 .frame(
-                    minWidth: 620,
-                    idealWidth: 1000,
+                    minWidth: 900,
+                    idealWidth: 1060,
                     maxWidth: .infinity,
                     minHeight: 620,
                     idealHeight: 720,
@@ -21,12 +21,12 @@ struct CodexNotchMonitorApp: App {
                 .background(MonitorDesktopTheme.windowBackground)
                 .preferredColorScheme(.dark)
         }
-        .defaultSize(width: 1000, height: 720)
+        .defaultSize(width: 1060, height: 760)
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .appSettings) {
-                Button("灵动岛设置") {
-                    appDelegate.openActivitySettings()
+                Button("设置") {
+                    appDelegate.openSettings()
                 }
                 .keyboardShortcut(",", modifiers: [.command])
             }
@@ -54,7 +54,6 @@ struct CodexNotchMonitorApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = MonitorStore()
     private var activityIslandController: ActivityIslandWindowController?
-    private var activitySettingsWindowController: ActivitySettingsWindowController?
     private var monitorCenterController: MonitorCenterWindowController?
     private var glanceWindowController: GlanceWindowController?
     private var statusItem: NSStatusItem?
@@ -75,14 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         AstaSansFontRegistrar.registerBundledFonts()
-        let settingsController = ActivitySettingsWindowController(store: store)
-        activitySettingsWindowController = settingsController
-        let centerController = MonitorCenterWindowController(
-            store: store,
-            onOpenActivitySettings: { [weak settingsController] in
-                settingsController?.show()
-            }
-        )
+        let centerController = MonitorCenterWindowController(store: store)
         monitorCenterController = centerController
         let glanceController = GlanceWindowController(
             store: store,
@@ -93,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         glanceWindowController = glanceController
         activityIslandController = ActivityIslandWindowController(store: store)
+        activityIslandController?.onOpenSettings = { [weak self] in self?.openActivitySettings() }
         installStatusItem()
         store.start()
         if store.shouldPresentSetupOnboarding {
@@ -191,7 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusItem(now: Date = Date()) {
         guard let item = statusItem, let button = item.button else { return }
-        let preferences = ActivityIslandPreferences.load()
+        let preferences = MenuBarPreferences.load()
         let project = preferences.routesTaskStateToMenuBar
             ? store.activeProjects.min(by: { lhs, rhs in
                 if lhs.task.phase.attentionPriority != rhs.task.phase.attentionPriority {
@@ -317,7 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .iconOnly:
             candidates = []
         case .compact:
-            candidates = compactCandidates ?? Array(titles.dropFirst())
+            candidates = displayed == nil ? titles : (compactCandidates ?? Array(titles.dropFirst()))
         case .automatic, .detailed:
             candidates = titles
         }
@@ -331,8 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusRotationTimer = nil
         }
         if let title = statusRotation.title {
-            // Reserve the same bounded slot across every page and token update.
-            layout = StatusItemLayout(title: title, width: budget)
+            layout = StatusItemLayout(title: title, width: min(budget, ceil(measure(title)) + 36))
             if statusRotationTimer == nil {
                 let timer = Timer(timeInterval: 4, repeats: true) { [weak self] _ in
                     guard let self else { return }
@@ -347,17 +339,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusRotationTimer?.invalidate()
             statusRotationTimer = nil
         }
-        let shouldFade = animateStatusRotation && !preferences.reduceMotion
+        let shouldFade = animateStatusRotation
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && !pages.isEmpty
         animateStatusRotation = false
         button.imageScaling = .scaleProportionallyDown
         button.font = font
         button.image = image ?? NSImage(systemSymbolName: "circle.dotted", accessibilityDescription: "Codex Monitor")
-        // Titles are already measured; never blank the live item between updates.
-        let targetLength = layout.title.isEmpty ? NSStatusItem.squareLength : layout.width
-        if item.length != targetLength { item.length = targetLength }
+        // Let AppKit measure the actual ring, title and spacing; the selection
+        // budget is a ceiling, not a visible empty reservation.
         button.imagePosition = layout.title.isEmpty ? .imageOnly : .imageLeading
         if button.title != layout.title { button.title = layout.title }
+        let naturalWidth = button.cell.map { Double($0.cellSize.width) } ?? layout.width
+        let targetLength = layout.title.isEmpty ? NSStatusItem.squareLength
+            : (naturalWidth.isFinite && naturalWidth > 0 ? ceil(naturalWidth) : layout.width)
+        if item.length != targetLength { item.length = targetLength }
         if shouldFade {
             button.wantsLayer = true
             let fade = CATransition()
@@ -458,7 +453,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openActivitySettings() {
-        activitySettingsWindowController?.show()
+        monitorCenterController?.show(section: .settings)
+    }
+
+    @objc func openSettings() {
+        monitorCenterController?.show(section: .panelSettings)
     }
 
     @objc func openSetupPermissions() {

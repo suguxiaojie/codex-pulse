@@ -1,1064 +1,233 @@
+// Activity Island child page, adapted from QuotaView d16307f (MIT).
+// Settings follow the app desktop theme; the QuotaView preview renderer is retained.
 import SwiftUI
 
-enum ActivitySettingsLayoutMode: Equatable {
-    case standard
-    case compact
-    case narrow
-
-    static func resolve(width: CGFloat) -> ActivitySettingsLayoutMode {
-        if width < 760 { return .narrow }
-        if width < 960 { return .compact }
-        return .standard
-    }
-
-    var previewFraction: CGFloat {
-        switch self {
-        case .standard: return 0.40
-        case .compact: return 0.38
-        case .narrow: return 1
-        }
-    }
-
-    var panePadding: CGFloat {
-        self == .narrow ? 16 : 20
-    }
-
-    var previewScaleFactor: CGFloat {
-        switch self {
-        case .standard, .narrow: return 0.60
-        case .compact: return 0.42
-        }
-    }
-}
-
-private enum ActivitySettingsSection: String, CaseIterable, Identifiable {
-    case display = "显示"
-    case appearance = "外观"
-    case behavior = "行为"
-    case accessibility = "辅助功能"
-
-    var id: String { rawValue }
-}
-
-private enum ActivitySettingsFocus: Hashable {
-    case enabled
-    case mode
-    case screen
-    case position
-    case density
-}
-
-private struct ActivitySettingsSegmentedControl: View {
-    @Binding var selection: ActivitySettingsSection
-
-    var body: some View {
-        Picker("设置分组", selection: $selection) {
-            ForEach(ActivitySettingsSection.allCases) { section in
-                Text(section.rawValue).tag(section)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .controlSize(.large)
-        .font(MonitorDesktopTypography.controlLarge)
-        .accessibilityLabel("设置分组")
-    }
-}
-
-private struct ActivitySettingsNumericTransition: ViewModifier {
-    let value: Double
-    let reduceMotion: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(macOS 14.0, *) {
-            content
-                .contentTransition(reduceMotion ? .identity : .numericText(value: value))
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: value)
-        } else {
-            content
-        }
-    }
-}
-
-/// Live preview and native controls share the persisted Activity Island preferences.
 struct QuotaStyleSettingsView: View {
     @ObservedObject var store: MonitorStore
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @AppStorage(ActivityIslandPreferenceKey.enabled) private var islandEnabled = true
-    @AppStorage(ActivityIslandPreferenceKey.mode) private var modeRawValue = ActivityIslandMode.floating.rawValue
-    @AppStorage(ActivityIslandPreferenceKey.menuBarDensity) private var menuBarDensityRawValue = MenuBarInformationDensity.automatic.rawValue
-    @AppStorage(MenuBarOverflow.preferenceKey) private var overflowRawValue = MenuBarOverflow.rotate.rawValue
-    @AppStorage(ActivityIslandPreferenceKey.screen) private var screenRawValue = ActivityIslandScreenMode.automatic.rawValue
-    @AppStorage(ActivityIslandPreferenceKey.position) private var positionRawValue = ActivityIslandPosition.center.rawValue
-    @AppStorage(ActivityIslandPreferenceKey.visualStyle) private var visualStyleRawValue = ActivityIslandVisualStyle.rippleGlow.rawValue
-    @AppStorage(ActivityIslandPreferenceKey.surfaceOpacity) private var surfaceOpacity = 0.38
-    @AppStorage(ActivityIslandPreferenceKey.surfaceScale) private var surfaceScale = 1.00
-    @AppStorage(ActivityIslandPreferenceKey.expandedHold) private var expandedHold = 8.0
-    @AppStorage(ActivityIslandPreferenceKey.compactHide) private var compactHide = 120.0
-    @AppStorage(ActivityIslandPreferenceKey.reduceMotion) private var reduceMotion = false
-    @AppStorage(ActivityIslandPreferenceKey.showCompletion) private var showCompletion = true
-    @State private var selectedSection = ActivitySettingsSection.display
-    @State private var isAdjustingSlider = false
-    @State private var highlightedSlider: String?
-    @State private var sliderFeedbackGeneration = 0
-    @State private var animationStyleRevision = 0
-    @State private var timeSettingsExpanded = true
-    @State private var previewIsVisible = true
-    @FocusState private var focusedControl: ActivitySettingsFocus?
+    @AppStorage(ActivityIslandPreferenceKey.material) private var material = ActivityIslandMaterial.liquidGlass.rawValue
+    @AppStorage(ActivityIslandPreferenceKey.glassDegree) private var glassDegree = 0.45
+    @AppStorage(ActivityIslandPreferenceKey.expandedWidth) private var expandedWidth = 680.0
+    @AppStorage(ActivityIslandPreferenceKey.progressEffect) private var effect = ActivityIslandProgressEffect.dropField.rawValue
+    @AppStorage(ActivityIslandPreferenceKey.privacyMode) private var privacyMode = false
+    @AppStorage(ActivityIslandPreferenceKey.floatingUsageEnabled) private var floatingUsageEnabled = true
+    @AppStorage(ActivityIslandPreferenceKey.usageCapsuleTone) private var usageCapsuleTone = ActivityIslandUsageCapsuleTone.dark.rawValue
+    @AppStorage(ActivityIslandPreferenceKey.automaticPopup) private var automaticPopup = true
+    @AppStorage(ActivityIslandPreferenceKey.expandedHold) private var expandedHold = 3.0
+    @State private var previewVisible = true
+    @State private var geometry = ActivityIslandWidthGeometry.current()
 
+
+    private var widthBinding: Binding<Double> {
+        Binding(get: { min(geometry.settingsRange.upperBound, max(geometry.settingsRange.lowerBound, expandedWidth)) },
+                set: { expandedWidth = ActivityIslandPreferences.normalizedWidth($0) })
+    }
+    private var durationBinding: Binding<Int> {
+        Binding(get: { Int(ActivityIslandPreferences.normalizedDuration(expandedHold)) }, set: { expandedHold = Double($0) })
+    }
     var body: some View {
-        VStack(spacing: 0) {
-            settingsHeader
-                .modifier(MonitorDesktopReveal(reduceMotion: motionIsReduced))
-            Divider().overlay(MonitorDesktopTheme.separator)
-
-            GeometryReader { proxy in
-                let layoutMode = ActivitySettingsLayoutMode.resolve(width: proxy.size.width)
-                Group {
-                    if layoutMode == .narrow {
-                        VStack(spacing: 0) {
-                            previewPane(layoutMode: layoutMode)
-                                .frame(height: 204)
-                            Divider().overlay(MonitorDesktopTheme.separator)
-                            inspector
-                        }
-                    } else {
-                        HStack(alignment: .top, spacing: 0) {
-                            previewPane(layoutMode: layoutMode)
-                                .frame(width: proxy.size.width * layoutMode.previewFraction)
-                            Divider().overlay(MonitorDesktopTheme.separator)
-                            inspector
-                        }
-                    }
-                }
-                .animation(
-                    motionIsReduced ? nil : .easeOut(duration: 0.16),
-                    value: layoutMode
-                )
-            }
-        }
-        .background(Color.clear)
-        .toggleStyle(.switch)
-        .controlSize(.regular)
-        .onDisappear { isAdjustingSlider = false }
-        .onChange(of: islandEnabled) { enabled in
-            if !enabled, focusedControl != .enabled {
-                focusedControl = .enabled
-            }
-            notifyPreferenceChange()
-        }
-        .onChange(of: modeRawValue) { _ in
-            restoreConditionalFocusIfNeeded()
-            notifyPreferenceChange()
-        }
-        .onChange(of: menuBarDensityRawValue) { _ in notifyPreferenceChange() }
-        .onChange(of: overflowRawValue) { _ in notifyPreferenceChange() }
-        .onChange(of: screenRawValue) { _ in notifyPreferenceChange() }
-        .onChange(of: positionRawValue) { _ in notifyPreferenceChange() }
-        .onChange(of: visualStyleRawValue) { _ in
-            if !motionIsReduced {
-                animationStyleRevision += 1
-            }
-            notifyPreferenceChange()
-        }
-        .onChange(of: surfaceOpacity) { _ in notifyPreferenceChange() }
-        .onChange(of: surfaceScale) { _ in notifyPreferenceChange() }
-        .onChange(of: expandedHold) { _ in notifyPreferenceChange() }
-        .onChange(of: compactHide) { _ in notifyPreferenceChange() }
-        .onChange(of: reduceMotion) { _ in notifyPreferenceChange() }
-        .onChange(of: showCompletion) { _ in notifyPreferenceChange() }
-        .onReceive(
-            NotificationCenter.default.publisher(
-                for: .activitySettingsPreviewVisibilityDidChange
-            )
-        ) { notification in
-            previewIsVisible = notification.object as? Bool ?? true
-        }
-    }
-
-    private var settingsHeader: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("灵动岛设置")
-                    .font(MonitorDesktopTypography.pageTitle)
-                    .foregroundStyle(MonitorDesktopTheme.primaryText)
-                Text("按你的工作方式呈现 Codex 任务状态。")
-                    .font(MonitorDesktopTypography.body)
-                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
-            }
-            Spacer(minLength: 12)
-            Label("自动保存", systemImage: "checkmark.circle")
-                .font(MonitorDesktopTypography.metadata)
-                .foregroundStyle(MonitorDesktopTheme.secondaryText)
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 18)
-    }
-
-    private func previewPane(layoutMode: ActivitySettingsLayoutMode) -> some View {
-        VStack(alignment: .leading, spacing: layoutMode == .narrow ? 8 : 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("实时预览")
-                    .font(MonitorDesktopTypography.cardTitle)
-                    .foregroundStyle(MonitorDesktopTheme.primaryText)
-                Spacer(minLength: 12)
-                Text(previewStatusTitle)
-                    .font(MonitorDesktopTypography.control)
-                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
-            }
-
-            previewStage(layoutMode: layoutMode)
-                .frame(maxWidth: .infinity)
-                .frame(height: layoutMode == .narrow ? 136 : 210)
-
-            if layoutMode != .narrow {
-                Text("调整会立即生效，预览跟随当前真实任务。")
-                    .font(MonitorDesktopTypography.body)
-                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(previewSummary)
-                    .font(MonitorDesktopTypography.metadata)
-                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityHidden(true)
-            }
-        }
-        .padding(layoutMode.panePadding)
-        .modifier(MonitorDesktopReveal(delay: 0.06, reduceMotion: motionIsReduced))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("灵动岛实时预览")
-        .accessibilityValue(previewSummary)
-    }
-
-    private func previewStage(layoutMode: ActivitySettingsLayoutMode) -> some View {
-        ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.black.opacity(0.24))
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(MonitorDesktopTheme.separator, lineWidth: 0.7)
-
-            VStack(spacing: 0) {
-                previewMenuBar
-                ZStack {
-                    Group {
-                        if !islandEnabled {
-                            previewEmptyState(
-                                symbol: "eye.slash",
-                                title: "任务状态已关闭",
-                                detail: "菜单栏额度与本地监控仍会继续运行。"
-                            )
-                        } else if selectedMode == .menuBar {
-                            previewEmptyState(
-                                symbol: "menubar.rectangle",
-                                title: "仅菜单栏",
-                                detail: "任务状态与本轮 Token 显示在菜单栏，悬停查看各项目与会话。"
-                            )
-                        } else {
-                            floatingIslandPreview(scaleFactor: layoutMode.previewScaleFactor)
-                                .id(animationStyleRevision)
-                                .transition(animationStyleTransition)
-                                .frame(
-                                    maxWidth: .infinity,
-                                    maxHeight: .infinity,
-                                    alignment: previewAlignment
-                                )
-                                .padding(.horizontal, 12)
-                                .animation(positionAnimation, value: positionRawValue)
-                                .animation(
-                                    animationStyleFeedbackAnimation,
-                                    value: animationStyleRevision
-                                )
-                        }
-                    }
-                    .id(previewStateID)
-                    .transition(previewTransition)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(previewAnimation, value: previewStateID)
-            }
-        }
-    }
-
-    private var previewMenuBar: some View {
-        HStack(spacing: 8) {
-            Text("Codex Monitor")
-                .font(MonitorDesktopTypography.metadata)
-                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-            Spacer(minLength: 8)
-            if islandEnabled, selectedMode == .menuBar {
-                Image(nsImage: MenuBarQuotaRingRenderer.image(
-                    remainingPercent: store.quotaState.primaryBucket?.limitingWindow?.remainingPercent ?? 0
-                ))
-                    .resizable()
-                    .frame(width: 12, height: 12)
-                Text(menuBarPreviewTitle)
-                    .font(MonitorDesktopTypography.metadata)
-                    .lineLimit(1)
-            } else {
-                Image(systemName: "wifi")
-                    .font(.system(size: 9, weight: .medium))
-                Image(systemName: "battery.100")
-                    .font(.system(size: 9, weight: .medium))
-            }
-        }
-        .foregroundStyle(MonitorDesktopTheme.secondaryText)
-        .padding(.horizontal, 10)
-        .frame(height: 27)
-        .background(Color.white.opacity(0.025))
-        .overlay(alignment: .bottom) {
-            Divider().overlay(MonitorDesktopTheme.hairline)
-        }
-    }
-
-    @ViewBuilder
-    private func floatingIslandPreview(scaleFactor: CGFloat) -> some View {
-        let effectiveScale = CGFloat(surfaceScale) * scaleFactor
-        if let snapshot = liveSnapshot {
-            ActivityIslandPreview(
-                snapshot: snapshot,
-                style: selectedVisualStyle,
-                animated: previewIsVisible && !motionIsReduced,
-                surfaceOpacity: surfaceOpacity,
-                surfaceScale: effectiveScale
-            )
-            .animation(nil, value: surfaceScale)
-            .animation(nil, value: surfaceOpacity)
-        } else {
-            HStack(spacing: 2) {
-                ActivityStateOrb(
-                    style: selectedVisualStyle,
-                    phase: nil,
-                    animated: previewIsVisible && !motionIsReduced
-                )
-                .frame(width: 122, height: 122)
-                .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("CODEX MONITOR")
-                        .font(AstaSans.semiBold(11.5))
-                        .foregroundStyle(.white.opacity(0.46))
-                    Text("等待真实任务状态")
-                        .font(AstaSans.semiBold(17))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text("检测到真实任务后会在此显示。")
-                        .font(AstaSans.regular(11.5))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 12)
-            }
-            .padding(.leading, 4)
-            .padding(.trailing, 18)
-            .frame(
-                width: ActivityIslandLayout.expandedSurfaceSize.width,
-                height: ActivityIslandLayout.expandedSurfaceSize.height
-            )
-            .background(Color.black.opacity(surfaceOpacity))
-            .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
-            }
-            .shadow(color: .black.opacity(0.42), radius: 7, y: 2)
-            .scaleEffect(effectiveScale)
-            .frame(
-                width: ActivityIslandLayout.expandedSurfaceSize.width * effectiveScale,
-                height: ActivityIslandLayout.expandedSurfaceSize.height * effectiveScale
-            )
-            .animation(nil, value: surfaceScale)
-            .animation(nil, value: surfaceOpacity)
-        }
-    }
-
-    private func previewEmptyState(
-        symbol: String,
-        title: String,
-        detail: String
-    ) -> some View {
-        VStack(spacing: 7) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(MonitorDesktopTheme.secondaryText)
-            Text(title)
-                .font(MonitorDesktopTypography.cardTitle)
-                .foregroundStyle(MonitorDesktopTheme.primaryText)
-            Text(detail)
-                .font(MonitorDesktopTypography.body)
-                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                .multilineTextAlignment(.center)
-        }
-        .padding(16)
-    }
-
-    private var inspector: some View {
-        VStack(spacing: 0) {
-            ActivitySettingsSegmentedControl(selection: $selectedSection)
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 12)
-
-            Divider().overlay(MonitorDesktopTheme.separator)
-
-            ScrollView(.vertical, showsIndicators: true) {
-                ZStack(alignment: .topLeading) {
-                    inspectorContent
-                        .padding(16)
-                        .background(
-                            MonitorDesktopTheme.cardFill,
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(MonitorDesktopTheme.hairline, lineWidth: 1)
-                        }
-                        .id(selectedSection)
-                        .transition(inspectorTransition)
-                }
-                .modifier(MonitorDesktopReveal(delay: 0.12, reduceMotion: motionIsReduced))
-                .animation(inspectorAnimation, value: selectedSection)
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 28)
-            }
-            .scrollDisabled(isAdjustingSlider)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    @ViewBuilder
-    private var inspectorContent: some View {
-        switch selectedSection {
-        case .display:
-            displayInspector
-        case .appearance:
-            appearanceInspector
-        case .behavior:
-            behaviorInspector
-        case .accessibility:
-            accessibilityInspector
-        }
-    }
-
-    private var displayInspector: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            inspectorHeading(
-                "显示",
-                detail: "控制任务状态与本轮 Token 是否显示，以及它们出现的位置。"
-            )
-
-            preferenceRow(
-                title: "显示任务状态",
-                detail: "在浮动灵动岛或菜单栏中显示当前任务与本轮 Token。"
-            ) {
-                TaskStateNativeSwitch(isOn: $islandEnabled)
-                    .frame(width: 42, height: 26)
-                    .focused($focusedControl, equals: .enabled)
-            }
-
-            inspectorDivider
-
-            VStack(spacing: 0) {
-                preferenceRow(
-                    title: "显示位置",
-                    detail: displayModeDetail,
-                    controlsDisabled: !islandEnabled
-                ) {
-                    Picker("显示位置", selection: $modeRawValue) {
-                        ForEach(ActivityIslandMode.allCases) { mode in
-                            Text(mode.title).tag(mode.rawValue)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 210)
-                    .focused($focusedControl, equals: .mode)
-                }
-
-                Group {
-                    if selectedMode == .floating {
-                        inspectorDivider
-                        preferenceRow(
-                            title: "目标显示器",
-                            detail: "选择浮动灵动岛所在的显示器。",
-                            controlsDisabled: !islandEnabled
-                        ) {
-                            Picker("目标显示器", selection: $screenRawValue) {
-                                ForEach(ActivityIslandScreenMode.allCases) { screen in
-                                    Text(screen.title).tag(screen.rawValue)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(width: 160)
-                            .focused($focusedControl, equals: .screen)
-                        }
-
-                        inspectorDivider
-                        preferenceRow(
-                            title: "位置",
-                            detail: "选择灵动岛在屏幕顶部的水平位置。",
-                            controlsDisabled: !islandEnabled
-                        ) {
-                            Picker("位置", selection: $positionRawValue) {
-                                ForEach(ActivityIslandPosition.allCases) { position in
-                                    Text(position.title).tag(position.rawValue)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
-                            .frame(width: 210)
-                            .focused($focusedControl, equals: .position)
-                        }
-                    } else {
-                        inspectorDivider
-                        preferenceRow(
-                            title: "信息密度",
-                            detail: "自动会在安全空间内尽可能完整显示；空间不足时才精简或轮换。",
-                            controlsDisabled: !islandEnabled
-                        ) {
-                            Picker("信息密度", selection: $menuBarDensityRawValue) {
-                                ForEach(MenuBarInformationDensity.allCases) { density in
-                                    Text(density.title).tag(density.rawValue)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
-                            .frame(width: 240)
-                            .focused($focusedControl, equals: .density)
-                        }
-                        inspectorDivider
-                        preferenceRow(
-                            title: "空间不足时",
-                            detail: "每 4 秒轮换一项信息，状态保持可见；悬停暂停，待确认与完成提示固定显示。",
-                            controlsDisabled: !islandEnabled
-                        ) {
-                            Picker("空间不足时", selection: $overflowRawValue) {
-                                ForEach(MenuBarOverflow.allCases) { option in
-                                    Text(option.title).tag(option.rawValue)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
-                            .frame(width: 210)
-                        }
-                    }
-                }
-                .id(selectedMode)
-                .transition(conditionalTransition)
-            }
-            .animation(inspectorAnimation, value: selectedMode)
-            .animation(inspectorAnimation, value: islandEnabled)
-
-            if !islandEnabled {
-                disabledExplanation
-                    .transition(.opacity)
-            }
-        }
-    }
-
-    private var appearanceInspector: some View {
-        inspectorGroup(
-            title: "外观",
-            detail: "调整浮动灵动岛的背景、尺寸和动画风格。"
-        ) {
-            opacitySliderRow
-            inspectorDivider
-            scaleSliderRow
-            inspectorDivider
-            VStack(alignment: .leading, spacing: 10) {
-                Text("动画风格")
-                    .font(MonitorDesktopTypography.rowTitle)
-                Picker("动画风格", selection: $visualStyleRawValue) {
-                    ForEach(ActivityIslandVisualStyle.allCases) { style in
-                        Text(style.title).tag(style.rawValue)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .disabled(floatingControlsAreDisabled)
-                Text(animationStyleDetail)
-                    .font(MonitorDesktopTypography.body)
-                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                if motionIsReduced {
-                    Label("减少动态效果已开启，当前以静态风格显示。", systemImage: "pause.circle")
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 20) {
+                settingsGroup("外观预览", status: "更改即时生效") {
+                    ActivityIslandDesktopPreview(material: ActivityIslandMaterial(rawValue: material) ?? .liquidGlass,
+                        degree: glassDegree, effect: ActivityIslandProgressEffect(rawValue: effect) ?? .dropField,
+                        expandedWidth: geometry.expandedWidth(preferred: expandedWidth),
+                        maximumExpandedWidth: geometry.maximumExpandedWidth,
+                        animated: previewVisible, reduceMotion: systemReduceMotion, privacyMode: privacyMode,
+                        floatingUsageEnabled: floatingUsageEnabled,
+                        usageCapsuleTone: ActivityIslandUsageCapsuleTone(rawValue: usageCapsuleTone) ?? .dark)
+                        .frame(height: 210).padding(.top, 14)
+                    Text("预览使用示例数据，实际任务与额度以本机数据为准。")
                         .font(MonitorDesktopTypography.metadata)
-                        .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(MonitorDesktopTheme.tertiaryText).padding(.vertical, 12)
+                }
+                settingsGroup("材质与尺寸") {
+                    materialOption(.liquidGlass, subtitle: "通透背景、自然高光与深色玻璃卡片。")
+                    divider
+                    materialOption(.classic, subtitle: "使用纯色背景，关闭玻璃材质。")
+                    if material == ActivityIslandMaterial.liquidGlass.rawValue {
+                        divider
+                        settingRow("玻璃程度", detail: "调整黑色遮罩与玻璃区域的比例。") {
+                            VStack(alignment: .trailing, spacing: 5) {
+                                IslandSettingsSlider(value: $glassDegree, range: 0.2...0.8, step: 0.01, title: "玻璃程度").accessibilityLabel("玻璃程度")
+                                    .accessibilityValue("黑色区域 \(Int(((1 - glassDegree) * 100).rounded()))%")
+                                Text("黑色区域 \(Int(((1 - glassDegree) * 100).rounded()))%")
+                                    .font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.tertiaryText).monospacedDigit()
+                            }.frame(width: 220)
+                        }
+                    }
+                    divider
+                    settingRow("展开宽度", detail: "调整任务列表宽度，刘海两侧保留安全空间。") {
+                        VStack(alignment: .trailing, spacing: 5) {
+                            IslandSettingsSlider(value: widthBinding, range: geometry.settingsRange, step: 1, title: "展开宽度").accessibilityLabel("展开宽度")
+                            Text("\(Int(widthBinding.wrappedValue)) pt").font(MonitorDesktopTypography.metadata)
+                                .foregroundStyle(MonitorDesktopTheme.tertiaryText).monospacedDigit()
+                        }.frame(width: 220)
+                    }
+                }
+                if #unavailable(macOS 26.0) {
+                    Text("原生液态玻璃需要 macOS 26 或更新版本；当前系统使用半透明材质。")
+                        .font(MonitorDesktopTypography.body).foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                }
+                settingsGroup("显示与隐私") {
+                    toggle("悬浮用量胶囊", detail: "在灵动岛下方显示剩余额度和重置倒计时。", value: $floatingUsageEnabled)
+                    divider
+                    settingRow("胶囊配色", detail: "深色为染色玻璃，浅色为清透玻璃。") {
+                        IslandSettingsTonePicker(selection: $usageCapsuleTone)
+                            .frame(width: 180).disabled(!floatingUsageEnabled)
+                    }
+                    divider
+                    toggle("隐私模式", detail: "隐藏任务内容、模型与账户数据。", value: $privacyMode)
+                }
+                settingsGroup("任务特效") {
+                    HStack(spacing: 12) {
+                        ForEach(ActivityIslandProgressEffect.allCases) { option in
+                            Button { effect = option.rawValue } label: { Text(option.title) }
+                                .buttonStyle(IslandSettingsEffectOptionStyle(effect: option, selected: effect == option.rawValue))
+                                .accessibilityLabel(option.title).accessibilityValue(effect == option.rawValue ? "已选择" : "未选择")
+                        }
+                    }.padding(.vertical, 14)
+                }
+                settingsGroup("自动展开") {
+                    toggle("自动弹出", detail: "新任务、完成或待确认时自动展开。", value: $automaticPopup)
+                    divider
+                    settingRow("停留时间", detail: "自动展开后停留的时长；待确认或固定时保持展开。") {
+                        Picker("停留时间", selection: durationBinding) {
+                            ForEach(1...10, id: \.self) { Text("\($0) 秒").tag($0) }
+                        }.pickerStyle(.menu).labelsHidden().frame(width: 110).disabled(!automaticPopup)
+                    }
                 }
             }
-            .padding(.vertical, 12)
-        }
+            .frame(maxWidth: 780)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 28)
+        }.font(MonitorDesktopTypography.body).foregroundStyle(MonitorDesktopTheme.primaryText)
+            .tint(MonitorDesktopTheme.selection).controlSize(.regular).preferredColorScheme(.dark)
+            .onAppear { previewVisible = true; geometry = .current() }
+            .onDisappear { previewVisible = false }
+            .onChange(of: material) { _ in signal() }.onChange(of: glassDegree) { _ in signal() }
+            .onChange(of: expandedWidth) { _ in signal() }.onChange(of: effect) { _ in signal() }
+            .onChange(of: privacyMode) { _ in signal() }.onChange(of: automaticPopup) { _ in signal() }
+            .onChange(of: expandedHold) { _ in signal() }
+            .onChange(of: floatingUsageEnabled) { _ in signal() }.onChange(of: usageCapsuleTone) { _ in signal() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in geometry = .current() }
     }
-
-    private var behaviorInspector: some View {
-        inspectorGroup(
-            title: "行为",
-            detail: "运行中缩小后持续显示；任务完成后按这里的时间退出。"
-        ) {
-            preferenceRow(
-                title: "显示任务完成反馈",
-                detail: "先显示完成状态，再收紧并隐藏。",
-                controlsDisabled: floatingControlsAreDisabled
-            ) {
-                Toggle("显示任务完成反馈", isOn: $showCompletion)
-                    .labelsHidden()
-            }
-            inspectorDivider
-            DisclosureGroup(isExpanded: $timeSettingsExpanded) {
-                VStack(spacing: 0) {
-                    sliderRow(
-                        title: "任务完成后保持展开",
-                        detail: "任务完成后继续保持展开状态的时间。",
-                        value: $expandedHold,
-                        range: 5...60
-                    )
-                    inspectorDivider
-                    sliderRow(
-                        title: "缩小后隐藏",
-                        detail: "任务完成进入紧凑态后继续显示的时间。",
-                        value: $compactHide,
-                        range: 5...120
-                    )
-                }
-            } label: {
-                Text("时间与自动隐藏")
-                    .font(MonitorDesktopTypography.rowTitle)
-                    .foregroundStyle(MonitorDesktopTheme.primaryText)
-            }
-            .padding(.vertical, 14)
-        }
-        .animation(disclosureAnimation, value: timeSettingsExpanded)
-    }
-
-    private var accessibilityInspector: some View {
+    private func signal() { ActivityIslandPreferenceSignal.post() }
+    private var divider: some View { Divider().overlay(MonitorDesktopTheme.separator) }
+    private func settingsGroup<Content: View>(_ title: String, status: String? = nil, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            inspectorHeading(
-                "辅助功能",
-                detail: "应用内设置会与 macOS 的减少动态效果共同生效。"
-            )
-            preferenceRow(
-                title: "减少动态效果",
-                detail: "停止持续流场、粒子运动和弹性位移，只保留必要状态变化。"
-            ) {
-                Toggle("减少动态效果", isOn: $reduceMotion)
-                    .labelsHidden()
-            }
-            inspectorDivider
-            VStack(alignment: .leading, spacing: 6) {
-                Label(
-                    systemReduceMotion ? "macOS 已启用减少动态效果" : "macOS 系统动态效果正常",
-                    systemImage: systemReduceMotion ? "checkmark.circle" : "circle"
-                )
-                .font(MonitorDesktopTypography.rowTitle)
-                .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                Text("系统设置和应用内设置任一开启，灵动岛都会采用减少动态的呈现。")
-                    .font(MonitorDesktopTypography.body)
-                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-            }
-            .padding(.vertical, 12)
-        }
-    }
-
-    private func inspectorGroup<Content: View>(
-        title: String,
-        detail: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            inspectorHeading(title, detail: detail)
-            if floatingControlsAreDisabled {
-                floatingScopeExplanation
-                    .padding(.bottom, 14)
-                    .transition(.opacity)
-            }
+            HStack {
+                Text(title).font(MonitorDesktopTypography.cardTitle).accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                if let status { Text(status).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.tertiaryText) }
+            }.padding(.vertical, 16)
+            divider
             content()
-        }
-        .animation(inspectorAnimation, value: islandEnabled)
-        .animation(inspectorAnimation, value: selectedMode)
+        }.padding(.horizontal, 18)
+            .background(MonitorDesktopTheme.cardFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(MonitorDesktopTheme.separator, lineWidth: 1) }
     }
-
-    private func inspectorHeading(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(MonitorDesktopTypography.cardTitle)
-                .foregroundStyle(MonitorDesktopTheme.primaryText)
-            Text(detail)
-                .font(MonitorDesktopTypography.body)
-                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.bottom, 18)
-    }
-
-    private func preferenceRow<Trailing: View>(
-        title: String,
-        detail: String,
-        controlsDisabled: Bool = false,
-        @ViewBuilder trailing: () -> Trailing
-    ) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 16) {
-                preferenceLabel(title: title, detail: detail)
-                    .frame(minWidth: 160, maxWidth: .infinity, alignment: .leading)
-                trailing()
-                    .disabled(controlsDisabled)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                preferenceLabel(title: title, detail: detail)
-                trailing()
-                    .disabled(controlsDisabled)
-            }
-        }
-        .font(MonitorDesktopTypography.controlLarge)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 14)
-        .accessibilityElement(children: .contain)
-    }
-
-    private func preferenceLabel(title: String, detail: String) -> some View {
+    private func rowLabel(_ title: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(MonitorDesktopTypography.rowTitle)
-                .foregroundStyle(MonitorDesktopTheme.primaryText)
-            Text(detail)
-                .font(MonitorDesktopTypography.body)
-                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+            Text(title).font(MonitorDesktopTypography.rowTitle)
+            Text(detail).font(MonitorDesktopTypography.body).foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
-
-    private func sliderRow(
-        title: String,
-        detail: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(MonitorDesktopTypography.rowTitle)
-                    Text(detail)
-                        .font(MonitorDesktopTypography.body)
-                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Text("\(Int(value.wrappedValue)) 秒")
-                    .font(MonitorDesktopTypography.rowTitle)
-                    .foregroundStyle(
-                        highlightedSlider == title
-                            ? MonitorDesktopTheme.primaryText
-                            : MonitorDesktopTheme.secondaryText
-                    )
-                    .monospacedDigit()
-                    .fixedSize()
-                    .modifier(ActivitySettingsNumericTransition(
-                        value: value.wrappedValue,
-                        reduceMotion: motionIsReduced
-                    ))
-                    .animation(controlResponseAnimation, value: highlightedSlider)
+    private func settingRow<Control: View>(_ title: String, detail: String, @ViewBuilder control: () -> Control) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 18) {
+                rowLabel(title, detail: detail).frame(minWidth: 210, maxWidth: .infinity, alignment: .leading)
+                control().fixedSize(horizontal: true, vertical: false)
             }
-            Slider(
-                value: value,
-                in: range,
-                step: 1,
-                onEditingChanged: { editing in
-                    setSliderEditing(editing, feedbackKey: title)
-                }
-            )
-            .tint(MonitorDesktopTheme.selection)
-            .disabled(floatingControlsAreDisabled)
-            .accessibilityLabel(title)
-            .accessibilityValue("\(Int(value.wrappedValue)) 秒")
-        }
-        .padding(.vertical, 12)
-    }
-
-    private var opacitySliderRow: some View {
-        percentageSliderRow(
-            title: "背景不透明度",
-            detail: "数值越高，背景越深；数值越低，背景越透明。",
-            value: $surfaceOpacity,
-            range: 0.10...0.90
-        )
-    }
-
-    private var scaleSliderRow: some View {
-        percentageSliderRow(
-            title: "整体缩放",
-            detail: "等比调整灵动岛与其中的内容。",
-            value: $surfaceScale,
-            range: 0.25...1.25
-        )
-    }
-
-    private func percentageSliderRow(
-        title: String,
-        detail: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(MonitorDesktopTypography.rowTitle)
-                    Text(detail)
-                        .font(MonitorDesktopTypography.body)
-                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Text("\(Int((value.wrappedValue * 100).rounded()))%")
-                    .font(MonitorDesktopTypography.rowTitle)
-                    .foregroundStyle(
-                        highlightedSlider == title
-                            ? MonitorDesktopTheme.primaryText
-                            : MonitorDesktopTheme.secondaryText
-                    )
-                    .monospacedDigit()
-                    .fixedSize()
-                    .modifier(ActivitySettingsNumericTransition(
-                        value: (value.wrappedValue * 100).rounded(),
-                        reduceMotion: motionIsReduced
-                    ))
-                    .animation(controlResponseAnimation, value: highlightedSlider)
+            VStack(alignment: .leading, spacing: 10) {
+                rowLabel(title, detail: detail)
+                HStack { Spacer(minLength: 0); control() }
             }
-            Slider(
-                value: value,
-                in: range,
-                step: 0.01,
-                onEditingChanged: { editing in
-                    setSliderEditing(editing, feedbackKey: title)
+        }.font(MonitorDesktopTypography.control).padding(.vertical, 14).frame(minHeight: 68)
+    }
+    private func toggle(_ title: String, detail: String, value: Binding<Bool>) -> some View {
+        settingRow(title, detail: detail) {
+            Toggle(title, isOn: value).labelsHidden()
+                .toggleStyle(SwitchToggleStyle(tint: MonitorDesktopTheme.selection)).controlSize(.regular)
+                .accessibilityLabel(title)
+        }
+    }
+    private func materialOption(_ option: ActivityIslandMaterial, subtitle: String) -> some View {
+        Button { material = option.rawValue } label: {
+            settingRow(option.title, detail: subtitle) {
+                Image(systemName: material == option.rawValue ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18)).foregroundStyle(material == option.rawValue ? MonitorDesktopTheme.selection : MonitorDesktopTheme.tertiaryText)
+            }.contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton).accessibilityLabel(option.title)
+            .accessibilityHint(subtitle).accessibilityValue(material == option.rawValue ? "已选择" : "未选择")
+    }
+
+}
+
+struct ActivityIslandDesktopPreview: View {
+    let material: ActivityIslandMaterial
+    let degree: Double
+    let effect: ActivityIslandProgressEffect
+    let expandedWidth: Double
+    var maximumExpandedWidth: CGFloat = 680
+    let animated: Bool
+    let reduceMotion: Bool
+    var privacyMode = false
+    var floatingUsageEnabled = true
+    var usageCapsuleTone: ActivityIslandUsageCapsuleTone = .dark
+    private var sample: ActivitySessionSnapshot {
+        ActivitySessionSnapshot(sessionID: "preview", turnID: "preview", projectID: "preview", projectName: "示例项目",
+            title: "整理项目资料", phase: .usingTool, actionText: "汇总文档，准备更新说明", updatedAt: Date(),
+            tokenUsage: .init(sessionID: "preview", turnID: "preview", total: 128000),
+            modelName: "gpt-6.1-sol", reasoningEffort: "high", startedAt: Date().addingTimeInterval(-120), sessionTotalTokens: 128000)
+    }
+    var body: some View {
+        GeometryReader { proxy in
+            let width = min(proxy.size.width - 24, 510 * min(1, CGFloat(expandedWidth) / max(1, maximumExpandedWidth)))
+            let shape = IslandNotchShape(bottomRadius: 24)
+            ZStack(alignment: .top) {
+                if let image = ActivityIslandPreviewAssets.image("Wallpaper") {
+                    Image(nsImage: image).resizable().scaledToFill().frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-            )
-            .tint(MonitorDesktopTheme.selection)
-            .disabled(floatingControlsAreDisabled)
-            .accessibilityLabel(title)
-            .accessibilityValue("\(Int((value.wrappedValue * 100).rounded()))%")
-        }
-        .padding(.vertical, 12)
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("1 个会话").font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        icon("pin"); icon("chevron.up")
+                    }.padding(.horizontal, 28).frame(height: 36)
+                    ActivityIslandTaskCard(row: privacyMode ? sample.hidingDetails() : sample, animated: animated,
+                        rowHeight: 62, selected: true, effect: effect, reduceMotion: reduceMotion, preview: true)
+                        .padding(.horizontal, 28).padding(.vertical, 12)
+                    HStack { Text("1 个会话"); Spacer(); Text("1 工作中"); icon("arrow.clockwise"); icon("gearshape") }
+                        .font(.system(size: 12)).padding(.horizontal, 28).padding(.bottom, 12).frame(height: 36)
+                }.frame(width: width).background {
+                    if material == .classic { shape.fill(.black) }
+                    else {
+                        ZStack {
+                            if #available(macOS 26.0, *) { Color.clear.glassEffect(.clear, in: shape) }
+                            else { shape.fill(.regularMaterial) }
+                            LinearGradient(stops: ActivityIslandGlassDegree.gradientStops(degree), startPoint: .top, endPoint: .bottom).clipShape(shape)
+                        }
+                    }
+                }
+                if floatingUsageEnabled && !privacyMode {
+                    IslandUsageCapsuleContent(windows: [
+                        .init(usedPercent: 28, windowDurationMinutes: 300, resetsAt: Date(timeIntervalSince1970: 12000)),
+                        .init(usedPercent: 54, windowDurationMinutes: 10080, resetsAt: Date(timeIntervalSince1970: 345600))
+                    ], current: true, now: Date(timeIntervalSince1970: 0), tone: usageCapsuleTone)
+                    .padding(.top, 166)
+                }
+            }.frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+        }.environment(\.islandLiquidGlassEnabled, material == .liquidGlass)
+            .allowsHitTesting(false).accessibilityElement(children: .ignore)
+            .accessibilityLabel("灵动岛外观预览")
+            .accessibilityValue("\(effect.title)，隐私模式\(privacyMode ? "已开启" : "已关闭")，展开宽度 \(Int(expandedWidth)) pt")
+            .transaction { $0.animation = nil }
     }
-
-    private var inspectorDivider: some View {
-        Divider().overlay(MonitorDesktopTheme.separator)
-    }
-
-    private var disabledExplanation: some View {
-        Label(
-            "任务状态展示已关闭，仍保留菜单栏额度与本地统计。",
-            systemImage: "info.circle"
-        )
-        .font(MonitorDesktopTypography.body)
-        .foregroundStyle(MonitorDesktopTheme.secondaryText)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.top, 12)
-        .accessibilityHint("重新开启显示任务状态后，这些设置会恢复可用")
-    }
-
-    private var floatingScopeExplanation: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: islandEnabled ? "menubar.rectangle" : "info.circle")
-                .accessibilityHidden(true)
-            Text(islandEnabled
-                ? "这些设置用于浮动灵动岛。当前为仅菜单栏模式，原有设置已保留。"
-                : "任务状态展示已关闭。原有设置已保留，可在“显示”中重新开启。")
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(MonitorDesktopTypography.body)
-        .foregroundStyle(MonitorDesktopTheme.secondaryText)
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            MonitorDesktopTheme.controlFill,
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-        )
-    }
-
-    private var floatingControlsAreDisabled: Bool {
-        !islandEnabled || selectedMode != .floating
-    }
-
-    private var selectedMode: ActivityIslandMode {
-        ActivityIslandMode(rawValue: modeRawValue) ?? .floating
-    }
-
-    private var selectedVisualStyle: ActivityIslandVisualStyle {
-        ActivityIslandVisualStyle(rawValue: visualStyleRawValue) ?? .rippleGlow
-    }
-
-    private var motionIsReduced: Bool {
-        systemReduceMotion || reduceMotion
-    }
-
-    private var previewAlignment: Alignment {
-        switch ActivityIslandPosition(rawValue: positionRawValue) ?? .center {
-        case .leading: return .leading
-        case .center: return .center
-        case .trailing: return .trailing
-        }
-    }
-
-    private var previewStateID: String {
-        guard islandEnabled else { return "closed" }
-        return selectedMode.rawValue
-    }
-
-    private var previewTransition: AnyTransition {
-        guard !motionIsReduced else { return .opacity }
-        return .opacity.combined(with: .scale(scale: 0.98))
-    }
-
-    private var inspectorTransition: AnyTransition {
-        guard !motionIsReduced else { return .opacity }
-        return .opacity.combined(with: .offset(x: 0, y: 10))
-    }
-
-    private var conditionalTransition: AnyTransition {
-        guard !motionIsReduced else { return .opacity }
-        return .opacity.combined(with: .offset(x: 0, y: 4))
-    }
-
-    private var animationStyleTransition: AnyTransition {
-        guard !motionIsReduced else { return .identity }
-        return .opacity.combined(with: .scale(scale: 0.99))
-    }
-
-    private var previewAnimation: Animation? {
-        motionIsReduced
-            ? .linear(duration: 0.08)
-            : .easeOut(duration: 0.18)
-    }
-
-    private var inspectorAnimation: Animation? {
-        motionIsReduced
-            ? .easeOut(duration: 0.15)
-            : .spring(response: 0.34, dampingFraction: 1)
-    }
-
-    private var disclosureAnimation: Animation? {
-        motionIsReduced
-            ? nil
-            : .spring(response: 0.3, dampingFraction: 1)
-    }
-
-    private var positionAnimation: Animation? {
-        motionIsReduced
-            ? nil
-            : .spring(response: 0.3, dampingFraction: 1)
-    }
-
-    private var controlResponseAnimation: Animation? {
-        motionIsReduced
-            ? nil
-            : .easeOut(duration: 0.12)
-    }
-
-    private var animationStyleFeedbackAnimation: Animation? {
-        motionIsReduced
-            ? nil
-            : .easeOut(duration: 0.18)
-    }
-
-    private var liveSnapshot: ActivityIslandSnapshot? {
-        guard let project = store.focusedProject else { return nil }
-        return ActivityIslandSnapshot(
-            projectID: project.id,
-            projectName: project.displayName,
-            phase: project.task.phase,
-            actionText: project.detailedActionSummary,
-            sessionCount: project.sessionCount,
-            projectCount: max(1, store.activeProjects.count),
-            updatedAt: max(
-                project.task.updatedAt,
-                project.latestDisplayActivity?.updatedAt ?? .distantPast
-            ),
-            turnTokenUsage: project.sessions.first.flatMap { session in
-                guard let usage = store.turnTokenUsages[session.task.id],
-                      usage.turnID == session.task.turnID else { return nil }
-                return usage
-            }
-        )
-    }
-
-    private var displayModeDetail: String {
-        selectedMode == .floating
-            ? "独立显示实时任务灵动岛，同时保留菜单栏额度。"
-            : "菜单栏显示任务与本轮 Token；多项目时优先显示需要处理的任务，悬停查看全部。"
-    }
-
-    private var animationStyleDetail: String {
-        selectedVisualStyle == .rippleGlow
-            ? "Ripple Glow 使用克制的边缘能量与衰减波纹。"
-            : "Particle Orb 使用中心粒子聚合与小范围轨道运动。"
-    }
-
-    private var previewStatusTitle: String {
-        guard islandEnabled else { return "已关闭" }
-        return selectedMode == .floating ? "浮动灵动岛" : "仅菜单栏"
-    }
-
-    private var menuBarPreviewTitle: String {
-        guard let snapshot = liveSnapshot else {
-            return store.quotaState.primaryBucket?.limitingWindow.map { "\($0.remainingPercent)%" } ?? "--"
-        }
-        return MenuBarTokenFormatter.title(
-            status: snapshot.phase.menuBarTitle, project: snapshot.projectName,
-            usage: snapshot.turnTokenUsage,
-            quota: store.quotaState.primaryBucket?.limitingWindow?.remainingPercent,
-            projectCount: store.activeProjects.count)
-    }
-
-    private var previewSummary: String {
-        let state: String
-        if !islandEnabled {
-            state = "任务状态展示关闭"
-        } else if selectedMode == .menuBar {
-            let density = MenuBarInformationDensity(rawValue: menuBarDensityRawValue)?.title ?? "自动"
-            state = "仅菜单栏，信息密度：\(density)"
-        } else {
-            let screen = ActivityIslandScreenMode(rawValue: screenRawValue)?.title ?? "自动"
-            let position = ActivityIslandPosition(rawValue: positionRawValue)?.title ?? "居中"
-            state = "浮动灵动岛，\(screen)，\(position)"
-        }
-        let task = liveSnapshot == nil ? "等待真实任务状态" : "使用当前真实任务状态"
-        let motion = motionIsReduced ? "已减少动态效果" : "动态效果开启"
-        guard islandEnabled, selectedMode == .floating else {
-            return "\(state)；\(task)。"
-        }
-        return "\(state)；\(selectedVisualStyle.title)；缩放 \(Int((surfaceScale * 100).rounded()))%；背景不透明度 \(Int((surfaceOpacity * 100).rounded()))%；\(motion)；\(task)。"
-    }
-
-    private func restoreConditionalFocusIfNeeded() {
-        switch selectedMode {
-        case .floating where focusedControl == .density:
-            focusedControl = .mode
-        case .menuBar where focusedControl == .screen || focusedControl == .position:
-            focusedControl = .mode
-        default:
-            break
-        }
-    }
-
-    private func notifyPreferenceChange() {
-        ActivityIslandPreferenceSignal.post()
-    }
-
-    private func setSliderEditing(
-        _ editing: Bool,
-        feedbackKey: String
-    ) {
-        isAdjustingSlider = editing
-        sliderFeedbackGeneration += 1
-        let generation = sliderFeedbackGeneration
-        highlightedSlider = feedbackKey
-        guard !editing else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-            guard sliderFeedbackGeneration == generation else { return }
-            highlightedSlider = nil
-        }
+    private func icon(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 10, weight: .medium)).foregroundStyle(.white)
+            .frame(width: 24, height: 24).islandGlass(Circle(), tint: .white.opacity(0.04), clearSurface: true)
     }
 }

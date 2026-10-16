@@ -23,6 +23,14 @@ enum MonitorCenterSection: String, CaseIterable, Identifiable {
     case setup = "安装与权限"
     case settings = "灵动岛设置"
     var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .usage: return "用量分析"
+        case .cost: return "成本估算"
+        case .panelSettings: return "菜单栏与面板"
+        default: return rawValue
+        }
+    }
 
     var symbol: String {
         switch self {
@@ -42,9 +50,9 @@ enum MonitorCenterSection: String, CaseIterable, Identifiable {
         case .cost: return "API 等价成本"
         case .tibo: return "官方额度、社区动态与本机恢复记录"
         case .continuity: return "本地会话连续性"
-        case .panelSettings: return "管理概览卡片中的数据与操作"
-        case .setup: return "首次引导、通知权限与 Codex Hooks"
-        case .settings: return "Activity Island"
+        case .panelSettings: return "菜单栏内容与概览面板"
+        case .setup: return "应用更新、通知权限与监控连接"
+        case .settings: return "材质、隐私、任务特效与自动展开"
         }
     }
 
@@ -89,43 +97,29 @@ private struct AnalysisPageShell<Content: View>: View {
 
 private struct AnalysisActivityRangeMenu: View {
     @Binding var selection: ActivityPeriod
-
+    @Binding var independent: Bool
+    let followingDays: Int
     var body: some View {
         Menu {
+            Button { independent = false } label: {
+                Label("跟随统计周期（\(followingDays) 日）", systemImage: independent ? "calendar" : "checkmark")
+            }
+            Divider()
             ForEach(ActivityPeriod.allCases) { period in
-                Button {
-                    selection = period
-                } label: {
-                    if selection == period {
-                        Label(period.rawValue, systemImage: "checkmark")
-                    } else {
-                        Text(period.rawValue)
-                    }
+                Button { selection = period; independent = true } label: {
+                    Label("独立范围 · \(period.rawValue)", systemImage: independent && selection == period ? "checkmark" : "calendar")
                 }
             }
         } label: {
-            HStack(spacing: 5) {
-                Text("活动范围")
-                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                Text(selection.rawValue)
-                    .foregroundStyle(MonitorDesktopTheme.primaryText)
-            }
-            .font(MonitorDesktopTypography.metadataMedium)
-            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .background(
-                MonitorDesktopTheme.controlFill,
-                in: RoundedRectangle(
-                    cornerRadius: MonitorDesktopTheme.controlCornerRadius,
-                    style: .continuous
-                )
-            )
-            .contentShape(Rectangle())
+            Text(independent ? "独立 · \(selection.rawValue)" : "跟随 · \(followingDays) 日")
+                .font(MonitorDesktopTypography.metadataMedium)
+                .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                .padding(.horizontal, 8).frame(height: 30)
+                .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 8))
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
+        .menuStyle(.borderlessButton).fixedSize()
         .accessibilityLabel("活动范围")
-        .accessibilityValue(selection.rawValue)
+        .accessibilityValue(independent ? "独立范围 \(selection.rawValue)" : "跟随统计周期 \(followingDays) 日")
     }
 }
 
@@ -210,9 +204,12 @@ struct NotchView: View {
     @State private var usageActivityPeriod: ActivityPeriod = .month
     @State private var costActivityPeriod: ActivityPeriod = .month
     @State private var costPeriod: UsagePeriod = .day
+    @State private var usageActivityIndependent = false
+    @State private var costActivityIndependent = false
+    @State private var showsAnalysisScopeInfo = false
+    @State private var showsAllUsageProjects = false
+    @State private var selectedUsageProject: ProjectUsage?
     @State private var usageAccountScopeID = UsageAccountScope.all
-    @AppStorage(ActivityIslandPreferenceKey.enabled) private var activityIslandEnabled = true
-    @AppStorage(ActivityIslandPreferenceKey.mode) private var activityIslandModeRaw = ActivityIslandMode.floating.rawValue
     @State private var compactHideWorkItem: DispatchWorkItem?
     @State private var compactHovered = false
     @State private var confirmsContinuityRecovery = false
@@ -302,6 +299,9 @@ struct NotchView: View {
                 )
                 .frame(width: store.visibleIslandWidth, height: store.visibleIslandHeight)
             }
+        }
+        .sheet(item: $selectedUsageProject) { project in
+            usageProjectDetail(project)
         }
         .preferredColorScheme(surface == .center ? .dark : nil)
         .onReceive(
@@ -631,12 +631,10 @@ struct NotchView: View {
 
             HStack(spacing: 5) {
                 Circle()
-                    .fill(!activityIslandEnabled || store.activeProjects.isEmpty ? Color.gray : statusColor)
+                    .fill(store.activeProjects.isEmpty ? Color.gray : statusColor)
                     .frame(width: 5, height: 5)
                 Text(
-                    !activityIslandEnabled
-                        ? "Activity Island 已关闭"
-                        : activityIslandModeStatusText
+                    activityIslandModeStatusText
                 )
                 Spacer()
                 Text("数据仅在本机处理")
@@ -753,7 +751,7 @@ struct NotchView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(MonitorTheme.cyanAccent.opacity(0.86))
                     .frame(width: 18)
-                Text(section.rawValue)
+                Text(section.title)
                     .font(.system(size: 9.5, weight: .semibold))
                 Spacer(minLength: 6)
                 Text(trailing)
@@ -776,14 +774,7 @@ struct NotchView: View {
     }
 
     private var activityIslandModeStatusText: String {
-        switch ActivityIslandMode(rawValue: activityIslandModeRaw) ?? .floating {
-        case .floating:
-            return store.activeProjects.isEmpty
-                ? "Activity Island 待命"
-                : "Activity Island 正在显示实时任务"
-        case .menuBar:
-            return "仅菜单栏状态模式"
-        }
+        store.activeProjects.isEmpty ? "Activity Island 待命" : "Activity Island 正在显示实时任务"
     }
 
     private var monitorCenterView: some View {
@@ -829,7 +820,7 @@ struct NotchView: View {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(expandedPage.rawValue)
+                        Text(expandedPage.title)
                             .font(MonitorDesktopTypography.pageTitle)
                             .tracking(-0.21)
                         Text(expandedPage.subtitle)
@@ -837,19 +828,13 @@ struct NotchView: View {
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     }
                     Spacer()
-                    if monitorCenterPageIsRefreshing {
-                        ProgressView().controlSize(.small).tint(.cyan)
-                    }
                     if monitorCenterPageCanRefresh {
-                        Button { refreshCurrentMonitorCenterPage() } label: {
-                            Label(
-                                monitorCenterRefreshTitle,
-                                systemImage: "arrow.clockwise"
-                            )
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                        .disabled(monitorCenterPageIsRefreshing)
+                        MonitorRefreshButton(
+                            title: monitorCenterRefreshTitle,
+                            loadingTitle: expandedPage == .continuity ? "检查中" : "刷新中",
+                            isRefreshing: monitorCenterPageIsRefreshing,
+                            action: refreshCurrentMonitorCenterPage
+                        )
                     } else if expandedPage == .panelSettings {
                         Label("更改即时生效", systemImage: "checkmark.circle")
                             .font(MonitorDesktopTypography.metadata)
@@ -897,7 +882,7 @@ struct NotchView: View {
                             .font(.system(size: 15, weight: .medium))
                             .frame(width: 21)
                             .accessibilityHidden(true)
-                        Text(section.rawValue)
+                        Text(section.title)
                             .font(MonitorDesktopTypography.controlLarge)
                         Spacer(minLength: 0)
                         if section == .continuity,
@@ -908,10 +893,6 @@ struct NotchView: View {
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(Color.orange.opacity(0.18), in: Capsule())
-                        } else if section == .settings {
-                            Image(systemName: "arrow.up.forward.square")
-                                .font(.system(size: 11))
-                                .accessibilityHidden(true)
                         }
                     }
                     .foregroundStyle(expandedPage == section ? .white : MonitorDesktopTheme.secondaryText)
@@ -932,10 +913,10 @@ struct NotchView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(MonitorCenterPressStyle())
-                .accessibilityLabel(section.rawValue)
+                .accessibilityLabel(section.title)
                 .accessibilityValue(expandedPage == section ? "当前页面" : "")
                 .accessibilityAddTraits(expandedPage == section ? .isSelected : [])
-                .help(section == .settings ? "在独立窗口中打开灵动岛设置" : section.subtitle)
+                .help(section.subtitle)
             }
         }
         .animation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.34, dampingFraction: 1), value: expandedPage)
@@ -1344,8 +1325,7 @@ struct NotchView: View {
         switch expandedPage {
         case .usage:
             AnalysisPageShell {
-                analysisAccountScopeBar
-                analysisPeriodBar
+                analysisFilterBar
                 usageOverviewCard
                     .modifier(MonitorDesktopReveal(delay: 0))
                 usageActivityCard
@@ -1356,8 +1336,7 @@ struct NotchView: View {
             }
         case .cost:
             AnalysisPageShell {
-                analysisAccountScopeBar
-                analysisPeriodBar
+                analysisFilterBar
                 costOverviewCard
                     .modifier(MonitorDesktopReveal(delay: 0))
                 costActivityCard
@@ -1374,15 +1353,11 @@ struct NotchView: View {
         case .setup:
             SetupPermissionsView(store: store)
         case .settings:
-            MonitorSettingsView(store: store)
+            QuotaStyleSettingsView(store: store)
         }
     }
 
     private func showPage(_ page: MonitorCenterSection) {
-        if surface == .center, page == .settings {
-            onOpenCenter(.settings)
-            return
-        }
         if expandedPage != page {
             transitionMonitorCenter(to: page)
         }
@@ -1612,16 +1587,24 @@ struct NotchView: View {
             }
             .font(MonitorDesktopTypography.control)
             .padding(.horizontal, 9)
-            .frame(minWidth: 150, maxWidth: .infinity, minHeight: 32)
-            .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            Picker("会话状态", selection: $continuityFilter) {
+            .frame(minWidth: 150, maxWidth: .infinity, minHeight: 34)
+            .background(.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.075), lineWidth: 0.5))
+            Menu {
                 ForEach(SessionLibraryFilter.allCases) { filter in
-                    Text(filter.rawValue).tag(filter)
+                    Button { continuityFilter = filter } label: {
+                        if continuityFilter == filter {
+                            Label(filter.rawValue, systemImage: "checkmark")
+                        } else { Text(filter.rawValue) }
+                    }
                 }
+            } label: {
+                Label(continuityFilter.rawValue, systemImage: "line.3.horizontal.decrease")
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(width: 100)
+            .menuStyle(.borderlessButton).menuIndicator(.visible)
+            .fixedSize()
+            .accessibilityLabel("会话状态")
+            Rectangle().fill(.white.opacity(0.08)).frame(width: 0.5, height: 20).padding(.horizontal, 4)
             Button {
                 store.chooseSessionImportBundle()
             } label: {
@@ -1652,7 +1635,7 @@ struct NotchView: View {
                 }
             }
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(AnalysisToolbarButtonStyle())
         .controlSize(.regular)
         .font(MonitorDesktopTypography.control)
     }
@@ -3336,6 +3319,36 @@ struct NotchView: View {
         }
     }
 
+    private func quotaEvidenceScope(_ event: TiboEvent) -> String {
+        let names = ["codex": "Codex", "chatgpt_work": "ChatGPT Work", "all": "全部范围",
+                     "pro": "Pro", "plus": "Plus", "unknown": "未注明"]
+        let plans = event.scope.plans.map { names[$0.lowercased()] ?? $0 }.joined(separator: "、")
+        let windows = event.scope.windows.map { value in
+            value.lowercased() == "unknown" ? "未注明额度窗口" : names[value.lowercased()] ?? value
+        }.joined(separator: "、")
+        return plans + " · " + windows
+    }
+
+    private func quotaCommunityEvidence(_ evidence: TiboEvent) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let time = evidence.effectiveDate ?? evidence.announcedDate {
+                Text("社区事件时间：" + time.formatted(date: .numeric, time: .shortened))
+            }
+            if let time = evidence.publishedDate {
+                Text("推文发布时间：" + time.formatted(date: .numeric, time: .shortened))
+            }
+            if evidence.hasDifferentSourceTimes {
+                Text("来源时间存在差异，已保留原始时间供核对。")
+                    .foregroundStyle(.orange)
+            }
+            Text("适用范围：" + quotaEvidenceScope(evidence))
+            if let url = URL(string: evidence.source.url) { Link("查看来源", destination: url) }
+        }
+        .font(MonitorDesktopTypography.metadata)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+    }
+
     private func tiboQuotaCandidateRow(_ candidate: QuotaResetConfirmationCandidate) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "questionmark.circle.fill")
@@ -3343,24 +3356,48 @@ struct NotchView: View {
                 .foregroundStyle(.orange)
                 .frame(width: 14, height: 15)
             VStack(alignment: .leading, spacing: 2) {
-                Text("检测到额度恢复，等待确认")
+                Text(candidate.title)
                     .font(MonitorDesktopTypography.rowTitle)
                 Text(quotaResetSummary(candidate))
                     .font(MonitorDesktopTypography.body)
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                Text(candidate.detectedAt.formatted(date: .numeric, time: .shortened))
+                    .font(MonitorDesktopTypography.metadata)
+                    .foregroundStyle(MonitorDesktopTheme.faintText)
+                Text(candidate.associationNote)
+                    .font(MonitorDesktopTypography.metadata)
+                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !candidate.communityEvidence.isEmpty {
+                    DisclosureGroup("社区线索（\(candidate.communityEvidence.count)）") {
+                        ForEach(candidate.communityEvidence) { evidence in
+                            quotaCommunityEvidence(evidence)
+                        }
+                    }
+                    .font(MonitorDesktopTypography.metadata)
+                }
+
             }
             Spacer(minLength: 6)
-            Button("标记为手动重置") {
-                quotaResetCandidateToConfirm = candidate
-                confirmsUserQuotaReset = true
+            if let eventID = candidate.historyEventID {
+                Menu("分类") {
+                    ForEach(QuotaResetDisplayType.allCases) { type in
+                        Button("显示为：" + type.title) { store.setQuotaResetDisplayType(eventID: eventID, displayType: type) }
+                    }
+                }
+                .font(MonitorDesktopTypography.metadataMedium)
+                .fixedSize()
+                .help("只修改显示分类，保留原始判断与证据；修改前自动备份。")
+            } else {
+                Button("确认为手动") {
+                    quotaResetCandidateToConfirm = candidate
+                    confirmsUserQuotaReset = true
+                }
+                .buttonStyle(MonitorCenterPressStyle())
+                .font(MonitorDesktopTypography.metadataMedium)
+                .foregroundStyle(.orange)
             }
-            .buttonStyle(MonitorCenterPressStyle())
-            .font(MonitorDesktopTypography.metadataMedium)
-            .foregroundStyle(.orange)
-            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .background(Color.orange.opacity(0.09), in: Capsule())
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -3373,13 +3410,17 @@ struct NotchView: View {
                 .foregroundStyle(quotaResetColor(event.displayReason))
                 .frame(width: 14, height: 15)
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.displayReason.title)
+                Text(event.communityAssociation != nil && event.userDisplayType == nil ? "Tibo 重置 · 自动关联" : event.displayReason.title)
                     .font(MonitorDesktopTypography.rowTitle)
                     .foregroundStyle(MonitorDesktopTheme.primaryText)
                 Text(quotaResetSummary(event))
                     .font(MonitorDesktopTypography.body)
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                if let evidence = event.communityAssociation {
+                    DisclosureGroup("关联依据") { quotaCommunityEvidence(evidence) }
+                        .font(MonitorDesktopTypography.metadata)
+                }
                 if event.userDisplayType != nil {
                     Text("原始判断：\(event.reason.title)")
                         .font(MonitorDesktopTypography.metadata)
@@ -3400,9 +3441,9 @@ struct NotchView: View {
                             )
                         } label: {
                             if event.userDisplayType == nil {
-                                Label("自动判断 · \(event.reason.title)", systemImage: "checkmark")
+                                Label(event.communityAssociation == nil ? "自动判断 · \(event.reason.title)" : "自动关联 · Tibo 重置", systemImage: "checkmark")
                             } else {
-                                Text("自动判断 · \(event.reason.title)")
+                                Text(event.communityAssociation == nil ? "自动判断 · \(event.reason.title)" : "自动关联 · Tibo 重置")
                             }
                         }
                         Divider()
@@ -3584,42 +3625,58 @@ struct NotchView: View {
     private var tiboRadarControls: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                Picker("动态中心页面", selection: Binding(
-                    get: { tiboRadarMode },
-                    set: { mode in
+                AnalysisPeriodPicker(options: TiboRadarMode.allCases.map(\.rawValue), selection: Binding(
+                    get: { tiboRadarMode.rawValue },
+                    set: { value in
+                        guard let mode = TiboRadarMode(rawValue: value) else { return }
                         transitionTiboContent {
                             tiboRadarMode = mode
                             tiboRadarFilter = .all
                         }
                     }
-                )) {
-                    ForEach(TiboRadarMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 430)
-                Spacer(minLength: 0)
+                ), accessibilityTitle: "动态中心页面")
+                .frame(width: 360)
+                Spacer(minLength: 12)
                 if tiboRadarMode != .history {
-                    Picker("内容筛选", selection: Binding(
-                        get: { tiboRadarFilter },
-                        set: { filter in transitionTiboContent { tiboRadarFilter = filter } }
-                    )) {
+                    Menu {
                         ForEach(TiboRadarFilter.allCases) { filter in
-                            Text(tiboFilterTitle(filter)).tag(filter)
+                            Button {
+                                transitionTiboContent { tiboRadarFilter = filter }
+                            } label: {
+                                if tiboRadarFilter == filter {
+                                    Label(tiboFilterTitle(filter), systemImage: "checkmark")
+                                } else {
+                                    Text(tiboFilterTitle(filter))
+                                }
+                            }
                         }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "line.3.horizontal.decrease")
+                                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                            Text(tiboFilterTitle(tiboRadarFilter))
+                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                        }
+                        .font(MonitorDesktopTypography.control)
+                        .padding(.horizontal, 12).frame(height: 34)
+                        .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+                        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.075), lineWidth: 0.5))
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 118)
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel("内容筛选")
                 }
             }
             if tiboRadarMode != .history {
                 HStack(spacing: 7) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 10))
+                        .foregroundStyle(MonitorDesktopTheme.faintText)
                     Text("codex-reset.com")
-                        .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                    Text("·")
+                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                    Text("·").foregroundStyle(MonitorDesktopTheme.faintText)
                     Text(tiboSourceFreshnessText)
                         .foregroundStyle(tiboSourceHasWarning ? .orange : MonitorDesktopTheme.tertiaryText)
                         .lineLimit(1)
@@ -4041,7 +4098,7 @@ struct NotchView: View {
                         .foregroundStyle(.orange)
                         .frame(width: 13, height: 14)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("检测到额度恢复，等待确认")
+                        Text(candidate.title)
                             .font(.system(size: 11, weight: .semibold))
                         Text(quotaResetSummary(candidate))
                             .font(.system(size: 11, weight: .medium))
@@ -4384,7 +4441,9 @@ struct NotchView: View {
             dataCardHeader(
                 symbol: "chart.xyaxis.line",
                 title: "成本概览"
-            ) { Text("跟随统计周期 · \(costPeriod.rawValue)") }
+            ) { Text(analysisScopeCaption) }
+            Text("本地日志 · 模型计价 · API 等价估值，非账单")
+                .font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.tertiaryText)
 
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -4394,7 +4453,7 @@ struct NotchView: View {
                     Text(formatDollars(totals.dollars))
                         .font(MonitorDesktopTypography.primaryMetric)
                         .tracking(-0.21)
-                        .foregroundStyle(MonitorDesktopTheme.cyanAccent)
+                        .foregroundStyle(MonitorDesktopTheme.primaryText)
                         .monospacedDigit()
                         .contentTransition(.numericText())
                         .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1), value: totals.dollars)
@@ -4413,7 +4472,7 @@ struct NotchView: View {
             }
 
             HStack(spacing: 8) {
-                Text("输入 \(formatCompactTokens(totals.inputTokens))")
+                Text("非缓存输入 \(formatCompactTokens(totals.inputTokens))")
                 Text("输出 \(formatCompactTokens(totals.outputTokens))")
                 Text("缓存 \(formatCompactTokens(totals.cacheTokens))")
                 Spacer(minLength: 0)
@@ -4423,11 +4482,17 @@ struct NotchView: View {
             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
             .lineLimit(1)
 
-            CostTrendChart(
-                values: Array(selectedCost.series.prefix(costVisiblePointCount)),
-                period: costPeriod
-            )
-            .frame(height: 104)
+            ZStack {
+                CostTrendChart(
+                    values: Array(selectedCost.series.prefix(costVisiblePointCount)),
+                    period: costPeriod
+                )
+                .frame(height: 140)
+                .id("\(costPeriod.rawValue)-\(costVisiblePointCount)")
+                .transition(.opacity)
+            }
+            .animation(reduceMotion ? nil : AnalysisMotion.swap, value: costPeriod)
+            .animation(reduceMotion ? nil : AnalysisMotion.swap, value: costVisiblePointCount)
 
             HStack {
                 Text(costTrendStartLabel)
@@ -4437,11 +4502,7 @@ struct NotchView: View {
             .font(MonitorDesktopTypography.body)
             .foregroundStyle(MonitorDesktopTheme.faintText)
         }
-        .padding(18)
-        .background(
-            MonitorDesktopTheme.cardFill,
-            in: RoundedRectangle(cornerRadius: MonitorGeometry.cardRadius, style: .continuous)
-        )
+        .modifier(AnalysisCard(primary: true))
     }
 
     private var costActivityCard: some View {
@@ -4450,7 +4511,7 @@ struct NotchView: View {
                 symbol: "square.grid.3x3.fill",
                 title: "成本活动"
             ) {
-                AnalysisActivityRangeMenu(selection: $costActivityPeriod)
+                AnalysisActivityRangeMenu(selection: $costActivityPeriod, independent: $costActivityIndependent, followingDays: costPeriod.activityDayCount)
             }
 
             if !selectedCostScope.usage.activityIsReady {
@@ -4458,189 +4519,149 @@ struct NotchView: View {
                     .font(MonitorDesktopTypography.body)
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     .frame(maxWidth: .infinity, minHeight: 48)
+            } else if TokenActivityLayout.usesBars(rangeDays: costActivityDays) {
+                AnalysisActivityBarChart(samples: costBarSamples, hourly: costActivityDays == 1, isCost: true, reduceMotion: reduceMotion)
+                    .id(costActivityDays)
+                    .transition(.opacity)
             } else {
                 CostActivityHeatmap(
                     activity: selectedCostActivity,
+                    tokenActivity: selectedCostScope.usage.activity,
                     reduceMotion: reduceMotion
                 )
+                .transition(.opacity)
             }
         }
-        .padding(18)
-        .background(
-            MonitorDesktopTheme.cardFill,
-            in: RoundedRectangle(cornerRadius: MonitorGeometry.cardRadius, style: .continuous)
-        )
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: costActivityPeriod)
+        .modifier(AnalysisCard(primary: false))
+        .animation(reduceMotion ? nil : AnalysisMotion.swap, value: costActivityDays)
     }
 
     private var providerCostCard: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            dataCardHeader(
-                symbol: "doc.text.fill",
-                title: "日志来源"
-            ) {
+        let sync = OfficialPricingCatalog.syncStatus
+        return VStack(alignment: .leading, spacing: 18) {
+            dataCardHeader(symbol: "doc.text.fill", title: "日志来源") {
                 HStack(spacing: 6) {
                     Text("跟随统计周期 · \(costPeriod.rawValue)")
-                    if store.isCostLoading { ProgressView().controlSize(.mini).tint(.cyan) }
+                    if store.isCostLoading { ProgressView().controlSize(.mini) }
                 }
             }
             ForEach(selectedCostScope.providers) { provider in
                 let totals = provider.totals(for: costPeriod)
-                VStack(spacing: 4) {
-                    HStack {
-                        Circle()
-                            .fill(Color.cyan)
-                            .frame(width: 6, height: 6)
-                        Text(provider.provider.rawValue)
-                            .font(MonitorDesktopTypography.cardTitle)
-                        Spacer()
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 8) {
+                        Text(provider.provider.rawValue).font(MonitorDesktopTypography.cardTitle)
+                        Text("本地会话日志").font(MonitorDesktopTypography.metadata)
+                            .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     }
-                    HStack {
-                        if totals.tokens == 0 {
-                            Text("暂无 Codex 本地日志")
-                                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                        } else {
-                            Text("Token 吞吐量")
-                                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                            Text(formatTokens(totals.tokens))
-                                .foregroundStyle(.cyan.opacity(0.78))
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                            Spacer()
-                            Text("等价成本")
-                                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                            Text(formatDollars(totals.dollars))
-                                .fontWeight(.bold)
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
+                    if totals.tokens == 0 {
+                        Text("暂无 Codex 本地日志")
+                            .font(MonitorDesktopTypography.body).foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                    } else {
+                        HStack(alignment: .top, spacing: 24) {
+                            sourceMetric("Token 用量", value: formatCompactTokens(totals.tokens), unit: "tokens")
+                            sourceMetric("API 等价成本", value: formatDollars(totals.dollars), unit: "USD")
                         }
                     }
-                    .font(MonitorDesktopTypography.body)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
                 }
             }
-            Label(
-                "GPT-6／GPT-5.6 使用 OpenAI 官方标准费率 · 核验于 \(ModelPricing.officialRateVerifiedAt)",
-                systemImage: "checkmark.shield"
-            )
-            .font(MonitorDesktopTypography.metadata)
-            .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-            .help("其他已知模型由每日公开价格目录与 App 后备表补充；这里展示 API 等价估值，不是订阅账单。")
+            Rectangle().fill(.white.opacity(0.07)).frame(height: 0.5)
+            VStack(spacing: 10) {
+                pricingSourceRow("官方费率", source: sync.date == nil ? "内置官方快照" : "OpenAI · Standard",
+                    status: sync.date.map { "同步于 " + OfficialPricingCatalog.dateLabel($0) }
+                        ?? "核验于 " + ModelPricing.officialRateVerifiedAt)
+                pricingSourceRow("补充目录", source: "社区模型目录",
+                    status: PricingCatalog.lastFetched.map { "同步于 " + OfficialPricingCatalog.dateLabel($0) } ?? "尚未成功同步")
+                if sync.failed {
+                    Text("官方更新失败，沿用最后有效费率")
+                        .font(MonitorDesktopTypography.metadata).foregroundStyle(.orange.opacity(0.85))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
             if !selectedCostScope.unknownModels.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .padding(.top, 1)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("\(selectedCostScope.unknownModels.count) 个未定价模型未计入美元估值")
-                        Text(selectedCostScope.unknownModels.joined(separator: ", "))
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    }
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.orange.opacity(0.82))
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Label("\(selectedCostScope.unknownModels.count) 个未定价模型未计入美元估值", systemImage: "exclamationmark.triangle")
+                    .font(MonitorDesktopTypography.metadata).foregroundStyle(.orange.opacity(0.85))
             }
-            if !selectedCostScope.estimatedModelAliases.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
+            DisclosureGroup("计价说明") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("按本地日志中的模型与输入、输出、缓存 Token 估算，非订阅账单。同步时间是成功读取时间，不代表官方调价日期。补充目录仅覆盖官方快照未收录的模型。")
                     ForEach(selectedCostScope.estimatedModelAliases.keys.sorted(), id: \.self) { model in
                         if let billingModel = selectedCostScope.estimatedModelAliases[model] {
-                            HStack(spacing: 5) {
-                                Image(systemName: "equal.circle.fill")
-                                    .font(.system(size: 11))
-                                Text("\(model) 已按 \(billingModel) 估算")
-                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                    .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(model).font(.system(size: 11, weight: .medium, design: .monospaced))
+                                Text("按 \(billingModel) 估算")
                             }
                         }
                     }
-                }
-                .foregroundStyle(.cyan.opacity(0.68))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(18)
-        .background(
-            MonitorDesktopTheme.cardFill,
-            in: RoundedRectangle(cornerRadius: MonitorGeometry.cardRadius, style: .continuous)
-        )
-    }
-
-    private var analysisAccountScopeBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Label("数据范围", systemImage: "person.2.fill")
-                    .font(MonitorDesktopTypography.cardTitle)
-                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                Spacer(minLength: 8)
-                accountScopeMenu
-            }
-
-            HStack(spacing: 8) {
-                Text(accountScopeEvidenceText)
-                    .font(MonitorDesktopTypography.metadata)
-                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 4)
-                if shouldOfferMonthlyHistoryShortcut {
-                    Button("查看近 30 日") {
-                        animate(.islandContentSwap) {
-                            usagePeriod = .month
-                            costPeriod = .month
-                        }
+                    if !selectedCostScope.unknownModels.isEmpty {
+                        Text("未定价：" + selectedCostScope.unknownModels.joined(separator: ", "))
                     }
-                    .buttonStyle(MonitorCenterPressStyle())
-                    .font(MonitorDesktopTypography.control)
-                    .foregroundStyle(MonitorDesktopTheme.cyanAccent)
                 }
+                .font(MonitorDesktopTypography.metadata)
+                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 10)
+                .textSelection(.enabled)
             }
-
+            .font(MonitorDesktopTypography.metadata)
+            .foregroundStyle(MonitorDesktopTheme.secondaryText)
+            .tint(MonitorDesktopTheme.tertiaryText)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            MonitorDesktopTheme.subtleCardFill,
-            in: RoundedRectangle(
-                cornerRadius: MonitorGeometry.cardRadius,
-                style: .continuous
-            )
-        )
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: MonitorGeometry.cardRadius,
-                style: .continuous
-            )
-            .strokeBorder(MonitorDesktopTheme.hairline, lineWidth: 0.5)
-        }
+        .modifier(AnalysisCard(primary: false))
     }
 
-    private var analysisPeriodBar: some View {
-        HStack(spacing: 12) {
-            Label("统计周期", systemImage: "calendar")
-                .font(MonitorDesktopTypography.cardTitle)
-                .foregroundStyle(MonitorDesktopTheme.secondaryText)
+    private func sourceMetric(_ title: String, value: String, unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.tertiaryText)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(value).font(.system(size: 25, weight: .semibold)).monospacedDigit()
+                    .contentTransition(.numericText())
+                Text(unit).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.faintText)
+            }
+            .lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func pricingSourceRow(_ title: String, source: String, status: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title).foregroundStyle(MonitorDesktopTheme.tertiaryText).frame(width: 62, alignment: .leading)
+            Text(source).foregroundStyle(MonitorDesktopTheme.secondaryText)
             Spacer(minLength: 8)
-            analysisPeriodControl
-                .frame(maxWidth: 360)
+            Text(status).foregroundStyle(MonitorDesktopTheme.faintText).monospacedDigit()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            MonitorDesktopTheme.subtleCardFill,
-            in: RoundedRectangle(
-                cornerRadius: MonitorGeometry.cardRadius,
-                style: .continuous
-            )
-        )
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: MonitorGeometry.cardRadius,
-                style: .continuous
-            )
-            .strokeBorder(MonitorDesktopTheme.hairline, lineWidth: 0.5)
+        .font(MonitorDesktopTypography.metadata)
+    }
+
+    private var analysisFilterBar: some View {
+        HStack(spacing: 10) {
+            accountScopeMenu
+            Button { showsAnalysisScopeInfo.toggle() } label: {
+                Image(systemName: "info.circle")
+                    .font(MonitorDesktopTypography.control)
+                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(MonitorCenterPressStyle())
+            .help(accountScopeEvidenceText)
+            .accessibilityLabel("数据范围说明")
+            .popover(isPresented: $showsAnalysisScopeInfo) {
+                Text(accountScopeEvidenceText)
+                    .font(MonitorDesktopTypography.body)
+                    .padding(16).frame(width: 280, alignment: .leading)
+            }
+            Spacer(minLength: 12)
+            if shouldOfferMonthlyHistoryShortcut {
+                Button("近 30 日") { usagePeriod = .month; costPeriod = .month }
+                    .buttonStyle(.plain).font(MonitorDesktopTypography.control)
+            }
+            analysisPeriodControl.frame(width: 216)
         }
+        .padding(.vertical, 2)
+    }
+
+    private var analysisScopeCaption: String {
+        if usageAccountScopeID == UsageAccountScope.all { return "本机全部账号" }
+        if usageAccountScopeID == UsageAccountScope.unknown { return "本机归属未知" }
+        return "本机 · " + selectedAccountScopeTitle
     }
 
     private var accountScopeMenu: some View {
@@ -4677,7 +4698,7 @@ struct NotchView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: true, vertical: false)
-        .help("筛选 Usage 和 Cost 的本地历史统计范围")
+        .help("筛选用量分析与成本估算的本地历史统计范围")
         .accessibilityLabel("数据范围")
         .accessibilityValue(selectedAccountScopeTitle)
     }
@@ -4685,77 +4706,15 @@ struct NotchView: View {
     @ViewBuilder
     private var analysisPeriodControl: some View {
         if expandedPage == .usage {
-            HStack(spacing: 3) {
-                ForEach(UsageTrendPeriod.allCases) { period in
-                    Button {
-                        animate(.islandContentSwap) { usagePeriod = period }
-                    } label: {
-                        Text(period.rawValue)
-                            .font(MonitorDesktopTypography.controlLarge)
-                            .frame(maxWidth: .infinity, minHeight: 30)
-                            .foregroundStyle(
-                                usagePeriod == period
-                                    ? MonitorDesktopTheme.primaryText
-                                    : MonitorDesktopTheme.tertiaryText
-                            )
-                            .background(
-                                usagePeriod == period
-                                    ? Color.white.opacity(0.11)
-                                    : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(MonitorCenterPressStyle())
-                    .accessibilityValue(usagePeriod == period ? "已选择" : "")
-                }
-            }
-            .padding(3)
-            .background(
-                MonitorDesktopTheme.controlFill,
-                in: RoundedRectangle(
-                    cornerRadius: MonitorDesktopTheme.controlCornerRadius,
-                    style: .continuous
-                )
-            )
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("统计周期")
+            AnalysisPeriodPicker(options: UsageTrendPeriod.allCases.map(\.rawValue), selection: Binding(
+                get: { usagePeriod.rawValue },
+                set: { if let period = UsageTrendPeriod(rawValue: $0) { usagePeriod = period } }
+            ))
         } else {
-            HStack(spacing: 3) {
-                ForEach(UsagePeriod.allCases) { period in
-                    Button {
-                        animate(.islandContentSwap) { costPeriod = period }
-                    } label: {
-                        Text(period.rawValue)
-                            .font(MonitorDesktopTypography.controlLarge)
-                            .frame(maxWidth: .infinity, minHeight: 30)
-                            .foregroundStyle(
-                                costPeriod == period
-                                    ? MonitorDesktopTheme.primaryText
-                                    : MonitorDesktopTheme.tertiaryText
-                            )
-                            .background(
-                                costPeriod == period
-                                    ? Color.white.opacity(0.11)
-                                    : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(MonitorCenterPressStyle())
-                    .accessibilityValue(costPeriod == period ? "已选择" : "")
-                }
-            }
-            .padding(3)
-            .background(
-                MonitorDesktopTheme.controlFill,
-                in: RoundedRectangle(
-                    cornerRadius: MonitorDesktopTheme.controlCornerRadius,
-                    style: .continuous
-                )
-            )
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("统计周期")
+            AnalysisPeriodPicker(options: UsagePeriod.allCases.map(\.rawValue), selection: Binding(
+                get: { costPeriod.rawValue },
+                set: { if let period = UsagePeriod(rawValue: $0) { costPeriod = period } }
+            ))
         }
     }
 
@@ -4839,8 +4798,35 @@ struct NotchView: View {
         store.costSnapshot.scope(for: usageAccountScopeID)
     }
 
+    private var costActivityDays: Int {
+        TokenActivityLayout.activityDays(following: costPeriod.activityDayCount, independentDays: costActivityIndependent ? costActivityPeriod.dayCount : nil)
+    }
+
+    private var tokenActivityDays: Int {
+        TokenActivityLayout.activityDays(following: usagePeriod.dayCount, independentDays: usageActivityIndependent ? usageActivityPeriod.dayCount : nil)
+    }
+
+    private var tokenBarSamples: [AnalysisActivityBarSample] {
+        selectedTokenActivity.map { .init(date: $0.date, value: Double($0.tokens), tokens: $0.tokens) }
+    }
+
+    private var costBarSamples: [AnalysisActivityBarSample] {
+        if costActivityDays == 1 {
+            let calendar = Calendar.current
+            let start = calendar.startOfDay(for: Date())
+            let series = selectedCostScope.today.series
+            let tokenSeries = selectedCostScope.usage.day.series
+            return (0..<TokenActivityLayout.observedHourCount(seriesCount: series.count, now: Date(), calendar: calendar)).compactMap { hour in
+                guard let date = calendar.date(byAdding: .hour, value: hour, to: start) else { return nil }
+                return .init(date: date, value: series[hour], tokens: tokenSeries.indices.contains(hour) ? Int(tokenSeries[hour]) : nil)
+            }
+        }
+        let tokens = Dictionary(selectedCostScope.usage.activity.map { ($0.date, $0.tokens) }, uniquingKeysWith: { first, _ in first })
+        return selectedCostActivity.map { .init(date: $0.date, value: $0.dollars, tokens: tokens[$0.date]) }
+    }
+
     private var selectedCostActivity: [DailyCostActivity] {
-        Array(selectedCostScope.costActivity.suffix(costActivityPeriod.dayCount))
+        Array(selectedCostScope.costActivity.suffix(TokenActivityLayout.activityDays(following: costPeriod.activityDayCount, independentDays: costActivityIndependent ? costActivityPeriod.dayCount : nil)))
     }
 
     private var costPeriodTitle: String {
@@ -4873,7 +4859,7 @@ struct NotchView: View {
 
     private var costTrendEndLabel: String {
         switch costPeriod {
-        case .day: return "23 时"
+        case .day: return String(format: "%02d 时", max(0, costVisiblePointCount - 1))
         case .week, .month: return rollingDateLabel(daysAgo: 0)
         }
     }
@@ -4883,7 +4869,7 @@ struct NotchView: View {
     }
 
     private var selectedTokenActivity: [DailyTokenActivity] {
-        Array(selectedCostScope.usage.activity.suffix(usageActivityPeriod.dayCount))
+        Array(selectedCostScope.usage.activity.suffix(TokenActivityLayout.activityDays(following: usagePeriod.dayCount, independentDays: usageActivityIndependent ? usageActivityPeriod.dayCount : nil)))
     }
 
     private func dataCardHeader<Trailing: View>(
@@ -4927,17 +4913,17 @@ struct NotchView: View {
             dataCardHeader(
                 symbol: "chart.xyaxis.line",
                 title: "Token 概览"
-            ) { Text("跟随统计周期 · \(usagePeriod.rawValue)") }
+            ) { Text(analysisScopeCaption) }
 
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(usagePeriodTitle)
+                    Text(usagePeriodTitle + "（含缓存）")
                         .font(MonitorDesktopTypography.body)
                         .foregroundStyle(MonitorDesktopTheme.secondaryText)
                     Text(formatTokens(usage.tokens))
                         .font(MonitorDesktopTypography.primaryMetric)
                         .tracking(-0.21)
-                        .foregroundStyle(MonitorDesktopTheme.cyanAccent)
+                        .foregroundStyle(MonitorDesktopTheme.primaryText)
                         .monospacedDigit()
                         .contentTransition(.numericText())
                         .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1), value: usage.tokens)
@@ -4948,7 +4934,7 @@ struct NotchView: View {
             }
 
             HStack(spacing: 8) {
-                Text("输入 \(formatCompactTokens(usage.inputTokens))")
+                Text("非缓存输入 \(formatCompactTokens(usage.inputTokens))")
                 Text("输出 \(formatCompactTokens(usage.outputTokens))")
                 Text("缓存 \(formatCompactTokens(usage.cacheTokens))")
                 Spacer(minLength: 0)
@@ -4958,11 +4944,17 @@ struct NotchView: View {
             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
             .lineLimit(1)
 
-            UsageTrendChart(
-                values: Array(usage.series.prefix(usageVisiblePointCount)),
-                period: usagePeriod
-            )
-            .frame(height: 104)
+            ZStack {
+                UsageTrendChart(
+                    values: Array(usage.series.prefix(usageVisiblePointCount)),
+                    period: usagePeriod
+                )
+                .frame(height: 140)
+                .id("\(usagePeriod.rawValue)-\(usageVisiblePointCount)")
+                .transition(.opacity)
+            }
+            .animation(reduceMotion ? nil : AnalysisMotion.swap, value: usagePeriod)
+            .animation(reduceMotion ? nil : AnalysisMotion.swap, value: usageVisiblePointCount)
 
             HStack {
                 Text(usageTrendStartLabel)
@@ -4972,11 +4964,7 @@ struct NotchView: View {
             .font(MonitorDesktopTypography.metadata)
             .foregroundStyle(MonitorDesktopTheme.faintText)
         }
-        .padding(18)
-        .background(
-            MonitorDesktopTheme.cardFill,
-            in: RoundedRectangle(cornerRadius: MonitorGeometry.cardRadius, style: .continuous)
-        )
+        .modifier(AnalysisCard(primary: true))
     }
 
     private var usageActivityCard: some View {
@@ -4985,7 +4973,7 @@ struct NotchView: View {
                 symbol: "square.grid.3x3.fill",
                 title: "Token 活动"
             ) {
-                AnalysisActivityRangeMenu(selection: $usageActivityPeriod)
+                AnalysisActivityRangeMenu(selection: $usageActivityPeriod, independent: $usageActivityIndependent, followingDays: usagePeriod.dayCount)
             }
 
             if !selectedCostScope.usage.activityIsReady {
@@ -4993,29 +4981,35 @@ struct NotchView: View {
                     .font(MonitorDesktopTypography.body)
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     .frame(maxWidth: .infinity, minHeight: 48)
+            } else if TokenActivityLayout.usesBars(rangeDays: tokenActivityDays) {
+                AnalysisActivityBarChart(samples: tokenBarSamples, hourly: false, isCost: false, reduceMotion: reduceMotion)
+                    .id(tokenActivityDays)
+                    .transition(.opacity)
             } else {
                 TokenActivityHeatmap(
                     activity: selectedTokenActivity,
                     reduceMotion: reduceMotion
                 )
+                .transition(.opacity)
             }
         }
-        .padding(18)
-        .background(
-            MonitorDesktopTheme.cardFill,
-            in: RoundedRectangle(cornerRadius: MonitorGeometry.cardRadius, style: .continuous)
-        )
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: usageActivityPeriod)
+        .modifier(AnalysisCard(primary: false))
+        .animation(reduceMotion ? nil : AnalysisMotion.swap, value: tokenActivityDays)
     }
 
     private var usageProjectCard: some View {
         let usage = selectedUsage
-        let topProjects = Array(usage.projects.prefix(4))
+        let topProjects = showsAllUsageProjects ? usage.projects : Array(usage.projects.prefix(4))
         return VStack(alignment: .leading, spacing: 8) {
             dataCardHeader(
                 symbol: "folder.fill",
                 title: "项目用量"
-            ) { Text("跟随统计周期 · \(usagePeriod.rawValue)") }
+            ) {
+                if usage.projects.count > 4 {
+                    Button(showsAllUsageProjects ? "收起" : "查看全部（\(usage.projects.count)）") { withAnimation(reduceMotion ? nil : AnalysisMotion.control) { showsAllUsageProjects.toggle() } }
+                        .buttonStyle(.plain)
+                }
+            }
             if topProjects.isEmpty {
                 Text("当前周期暂无本地 Token 记录")
                     .font(MonitorDesktopTypography.body)
@@ -5023,14 +5017,15 @@ struct NotchView: View {
                     .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
             } else {
                 ForEach(Array(topProjects.enumerated()), id: \.element.id) { index, project in
+                    Button { selectedUsageProject = project } label: {
                     HStack(spacing: 7) {
                         Text("\(index + 1)")
                             .font(MonitorDesktopTypography.rowTitle)
-                            .foregroundStyle(index == 0 ? .cyan.opacity(0.85) : .white.opacity(0.3))
+                            .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                             .frame(width: 10)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(project.name)
-                                .font(MonitorDesktopTypography.cardTitle)
+                                .font(MonitorDesktopTypography.rowTitle)
                                 .lineLimit(1)
                             Text("\(project.sessionCount) 个会话")
                                 .font(MonitorDesktopTypography.metadata)
@@ -5039,18 +5034,48 @@ struct NotchView: View {
                         Spacer(minLength: 5)
                         Text(formatCompactTokens(project.tokens))
                             .font(MonitorDesktopTypography.body)
-                            .foregroundStyle(.cyan.opacity(0.75))
+                            .foregroundStyle(MonitorDesktopTheme.secondaryText)
                             .monospacedDigit()
                             .contentTransition(.numericText())
+                        Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(MonitorDesktopTheme.faintText)
                     }
+                    .padding(.vertical, 8).contentShape(Rectangle())
+                    }
+                    .buttonStyle(AnalysisRowButtonStyle())
+                    .help("查看项目用量与关联会话")
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
-        .padding(18)
-        .background(
-            MonitorDesktopTheme.cardFill,
-            in: RoundedRectangle(cornerRadius: MonitorGeometry.cardRadius, style: .continuous)
-        )
+        .modifier(AnalysisCard(primary: false))
+    }
+
+    private func usageProjectDetail(_ project: ProjectUsage) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text(project.name).font(.title2.weight(.semibold))
+                Spacer()
+                Button("关闭") { selectedUsageProject = nil }.keyboardShortcut(.cancelAction)
+            }
+            Text(analysisScopeCaption + " · " + usagePeriodTitle)
+                .font(.subheadline).foregroundStyle(.secondary)
+            Text(formatTokens(project.tokens)).font(.largeTitle.weight(.semibold)).monospacedDigit()
+            Text("所选周期内 \(project.sessionCount) 个会话 · 总量含缓存")
+            Text(project.path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            Divider()
+            Text("会话管理将展示该项目的全部本机会话，不限于当前统计周期。")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("查看该项目全部本机会话") {
+                selectedUsageProject = nil
+                continuitySearchText = project.path
+                continuityFilter = .all
+                showPage(.continuity)
+                store.refreshContinuity()
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(24).frame(width: 540, alignment: .leading)
+        .background(Color(white: 0.075)).preferredColorScheme(.dark)
     }
 
     private var usagePeriodTitle: String {
@@ -5759,116 +5784,91 @@ private struct TiboChineseTranslationView: View {
 }
 #endif
 
-private struct CostTrendChart: View {
+private struct AnalysisSmoothTrendPlot: View {
     let values: [Double]
-    let period: UsagePeriod
+    let labels: [String]
+    let isCost: Bool
     @State private var hoveredIndex: Int?
+    @State private var reveal: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var readout: String {
+        if let index = hoveredIndex, values.indices.contains(index), labels.indices.contains(index) {
+            return labels[index] + " · " + formatted(values[index], exact: true)
+        }
+        return "峰值 " + formatted(values.max() ?? 0, exact: false)
+    }
 
     var body: some View {
-        GeometryReader { proxy in
-            let points = UsageTrendGeometry.points(values: values, in: proxy.size)
-            ZStack {
-                VStack(spacing: 0) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        Rectangle()
-                            .fill(.white.opacity(0.045))
-                            .frame(height: 0.5)
-                        Spacer(minLength: 0)
+        VStack(spacing: 6) {
+            AnalysisActivityReadout(label: isCost ? "成本趋势" : "用量趋势", value: readout, selected: hoveredIndex != nil)
+            GeometryReader { proxy in
+                let points = UsageTrendGeometry.points(values: values, in: proxy.size)
+                ZStack {
+                    VStack(spacing: 0) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Rectangle().fill(.white.opacity(0.045)).frame(height: 0.5)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    if values.contains(where: { $0 > 0 }) {
+                        UsageTrendArea(points: points)
+                            .fill(LinearGradient(colors: [AnalysisActivityStyle.accent.opacity(0.12), .clear], startPoint: .top, endPoint: .bottom))
+                        UsageTrendLine(points: points)
+                            .trim(from: 0, to: reveal)
+                            .stroke(AnalysisActivityStyle.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                        if let last = points.last {
+                            Circle().fill(AnalysisActivityStyle.accent)
+                                .frame(width: 4.5, height: 4.5).position(last)
+                        }
+                        if let index = hoveredIndex, points.indices.contains(index) {
+                            let point = points[index]
+                            Rectangle().fill(.white.opacity(0.12))
+                                .frame(width: 0.7, height: proxy.size.height)
+                                .position(x: point.x, y: proxy.size.height / 2)
+                            Circle().fill(.black).frame(width: 7, height: 7)
+                                .overlay(Circle().stroke(AnalysisActivityStyle.accent, lineWidth: 1.5))
+                                .position(point)
+                        }
+                    } else {
+                        Text(isCost ? "当前周期暂无可估算成本" : "当前周期暂无 Token 记录")
+                            .font(MonitorDesktopTypography.metadata)
+                            .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     }
                 }
-
-                if values.contains(where: { $0 > 0 }) {
-                    UsageTrendArea(points: points)
-                        .fill(
-                            LinearGradient(
-                                colors: [.cyan.opacity(0.24), .cyan.opacity(0.07), .clear],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-
-                    UsageTrendLine(points: points)
-                        .stroke(
-                            LinearGradient(
-                                colors: [.cyan.opacity(0.68), .cyan],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ),
-                            style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
-                        )
-                        .shadow(color: .cyan.opacity(0.28), radius: 2)
-
-                    if let endpoint = points.last {
-                        Circle()
-                            .fill(.cyan.opacity(0.18))
-                            .frame(width: 13, height: 13)
-                            .blur(radius: 1.5)
-                            .position(endpoint)
-                        Circle()
-                            .fill(.cyan)
-                            .frame(width: 5.5, height: 5.5)
-                            .overlay(Circle().stroke(.white.opacity(0.42), lineWidth: 0.7))
-                            .shadow(color: .cyan.opacity(0.75), radius: 3)
-                            .position(endpoint)
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case let .active(location):
+                        guard !points.isEmpty else { hoveredIndex = nil; return }
+                        let ratio = min(1, max(0, (location.x - 3) / max(1, proxy.size.width - 6)))
+                        hoveredIndex = min(points.count - 1, max(0, Int((ratio * CGFloat(max(1, points.count-1))).rounded())))
+                    case .ended: hoveredIndex = nil
                     }
-
-                    if let hoveredIndex,
-                       values.indices.contains(hoveredIndex),
-                       points.indices.contains(hoveredIndex) {
-                        let point = points[hoveredIndex]
-                        Rectangle()
-                            .fill(.white.opacity(0.13))
-                            .frame(width: 0.7, height: max(1, proxy.size.height - 18))
-                            .position(x: point.x, y: proxy.size.height / 2 + 9)
-
-                        Circle()
-                            .fill(.black)
-                            .frame(width: 9, height: 9)
-                            .overlay(Circle().stroke(.cyan, lineWidth: 2))
-                            .shadow(color: .cyan.opacity(0.8), radius: 4)
-                            .position(point)
-
-                        Text("\(bucketLabel(for: hoveredIndex)) · \(formatDollars(values[hoveredIndex]))")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .lineLimit(1)
-                            .padding(.horizontal, 6)
-                            .frame(height: 24)
-                            .background(.black.opacity(0.92), in: Capsule(style: .continuous))
-                            .overlay {
-                                Capsule(style: .continuous)
-                                    .strokeBorder(.cyan.opacity(0.28), lineWidth: 0.6)
-                            }
-                            .fixedSize()
-                            .position(
-                                x: tooltipX(point.x, width: proxy.size.width),
-                                y: 12
-                            )
-                    }
-                } else {
-                    Text("当前周期暂无可估算成本")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case let .active(location):
-                    guard !points.isEmpty else {
-                        hoveredIndex = nil
-                        return
-                    }
-                    let denominator = max(1, points.count - 1)
-                    let ratio = min(1, max(0, location.x / max(1, proxy.size.width)))
-                    hoveredIndex = min(points.count - 1, max(0, Int((ratio * CGFloat(denominator)).rounded())))
-                case .ended:
-                    hoveredIndex = nil
                 }
             }
         }
-        .accessibilityLabel("美元成本趋势")
+        .opacity(Double(reveal))
+        .animation(reduceMotion ? nil : AnalysisMotion.data, value: values)
+        .onAppear { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.36)) { reveal = 1 } }
+    }
+
+    private func formatted(_ value: Double, exact: Bool) -> String {
+        if isCost { return AnalysisActivityStyle.dollars(value) }
+        if exact { return AnalysisActivityStyle.tokens(Int(value)) }
+        if value >= 1_000_000_000 { return String(format: "%.1fB Token", value / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.1fM Token", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1fK Token", value / 1_000) }
+        return AnalysisActivityStyle.tokens(Int(value))
+    }
+}
+
+private struct CostTrendChart: View {
+    let values: [Double]
+    let period: UsagePeriod
+    var body: some View {
+        AnalysisSmoothTrendPlot(values: values, labels: values.indices.map { bucketLabel(for: $0) }, isCost: true)
+            .accessibilityLabel("美元成本趋势")
     }
 
     private func bucketLabel(for index: Int) -> String {
@@ -5881,22 +5881,15 @@ private struct CostTrendChart: View {
             let today = calendar.startOfDay(for: now)
             let start = calendar.date(byAdding: .day, value: -6, to: today) ?? today
             let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
-            return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
+            return "\(calendar.component(.month, from: date))/\(calendar.component(.day, from: date))"
         case .month:
             let today = calendar.startOfDay(for: now)
             let start = calendar.date(byAdding: .day, value: -29, to: today) ?? today
             let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
-            return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
+            return "\(calendar.component(.month, from: date))/\(calendar.component(.day, from: date))"
         }
     }
 
-    private func formatDollars(_ value: Double) -> String {
-        value < 1 ? String(format: "$%.4f", value) : String(format: "$%.2f", value)
-    }
-
-    private func tooltipX(_ pointX: CGFloat, width: CGFloat) -> CGFloat {
-        min(max(pointX, 104), max(104, width - 104))
-    }
 }
 
 private struct UsageCountMetric: View {
@@ -5919,67 +5912,207 @@ private struct UsageCountMetric: View {
     }
 }
 
+private struct AnalysisActivityBarSample: Identifiable {
+    var id: Date { date }
+    let date: Date
+    let value: Double
+    let tokens: Int?
+}
+
+private enum AnalysisActivityStyle {
+    static let accent = Color(red: 0.20, green: 0.72, blue: 0.86)
+    static let cornerRadius: CGFloat = 3
+    static let hoverAnimation = Animation.easeOut(duration: 0.14)
+
+    static func dollars(_ value: Double) -> String {
+        String(format: value > 0 && value < 1 ? "$%.4f" : "$%.2f", value)
+    }
+
+    static func tokens(_ value: Int) -> String { value.formatted() + " Token" }
+}
+
+private struct AnalysisActivityMark: View {
+    let active: Bool
+    let opacity: Double
+    let selected: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: AnalysisActivityStyle.cornerRadius, style: .continuous)
+            .fill(active ? AnalysisActivityStyle.accent.opacity(min(0.88, opacity + (selected ? 0.06 : 0))) : Color.white.opacity(0.08))
+            .overlay {
+                RoundedRectangle(cornerRadius: AnalysisActivityStyle.cornerRadius, style: .continuous)
+                    .strokeBorder(selected ? AnalysisActivityStyle.accent.opacity(0.65) : Color.white.opacity(0.05), lineWidth: 0.7)
+            }
+    }
+}
+
+private struct AnalysisActivityReadout: View {
+    let label: String
+    let value: String
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label).foregroundStyle(MonitorDesktopTheme.tertiaryText)
+            Spacer(minLength: 8)
+            Text(value)
+                .foregroundStyle(selected ? MonitorDesktopTheme.primaryText : MonitorDesktopTheme.tertiaryText)
+                .monospacedDigit()
+                .contentTransition(.opacity)
+        }
+        .font(MonitorDesktopTypography.metadata)
+        .lineLimit(1)
+        .frame(height: 24)
+    }
+}
+
+private struct AnalysisActivityBarChart: View {
+    let samples: [AnalysisActivityBarSample]
+    let hourly: Bool
+    let isCost: Bool
+    let reduceMotion: Bool
+    @State private var hoveredIndex: Int?
+    @State private var entered = false
+    private var weekly: Bool { !hourly && samples.count == 7 }
+
+    private var maximum: Double { max(0.000001, samples.map(\.value).max() ?? 0) }
+    private var slotCount: Int { hourly ? 24 : max(1, samples.count) }
+    private var hovered: AnalysisActivityBarSample? {
+        guard let hoveredIndex, samples.indices.contains(hoveredIndex) else { return nil }
+        return samples[hoveredIndex]
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            AnalysisActivityReadout(
+                label: hourly ? "按小时" : "按天",
+                value: hovered.map(detail) ?? "峰值 " + formatted(samples.map(\.value).max() ?? 0),
+                selected: hovered != nil
+            )
+            GeometryReader { proxy in
+                ZStack(alignment: .bottom) {
+                    VStack {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Rectangle().fill(.white.opacity(0.05)).frame(height: 0.5)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    HStack(alignment: .bottom, spacing: 0) {
+                        ForEach(0..<slotCount, id: \.self) { index in
+                            let sample = samples.indices.contains(index) ? samples[index] : nil
+                            let height = sample.map { max(0, $0.value) / maximum * proxy.size.height } ?? 0
+                            AnalysisActivityMark(active: (sample?.value ?? 0) > 0, opacity: ActivityHeatmapPalette.opacity(for: 4), selected: hoveredIndex == index)
+                                .frame(width: AnalysisBarLayout.width(slotWidth: proxy.size.width / CGFloat(slotCount), count: slotCount, hourly: hourly), height: height * (entered ? 1 : 0))
+                                .opacity(height > 0 ? 1 : 0)
+                                .animation(reduceMotion ? nil : .easeOut(duration: 0.38).delay(weekly ? Double(index) * 0.018 : 0), value: entered)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: proxy.size.height, alignment: .bottom)
+                                .contentShape(Rectangle())
+                                .onHover { inside in hoveredIndex = inside && sample != nil ? index : nil }
+                                .help(sample.map(detail) ?? "尚未发生的时段")
+                                .accessibilityElement()
+                                .accessibilityLabel(sample.map { label($0.date) } ?? "尚未发生的时段")
+                                .accessibilityValue(sample.map(detail) ?? "无数据")
+                        }
+                    }
+                    if !samples.contains(where: { $0.value > 0 }) {
+                        Text("当前范围暂无" + (isCost ? "可估算成本" : "Token 记录"))
+                            .font(MonitorDesktopTypography.metadata)
+                            .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+            .frame(height: weekly ? 140 : 110)
+            HStack {
+                if hourly {
+                    ForEach(["00:00", "06:00", "12:00", "18:00", "24:00"], id: \.self) { hour in
+                        Text(hour)
+                        if hour != "24:00" { Spacer() }
+                    }
+                } else if weekly {
+                    ForEach(samples) { sample in
+                        Text(label(sample.date)).frame(maxWidth: .infinity)
+                    }
+                } else {
+                    Text(samples.first.map { label($0.date) } ?? "—")
+                    Spacer()
+                    Text(samples.last.map { label($0.date) } ?? "—")
+                }
+            }
+            .font(MonitorDesktopTypography.metadata)
+            .foregroundStyle(MonitorDesktopTheme.faintText)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel((isCost ? "成本" : "Token") + (hourly ? "小时柱状图" : "每日柱状图"))
+        .animation(reduceMotion ? nil : AnalysisActivityStyle.hoverAnimation, value: hoveredIndex)
+        .animation(reduceMotion ? nil : AnalysisMotion.data, value: samples.map(\.value))
+        .onChange(of: samples.map(\.date)) { _ in hoveredIndex = nil }
+        .onAppear { entered = true }
+    }
+
+    private func label(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = hourly ? "HH:00" : "M/d"
+        return formatter.string(from: date)
+    }
+
+    private func formatted(_ value: Double) -> String {
+        if isCost { return AnalysisActivityStyle.dollars(value) }
+        if value >= 1_000_000 { return String(format: "%.1fM Token", value / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1fK Token", value / 1_000) }
+        return String(format: "%.0f Token", value)
+    }
+
+    private func detail(_ sample: AnalysisActivityBarSample) -> String {
+        var text = label(sample.date) + " · " + formatted(sample.value)
+        if isCost, let tokens = sample.tokens { text += " · " + tokens.formatted() + " Token" }
+        if !isCost { text = label(sample.date) + " · " + Int(sample.value).formatted() + " Token" }
+        return text
+    }
+}
+
 private struct TokenActivityHeatmap: View {
     private static let cellSize: CGFloat = 22
     private static let spacing: CGFloat = 5
 
     let activity: [DailyTokenActivity]
     let reduceMotion: Bool
-
     @State private var hoveredDate: Date?
-    @State private var hoverWorkItem: DispatchWorkItem?
+
+    private var hovered: DailyTokenActivity? { activity.first { $0.date == hoveredDate } }
 
     var body: some View {
-        VStack(spacing: 6) {
-            ZStack(alignment: .topTrailing) {
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.fixed(Self.cellSize), spacing: Self.spacing),
-                        count: TokenActivityLayout.columnCount
-                    ),
-                    spacing: Self.spacing
-                ) {
-                    ForEach(Array(paddedActivity.enumerated()), id: \.offset) { _, day in
-                        activityCell(day)
-                    }
-                }
-                .padding(.top, 32)
-
-                if let hovered = activity.first(where: { $0.date == hoveredDate }) {
-                    Text("\(dateLabel(hovered.date)) · \(compactTokens(hovered.tokens))")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(MonitorDesktopTheme.primaryText)
-                        .padding(.horizontal, 7)
-                        .frame(height: 24)
-                        .background(Color.black.opacity(0.90), in: Capsule())
-                        .overlay {
-                            Capsule().strokeBorder(Color.cyan.opacity(0.28), lineWidth: 0.6)
-                        }
-                        .transition(.opacity)
-                } else {
-                    Text("悬停查看日期与 Token")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MonitorDesktopTheme.faintText)
-                        .frame(height: 24)
+        VStack(spacing: 10) {
+            AnalysisActivityReadout(
+                label: "按天 · 颜色表示用量",
+                value: hovered.map(detail) ?? "峰值 " + compactTokens(activity.map(\.tokens).max() ?? 0),
+                selected: hovered != nil
+            )
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.fixed(Self.cellSize), spacing: Self.spacing), count: visibleColumns),
+                spacing: Self.spacing
+            ) {
+                ForEach(Array(paddedActivity.enumerated()), id: \.offset) { _, day in
+                    activityCell(day)
                 }
             }
             .frame(width: gridWidth)
-
             HStack {
                 Text(activity.first.map { dateLabel($0.date) } ?? "—")
                 Spacer()
-                Text(activity.last.map { dateLabel($0.date) } ?? "—")
+                if activity.count > 1 { Text(activity.last.map { dateLabel($0.date) } ?? "—") }
             }
-            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .font(MonitorDesktopTypography.metadata)
             .foregroundStyle(MonitorDesktopTheme.faintText)
             .frame(width: gridWidth)
         }
         .frame(maxWidth: .infinity)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hoveredDate)
-        .onChange(of: activity.map(\.date)) { _ in
-            cancelHover()
-        }
-        .onDisappear(perform: cancelHover)
+        .animation(reduceMotion ? nil : AnalysisActivityStyle.hoverAnimation, value: hoveredDate)
+        .animation(reduceMotion ? nil : AnalysisMotion.data, value: activity.map(\.tokens))
+        .onChange(of: activity.map(\.date)) { _ in hoveredDate = nil }
+        .onDisappear { hoveredDate = nil }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Token 活动热力图")
     }
@@ -5987,78 +6120,36 @@ private struct TokenActivityHeatmap: View {
     @ViewBuilder
     private func activityCell(_ day: DailyTokenActivity?) -> some View {
         if let day {
-            let selected = hoveredDate == day.date
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(cellColor(tokens: day.tokens))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(
-                            selected ? Color.cyan.opacity(0.95) : Color.white.opacity(0.06),
-                            lineWidth: selected ? 1.2 : 0.5
-                        )
-                }
+            let level = ActivityHeatmapScale.level(value: Double(day.tokens), maximum: maximum)
+            AnalysisActivityMark(active: day.tokens > 0, opacity: ActivityHeatmapPalette.opacity(for: level), selected: hoveredDate == day.date)
                 .frame(width: Self.cellSize, height: Self.cellSize)
                 .contentShape(Rectangle())
-                .onHover { hovering in
-                    scheduleHover(day: day, hovering: hovering)
+                .onHover { inside in
+                    if inside { hoveredDate = day.date }
+                    else if hoveredDate == day.date { hoveredDate = nil }
                 }
                 .accessibilityElement()
                 .accessibilityLabel(dateLabel(day.date))
-                .accessibilityValue(compactTokens(day.tokens))
+                .accessibilityValue(detail(day))
         } else {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(Color.white.opacity(0.025))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(
-                            Color.white.opacity(0.12),
-                            style: StrokeStyle(lineWidth: 0.6, dash: [2, 2])
-                        )
-                }
-                .frame(width: Self.cellSize, height: Self.cellSize)
-                .accessibilityHidden(true)
+            Color.clear.frame(width: Self.cellSize, height: Self.cellSize).accessibilityHidden(true)
         }
     }
 
     private var paddedActivity: [DailyTokenActivity?] {
         guard !activity.isEmpty else { return [] }
-        let padding = TokenActivityLayout.placeholderCount(for: activity.count)
+        let padding = (visibleColumns - activity.count % visibleColumns) % visibleColumns
         return Array(repeating: nil, count: padding) + activity.map(Optional.some)
     }
 
-    private var maximumTokens: Int {
-        max(1, activity.map(\.tokens).max() ?? 0)
-    }
-
+    private var maximum: Double { max(0.000001, Double(activity.map(\.tokens).max() ?? 0)) }
+    private var visibleColumns: Int { TokenActivityLayout.visibleColumns(for: activity.count) }
     private var gridWidth: CGFloat {
-        CGFloat(TokenActivityLayout.columnCount) * Self.cellSize
-            + CGFloat(TokenActivityLayout.columnCount - 1) * Self.spacing
+        max(180, CGFloat(visibleColumns) * Self.cellSize + CGFloat(visibleColumns - 1) * Self.spacing)
     }
 
-    private func cellColor(tokens: Int) -> Color {
-        let level = ActivityHeatmapScale.level(
-            value: Double(tokens),
-            maximum: Double(maximumTokens)
-        )
-        return Color.white.opacity(ActivityHeatmapPalette.opacity(for: level))
-    }
-
-    private func scheduleHover(day: DailyTokenActivity, hovering: Bool) {
-        hoverWorkItem?.cancel()
-        hoverWorkItem = nil
-        guard hovering else {
-            if hoveredDate == day.date { hoveredDate = nil }
-            return
-        }
-        let work = DispatchWorkItem { hoveredDate = day.date }
-        hoverWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-    }
-
-    private func cancelHover() {
-        hoverWorkItem?.cancel()
-        hoverWorkItem = nil
-        hoveredDate = nil
+    private func detail(_ day: DailyTokenActivity) -> String {
+        return dateLabel(day.date) + " · " + AnalysisActivityStyle.tokens(day.tokens)
     }
 
     private func dateLabel(_ date: Date) -> String {
@@ -6067,11 +6158,10 @@ private struct TokenActivityHeatmap: View {
     }
 
     private func compactTokens(_ value: Int) -> String {
-        if value == 0 { return "0 tokens" }
-        if value < 1_000 { return "<1K tokens" }
-        if value >= 1_000_000_000 { return String(format: "%.1fB tokens", Double(value) / 1_000_000_000) }
-        if value >= 1_000_000 { return String(format: "%.1fM tokens", Double(value) / 1_000_000) }
-        return String(format: "%.1fK tokens", Double(value) / 1_000)
+        if value >= 1_000_000_000 { return String(format: "%.1fB Token", Double(value) / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.1fM Token", Double(value) / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1fK Token", Double(value) / 1_000) }
+        return AnalysisActivityStyle.tokens(value)
     }
 }
 
@@ -6080,62 +6170,42 @@ private struct CostActivityHeatmap: View {
     private static let spacing: CGFloat = 5
 
     let activity: [DailyCostActivity]
+    let tokenActivity: [DailyTokenActivity]
     let reduceMotion: Bool
-
     @State private var hoveredDate: Date?
-    @State private var hoverWorkItem: DispatchWorkItem?
+
+    private var hovered: DailyCostActivity? { activity.first { $0.date == hoveredDate } }
 
     var body: some View {
-        VStack(spacing: 6) {
-            ZStack(alignment: .topTrailing) {
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.fixed(Self.cellSize), spacing: Self.spacing),
-                        count: TokenActivityLayout.columnCount
-                    ),
-                    spacing: Self.spacing
-                ) {
-                    ForEach(Array(paddedActivity.enumerated()), id: \.offset) { _, day in
-                        activityCell(day)
-                    }
-                }
-                .padding(.top, 32)
-
-                if let hovered = activity.first(where: { $0.date == hoveredDate }) {
-                    Text("\(dateLabel(hovered.date)) · \(compactDollars(hovered.dollars))")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(MonitorDesktopTheme.primaryText)
-                        .padding(.horizontal, 7)
-                        .frame(height: 24)
-                        .background(Color.black.opacity(0.90), in: Capsule())
-                        .overlay {
-                            Capsule().strokeBorder(Color.cyan.opacity(0.34), lineWidth: 0.6)
-                        }
-                        .transition(.opacity)
-                } else {
-                    Text("悬停查看日期与成本")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MonitorDesktopTheme.faintText)
-                        .frame(height: 24)
+        VStack(spacing: 10) {
+            AnalysisActivityReadout(
+                label: "按天 · 颜色表示成本",
+                value: hovered.map(detail) ?? "峰值 " + AnalysisActivityStyle.dollars(activity.map(\.dollars).max() ?? 0),
+                selected: hovered != nil
+            )
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.fixed(Self.cellSize), spacing: Self.spacing), count: visibleColumns),
+                spacing: Self.spacing
+            ) {
+                ForEach(Array(paddedActivity.enumerated()), id: \.offset) { _, day in
+                    activityCell(day)
                 }
             }
             .frame(width: gridWidth)
-
             HStack {
                 Text(activity.first.map { dateLabel($0.date) } ?? "—")
                 Spacer()
-                Text(activity.last.map { dateLabel($0.date) } ?? "—")
+                if activity.count > 1 { Text(activity.last.map { dateLabel($0.date) } ?? "—") }
             }
-            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .font(MonitorDesktopTypography.metadata)
             .foregroundStyle(MonitorDesktopTheme.faintText)
             .frame(width: gridWidth)
         }
         .frame(maxWidth: .infinity)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hoveredDate)
-        .onChange(of: activity.map(\.date)) { _ in
-            cancelHover()
-        }
-        .onDisappear(perform: cancelHover)
+        .animation(reduceMotion ? nil : AnalysisActivityStyle.hoverAnimation, value: hoveredDate)
+        .animation(reduceMotion ? nil : AnalysisMotion.data, value: activity.map(\.dollars))
+        .onChange(of: activity.map(\.date)) { _ in hoveredDate = nil }
+        .onDisappear { hoveredDate = nil }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("成本活动热力图")
     }
@@ -6143,199 +6213,54 @@ private struct CostActivityHeatmap: View {
     @ViewBuilder
     private func activityCell(_ day: DailyCostActivity?) -> some View {
         if let day {
-            let selected = hoveredDate == day.date
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(cellColor(dollars: day.dollars))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(
-                            selected ? Color.cyan.opacity(0.95) : Color.white.opacity(0.06),
-                            lineWidth: selected ? 1.2 : 0.5
-                        )
-                }
+            let level = ActivityHeatmapScale.level(value: Double(day.dollars), maximum: maximum)
+            AnalysisActivityMark(active: day.dollars > 0, opacity: ActivityHeatmapPalette.opacity(for: level), selected: hoveredDate == day.date)
                 .frame(width: Self.cellSize, height: Self.cellSize)
                 .contentShape(Rectangle())
-                .onHover { hovering in
-                    scheduleHover(day: day, hovering: hovering)
+                .onHover { inside in
+                    if inside { hoveredDate = day.date }
+                    else if hoveredDate == day.date { hoveredDate = nil }
                 }
                 .accessibilityElement()
                 .accessibilityLabel(dateLabel(day.date))
-                .accessibilityValue(compactDollars(day.dollars))
+                .accessibilityValue(detail(day))
         } else {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(Color.white.opacity(0.025))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(
-                            Color.white.opacity(0.12),
-                            style: StrokeStyle(lineWidth: 0.6, dash: [2, 2])
-                        )
-                }
-                .frame(width: Self.cellSize, height: Self.cellSize)
-                .accessibilityHidden(true)
+            Color.clear.frame(width: Self.cellSize, height: Self.cellSize).accessibilityHidden(true)
         }
     }
 
     private var paddedActivity: [DailyCostActivity?] {
         guard !activity.isEmpty else { return [] }
-        let padding = TokenActivityLayout.placeholderCount(for: activity.count)
+        let padding = (visibleColumns - activity.count % visibleColumns) % visibleColumns
         return Array(repeating: nil, count: padding) + activity.map(Optional.some)
     }
 
-    private var maximumDollars: Double {
-        max(0.000_001, activity.map(\.dollars).max() ?? 0)
-    }
-
+    private var maximum: Double { max(0.000001, Double(activity.map(\.dollars).max() ?? 0)) }
+    private var visibleColumns: Int { TokenActivityLayout.visibleColumns(for: activity.count) }
     private var gridWidth: CGFloat {
-        CGFloat(TokenActivityLayout.columnCount) * Self.cellSize
-            + CGFloat(TokenActivityLayout.columnCount - 1) * Self.spacing
+        max(180, CGFloat(visibleColumns) * Self.cellSize + CGFloat(visibleColumns - 1) * Self.spacing)
     }
 
-    private func cellColor(dollars: Double) -> Color {
-        let level = ActivityHeatmapScale.level(value: dollars, maximum: maximumDollars)
-        return Color.white.opacity(ActivityHeatmapPalette.opacity(for: level))
-    }
-
-    private func scheduleHover(day: DailyCostActivity, hovering: Bool) {
-        hoverWorkItem?.cancel()
-        hoverWorkItem = nil
-        guard hovering else {
-            if hoveredDate == day.date { hoveredDate = nil }
-            return
+    private func detail(_ day: DailyCostActivity) -> String {
+        var value = dateLabel(day.date) + " · " + AnalysisActivityStyle.dollars(day.dollars)
+        if let tokens = tokenActivity.first(where: { $0.date == day.date })?.tokens {
+            value += " · " + AnalysisActivityStyle.tokens(tokens)
         }
-        let work = DispatchWorkItem { hoveredDate = day.date }
-        hoverWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-    }
-
-    private func cancelHover() {
-        hoverWorkItem?.cancel()
-        hoverWorkItem = nil
-        hoveredDate = nil
+        return value
     }
 
     private func dateLabel(_ date: Date) -> String {
         let calendar = Calendar.current
         return "\(calendar.component(.month, from: date))/\(calendar.component(.day, from: date))"
     }
-
-    private func compactDollars(_ value: Double) -> String {
-        if value == 0 { return "US$0" }
-        if value < 1 { return String(format: "US$%.4f", value) }
-        return String(format: "US$%.2f", value)
-    }
 }
 
 private struct UsageTrendChart: View {
     let values: [Double]
     let period: UsageTrendPeriod
-    @State private var hoveredIndex: Int?
-
     var body: some View {
-        GeometryReader { proxy in
-            let points = UsageTrendGeometry.points(values: values, in: proxy.size)
-            ZStack {
-                VStack(spacing: 0) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        Rectangle()
-                            .fill(.white.opacity(0.045))
-                            .frame(height: 0.5)
-                        Spacer(minLength: 0)
-                    }
-                }
-
-                if values.contains(where: { $0 > 0 }) {
-                    UsageTrendArea(points: points)
-                        .fill(
-                            LinearGradient(
-                                colors: [.cyan.opacity(0.24), .cyan.opacity(0.07), .clear],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-
-                    UsageTrendLine(points: points)
-                        .stroke(
-                            LinearGradient(
-                                colors: [.cyan.opacity(0.68), .cyan],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ),
-                            style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
-                        )
-                        .shadow(color: .cyan.opacity(0.28), radius: 2)
-
-                    if let endpoint = points.last {
-                        Circle()
-                            .fill(.cyan.opacity(0.18))
-                            .frame(width: 13, height: 13)
-                            .blur(radius: 1.5)
-                            .position(endpoint)
-                        Circle()
-                            .fill(.cyan)
-                            .frame(width: 5.5, height: 5.5)
-                            .overlay(Circle().stroke(.white.opacity(0.42), lineWidth: 0.7))
-                            .shadow(color: .cyan.opacity(0.75), radius: 3)
-                            .position(endpoint)
-                    }
-
-                    if let hoveredIndex,
-                       values.indices.contains(hoveredIndex),
-                       points.indices.contains(hoveredIndex) {
-                        let point = points[hoveredIndex]
-                        Rectangle()
-                            .fill(.white.opacity(0.13))
-                            .frame(width: 0.7, height: max(1, proxy.size.height - 18))
-                            .position(x: point.x, y: proxy.size.height / 2 + 9)
-
-                        Circle()
-                            .fill(.black)
-                            .frame(width: 9, height: 9)
-                            .overlay(Circle().stroke(.cyan, lineWidth: 2))
-                            .shadow(color: .cyan.opacity(0.8), radius: 4)
-                            .position(point)
-
-                        Text("\(bucketLabel(for: hoveredIndex)) · \(compactTokens(values[hoveredIndex])) tokens")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .lineLimit(1)
-                            .padding(.horizontal, 6)
-                            .frame(height: 24)
-                            .background(.black.opacity(0.92), in: Capsule(style: .continuous))
-                            .overlay {
-                                Capsule(style: .continuous)
-                                    .strokeBorder(.cyan.opacity(0.28), lineWidth: 0.6)
-                            }
-                            .fixedSize()
-                            .position(
-                                x: tooltipX(point.x, width: proxy.size.width),
-                                y: 12
-                            )
-                    }
-                } else {
-                    Text("当前周期暂无 Token 记录")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case let .active(location):
-                    guard !points.isEmpty else {
-                        hoveredIndex = nil
-                        return
-                    }
-                    let denominator = max(1, points.count - 1)
-                    let ratio = min(1, max(0, location.x / max(1, proxy.size.width)))
-                    hoveredIndex = min(points.count - 1, max(0, Int((ratio * CGFloat(denominator)).rounded())))
-                case .ended:
-                    hoveredIndex = nil
-                }
-            }
-        }
-        .accessibilityLabel("Token 使用趋势")
+        AnalysisSmoothTrendPlot(values: values, labels: values.indices.map { bucketLabel(for: $0) }, isCost: false)
+            .accessibilityLabel("Token 使用趋势")
     }
 
     private func bucketLabel(for index: Int) -> String {
@@ -6346,73 +6271,33 @@ private struct UsageTrendChart: View {
             let today = calendar.startOfDay(for: now)
             let start = calendar.date(byAdding: .day, value: -6, to: today) ?? today
             let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
-            return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
+            return "\(calendar.component(.month, from: date))/\(calendar.component(.day, from: date))"
         case .month:
             let today = calendar.startOfDay(for: now)
             let start = calendar.date(byAdding: .day, value: -29, to: today) ?? today
             let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
-            return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
+            return "\(calendar.component(.month, from: date))/\(calendar.component(.day, from: date))"
         case .quarter:
             let today = calendar.startOfDay(for: now)
             let start = calendar.date(byAdding: .day, value: -89, to: today) ?? today
             let date = calendar.date(byAdding: .day, value: index, to: start) ?? start
-            return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
+            return "\(calendar.component(.month, from: date))/\(calendar.component(.day, from: date))"
         }
     }
 
-    private func compactTokens(_ value: Double) -> String {
-        if value >= 1_000_000_000 { return String(format: "%.2fB", value / 1_000_000_000) }
-        if value >= 1_000_000 { return String(format: "%.2fM", value / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.1fK", value / 1_000) }
-        return String(format: "%.0f", value)
-    }
-
-    private func tooltipX(_ pointX: CGFloat, width: CGFloat) -> CGFloat {
-        // The capsule is at most about 120pt wide at menu scale. Keep its
-        // center away from either card edge without affecting point selection.
-        min(max(pointX, 62), max(62, width - 62))
-    }
 }
 
 private enum UsageTrendGeometry {
     static func points(values: [Double], in size: CGSize) -> [CGPoint] {
         guard !values.isEmpty else { return [] }
-        // Reserve the first 17pt for the hover value capsule.
-        let top: CGFloat = 19
+        let top: CGFloat = 5
         let bottom = max(top, size.height - 3)
-        let maximum = max(1, values.max() ?? 0)
+        let maximum = max(0.000001, values.max() ?? 0)
         let denominator = max(1, values.count - 1)
         return values.indices.map { index in
-            let x = size.width * CGFloat(index) / CGFloat(denominator)
+            let x = 3 + max(0, size.width - 6) * CGFloat(index) / CGFloat(denominator)
             let ratio = CGFloat(max(0, values[index]) / maximum)
             return CGPoint(x: x, y: bottom - (bottom - top) * ratio)
         }
-    }
-}
-
-private struct UsageTrendLine: Shape {
-    let points: [CGPoint]
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard let first = points.first else { return path }
-        path.move(to: first)
-        for point in points.dropFirst() { path.addLine(to: point) }
-        return path
-    }
-}
-
-private struct UsageTrendArea: Shape {
-    let points: [CGPoint]
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard let first = points.first, let last = points.last else { return path }
-        path.move(to: CGPoint(x: first.x, y: rect.maxY))
-        path.addLine(to: first)
-        for point in points.dropFirst() { path.addLine(to: point) }
-        path.addLine(to: CGPoint(x: last.x, y: rect.maxY))
-        path.closeSubpath()
-        return path
     }
 }

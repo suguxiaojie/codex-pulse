@@ -461,6 +461,11 @@ struct MonitoredTask: Identifiable, Equatable {
     var toolName: String?
     var phase: TaskPhase
     var updatedAt: Date
+    /// A phase label alone is not completion evidence (e.g. SubagentStop).
+    var confirmsTurnEnd = false
+    var reasoningEffort: String? = nil
+    var startedAt: Date? = nil
+    var hookEventName: String? = nil
 }
 
 enum SessionActivityKind: String, Equatable {
@@ -639,7 +644,10 @@ enum HookEventMapper {
             model: event.model,
             toolName: event.toolName,
             phase: phase(for: event.hookEventName),
-            updatedAt: event.receivedAt
+            updatedAt: event.receivedAt,
+            confirmsTurnEnd: event.turnID?.isEmpty == false
+                && ["Stop", "SessionEnd"].contains(event.hookEventName),
+            hookEventName: event.hookEventName
         )
     }
 }

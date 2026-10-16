@@ -483,7 +483,7 @@ final class SessionImportService: @unchecked Sendable {
         var ids = Set<String>()
         for root in roots where fileManager.fileExists(atPath: root.path) {
             guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
-            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+            for case let url as URL in enumerator where RolloutReader.isRollout(url) {
                 if let id = SessionContinuityService.parseThreadEnvelope(at: url)?.id { ids.insert(id) }
             }
         }

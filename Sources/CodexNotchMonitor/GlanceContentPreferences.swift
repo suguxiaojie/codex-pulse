@@ -118,19 +118,14 @@ struct GlanceContentSettingsView: View {
         VStack(spacing: 0) {
             previewStatusBar
 
-            Picker("面板设置分组", selection: $selectedSection) {
-                ForEach(GlanceSettingsSection.allCases) { section in
-                    Text(section.rawValue).tag(section)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .accessibilityLabel("面板设置分组")
-            .controlSize(.regular)
-            .frame(maxWidth: 320)
+            AnalysisPeriodPicker(options: GlanceSettingsSection.allCases.map(\.rawValue), selection: Binding(
+                get: { selectedSection.rawValue },
+                set: { if let section = GlanceSettingsSection(rawValue: $0) { selectedSection = section } }
+            ), accessibilityTitle: "面板设置分组")
+            .frame(width: 200)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 24)
-            .padding(.vertical, 16)
+            .padding(.vertical, 14)
 
             divider
 
@@ -357,18 +352,13 @@ struct GlanceContentSettingsView: View {
                 }
                 Spacer()
                 Text("\(Int((surfaceOpacity * 100).rounded()))%")
-                    .font(MonitorDesktopTypography.rowTitle)
+                    .font(.system(size: 23, weight: .semibold))
                     .monospacedDigit()
+                    .contentTransition(.numericText())
             }
-            Slider(
-                value: $surfaceOpacity,
-                in: 0.10...0.90,
-                step: 0.01,
-                onEditingChanged: { isAdjustingOpacity = $0 }
-            )
-            .tint(MonitorDesktopTheme.selection)
-            .accessibilityLabel("背景不透明度")
-            .accessibilityValue("\(Int((surfaceOpacity * 100).rounded()))%")
+            IslandSettingsSlider(value: $surfaceOpacity, range: 0.10...0.90, step: 0.01,
+                                 title: "背景不透明度", onEditingChanged: { isAdjustingOpacity = $0 })
+                .accessibilityValue("\(Int((surfaceOpacity * 100).rounded()))%")
             HStack {
                 Text("更透明")
                 Spacer()
@@ -379,13 +369,7 @@ struct GlanceContentSettingsView: View {
             .accessibilityHidden(true)
         }
         .padding(20)
-        .background(
-            MonitorDesktopTheme.cardFill,
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(MonitorDesktopTheme.separator, lineWidth: 1)
-        }
+        .background(.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.065), lineWidth: 0.7))
     }
 }

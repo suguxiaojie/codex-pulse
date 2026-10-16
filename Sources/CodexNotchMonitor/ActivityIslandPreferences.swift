@@ -1,12 +1,39 @@
 import Foundation
+import SwiftUI
+
+enum ActivityIslandMaterial: String, CaseIterable, Identifiable {
+    case liquidGlass, classic
+    var id: String { rawValue }
+    var title: String { self == .liquidGlass ? "液态玻璃" : "经典纯色" }
+}
+
+enum ActivityIslandProgressEffect: String, CaseIterable, Identifiable {
+    case stateSmoke, dropField, sloshFlow
+    var id: String { rawValue }
+    var shaderIndex: Float { self == .stateSmoke ? 0 : self == .dropField ? 2 : 3 }
+    var title: String { self == .stateSmoke ? "状态烟雾" : self == .dropField ? "量子噪点" : "液态涌浪" }
+    var asset: String { self == .stateSmoke ? "StateSmoke" : self == .dropField ? "QuantumNoise" : "LiquidWave" }
+}
+
+enum ActivityIslandGlassDegree {
+    static func normalized(_ value: Double) -> Double { value.isFinite ? min(0.8, max(0.2, value)) : 0.45 }
+    static func gradientStops(_ value: Double) -> [Gradient.Stop] {
+        let blackEnd = 1 - normalized(value)
+        let fadeEnd = blackEnd + (1 - blackEnd) * 0.7
+        return [.init(color: .black, location: 0)] + (0...16).map { index in
+            let t = Double(index) / 16
+            let eased = t * t * t * (t * (t * 6 - 15) + 10)
+            return .init(color: .black.opacity(1 - eased), location: blackEnd + (fadeEnd - blackEnd) * t)
+        } + [.init(color: .clear, location: 1)]
+    }
+}
+
 
 extension Notification.Name {
     static let activityIslandPreferencesDidChange = Notification.Name(
         "CodexMonitor.activityIslandPreferencesDidChange"
     )
-    static let activitySettingsPreviewVisibilityDidChange = Notification.Name(
-        "CodexMonitor.activitySettingsPreviewVisibilityDidChange"
-    )
+
 }
 
 enum ActivityIslandPreferenceSignal {
@@ -18,34 +45,6 @@ enum ActivityIslandPreferenceSignal {
     }
 }
 
-enum ActivityIslandPreferenceKey {
-    static let enabled = "activityIsland.enabled"
-    static let mode = "activityIsland.mode"
-    static let menuBarDensity = "activityIsland.menuBarDensity"
-    static let screen = "activityIsland.screen"
-    static let position = "activityIsland.position"
-    static let visualStyle = "activityIsland.visualStyle"
-    static let surfaceOpacity = "activityIsland.surfaceOpacity"
-    static let surfaceScale = "activityIsland.surfaceScale"
-    static let expandedHold = "activityIsland.expandedHold"
-    static let compactHide = "activityIsland.compactHide"
-    static let reduceMotion = "activityIsland.reduceMotion"
-    static let showCompletion = "activityIsland.showCompletion"
-}
-
-enum ActivityIslandMode: String, CaseIterable, Identifiable {
-    case floating
-    case menuBar
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .floating: return "浮动状态岛"
-        case .menuBar: return "仅菜单栏"
-        }
-    }
-}
-
 enum MenuBarInformationDensity: String, CaseIterable, Identifiable {
     case automatic
     case detailed
@@ -53,6 +52,8 @@ enum MenuBarInformationDensity: String, CaseIterable, Identifiable {
     case iconOnly
 
     var id: String { rawValue }
+    var settingsValue: String { self == .detailed ? Self.automatic.rawValue : rawValue }
+    static let settingsCases: [Self] = [.automatic, .compact, .iconOnly]
 
     var title: String {
         switch self {
@@ -71,194 +72,57 @@ enum MenuBarOverflow: String, CaseIterable, Identifiable {
     static let preferenceKey = "activityIsland.menuBarOverflow"
 }
 
-enum ActivityIslandScreenMode: String, CaseIterable, Identifiable {
-    case automatic
-    case main
-    case notched
 
+// Retired settings keys remain readable for compatibility; saved values are never rewritten.
+// The status item now always shows quota as a ring and percentage.
+struct MenuBarPreferences: Equatable {
+    static let densityKey = "activityIsland.menuBarDensity"
+    static let activityKey = "menuBar.showsTaskActivity"
+    var menuBarDensity: MenuBarInformationDensity = .automatic
+    var menuBarOverflow: MenuBarOverflow = .rotate
+    var routesTaskStateToMenuBar = false
+    static func load(from defaults: UserDefaults = .standard) -> Self { Self() }
+}
+
+enum ActivityIslandPreferenceKey {
+    static let floatingUsageEnabled = "activityIsland.floatingUsageEnabled"
+    static let usageCapsuleTone = "activityIsland.usageCapsuleTone"
+    static let expandedHold = "activityIsland.expandedHold"
+    static let material = "activityIsland.material"
+    static let glassDegree = "activityIsland.glassDegree"
+    static let expandedWidth = "activityIsland.expandedWidth"
+    static let privacyMode = "activityIsland.privacyMode"
+    static let automaticPopup = "activityIsland.automaticPopup"
+    static let progressEffect = "activityIsland.progressEffect"
+}
+
+enum ActivityIslandUsageCapsuleTone: String, CaseIterable, Identifiable {
+    case dark, light
     var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .automatic: return "自动"
-        case .main: return "主显示器"
-        case .notched: return "刘海显示器"
-        }
-    }
-}
-
-enum ActivityIslandPosition: String, CaseIterable, Identifiable {
-    case leading
-    case center
-    case trailing
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .leading: return "左侧"
-        case .center: return "居中"
-        case .trailing: return "右侧"
-        }
-    }
-}
-
-enum ActivityIslandVisualStyle: String, CaseIterable, Identifiable {
-    case rippleGlow
-    case particleOrb
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .rippleGlow: return "Ripple Glow"
-        case .particleOrb: return "Particle Orb"
-        }
-    }
-}
-
-enum ActivityIslandPlacementPolicy {
-    static let maximumNotchLift: CGFloat = 18
-    static let readableContentSafety: CGFloat = 10
-
-    static func notchLift(safeAreaTop: CGFloat) -> CGFloat {
-        guard safeAreaTop > 0 else { return 0 }
-        return min(
-            maximumNotchLift,
-            max(0, safeAreaTop - readableContentSafety)
-        )
-    }
-}
-
-enum ActivityIslandScreenSelectionPolicy {
-    static func targetDisplayID(
-        mode: ActivityIslandScreenMode,
-        activeDisplayID: UInt32?,
-        primaryDisplayID: UInt32?,
-        notchedDisplayIDs: [UInt32],
-        availableDisplayIDs: [UInt32]
-    ) -> UInt32? {
-        let available = Set(availableDisplayIDs)
-        func connected(_ displayID: UInt32?) -> UInt32? {
-            guard let displayID, available.contains(displayID) else { return nil }
-            return displayID
-        }
-
-        switch mode {
-        case .automatic:
-            return connected(activeDisplayID)
-                ?? connected(primaryDisplayID)
-                ?? availableDisplayIDs.first
-        case .main:
-            return connected(primaryDisplayID)
-                ?? connected(activeDisplayID)
-                ?? availableDisplayIDs.first
-        case .notched:
-            return notchedDisplayIDs.first(where: available.contains)
-                ?? connected(primaryDisplayID)
-                ?? connected(activeDisplayID)
-                ?? availableDisplayIDs.first
-        }
-    }
-}
-
-enum ActivityIslandMotionPolicy {
-    static func isReduced(
-        systemPreference: Bool,
-        appPreference: Bool
-    ) -> Bool {
-        systemPreference || appPreference
-    }
 }
 
 struct ActivityIslandPreferences: Equatable {
-    var enabled: Bool
-    var mode: ActivityIslandMode
-    var menuBarDensity: MenuBarInformationDensity
-    var screen: ActivityIslandScreenMode
-    var position: ActivityIslandPosition
-    var visualStyle: ActivityIslandVisualStyle
-    var surfaceOpacity: Double
-    var surfaceScale: Double
-    var expandedHold: TimeInterval
-    var compactHide: TimeInterval
-    var reduceMotion: Bool
-    var showCompletion: Bool
-    var menuBarOverflow: MenuBarOverflow = .rotate
-
-    var showsFloatingIsland: Bool {
-        enabled && mode == .floating
-    }
-
-    var routesTaskStateToMenuBar: Bool {
-        enabled && mode == .menuBar
-    }
-
-    static let defaults = ActivityIslandPreferences(
-        enabled: true,
-        mode: .floating,
-        menuBarDensity: .automatic,
-        screen: .automatic,
-        position: .center,
-        visualStyle: .rippleGlow,
-        surfaceOpacity: 0.38,
-        surfaceScale: 1.00,
-        expandedHold: 8,
-        compactHide: 120,
-        reduceMotion: false,
-        showCompletion: true
-    )
-
-    static func load(from defaults: UserDefaults = .standard) -> ActivityIslandPreferences {
-        let registered = Self.defaults
-        return ActivityIslandPreferences(
-            enabled: defaults.object(forKey: ActivityIslandPreferenceKey.enabled) as? Bool
-                ?? registered.enabled,
-            mode: ActivityIslandMode(
-                rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.mode) ?? ""
-            ) ?? registered.mode,
-            menuBarDensity: MenuBarInformationDensity(
-                rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.menuBarDensity) ?? ""
-            ) ?? registered.menuBarDensity,
-            screen: ActivityIslandScreenMode(
-                rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.screen) ?? ""
-            ) ?? registered.screen,
-            position: ActivityIslandPosition(
-                rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.position) ?? ""
-            ) ?? registered.position,
-            visualStyle: ActivityIslandVisualStyle(
-                rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.visualStyle) ?? ""
-            ) ?? registered.visualStyle,
-            surfaceOpacity: clamped(
-                defaults.object(forKey: ActivityIslandPreferenceKey.surfaceOpacity) as? Double
-                    ?? registered.surfaceOpacity,
-                lower: 0.10,
-                upper: 0.90
-            ),
-            surfaceScale: clamped(
-                defaults.object(forKey: ActivityIslandPreferenceKey.surfaceScale) as? Double
-                    ?? registered.surfaceScale,
-                lower: 0.25,
-                upper: 1.25
-            ),
-            expandedHold: clamped(
-                defaults.object(forKey: ActivityIslandPreferenceKey.expandedHold) as? Double
-                    ?? registered.expandedHold,
-                lower: 5,
-                upper: 60
-            ),
-            compactHide: clamped(
-                defaults.object(forKey: ActivityIslandPreferenceKey.compactHide) as? Double
-                    ?? registered.compactHide,
-                lower: 5,
-                upper: 120
-            ),
-            reduceMotion: defaults.object(forKey: ActivityIslandPreferenceKey.reduceMotion) as? Bool
-                ?? registered.reduceMotion,
-            showCompletion: defaults.object(forKey: ActivityIslandPreferenceKey.showCompletion) as? Bool
-                ?? registered.showCompletion,
-            menuBarOverflow: MenuBarOverflow(rawValue: defaults.string(forKey: MenuBarOverflow.preferenceKey) ?? "") ?? .rotate
-        )
-    }
-
-    private static func clamped(_ value: Double, lower: Double, upper: Double) -> Double {
-        max(lower, min(upper, value))
+    var expandedHold: TimeInterval = 3
+    var material: ActivityIslandMaterial = .liquidGlass
+    var glassDegree: Double = 0.45
+    var expandedWidth: Double = 680
+    var progressEffect: ActivityIslandProgressEffect = .dropField
+    var privacyMode = false
+    var automaticPopup = true
+    var floatingUsageEnabled = true
+    var usageCapsuleTone: ActivityIslandUsageCapsuleTone = .dark
+    static let defaults = Self()
+    static func normalizedDuration(_ value: Double) -> Double { value.isFinite ? min(10, max(1, value.rounded())) : 3 }
+    static func normalizedWidth(_ value: Double) -> Double { value.isFinite ? min(680, max(560, value)) : 680 }
+    static func load(from defaults: UserDefaults = .standard) -> Self {
+        Self(expandedHold: normalizedDuration(defaults.object(forKey: ActivityIslandPreferenceKey.expandedHold) as? Double ?? 3),
+             material: ActivityIslandMaterial(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.material) ?? "") ?? .liquidGlass,
+             glassDegree: ActivityIslandGlassDegree.normalized(defaults.object(forKey: ActivityIslandPreferenceKey.glassDegree) as? Double ?? 0.45),
+             expandedWidth: normalizedWidth(defaults.object(forKey: ActivityIslandPreferenceKey.expandedWidth) as? Double ?? 680),
+             progressEffect: ActivityIslandProgressEffect(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.progressEffect) ?? "") ?? .dropField,
+             privacyMode: defaults.object(forKey: ActivityIslandPreferenceKey.privacyMode) as? Bool ?? false,
+             automaticPopup: defaults.object(forKey: ActivityIslandPreferenceKey.automaticPopup) as? Bool ?? true,
+             floatingUsageEnabled: defaults.object(forKey: ActivityIslandPreferenceKey.floatingUsageEnabled) as? Bool ?? true,
+             usageCapsuleTone: ActivityIslandUsageCapsuleTone(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.usageCapsuleTone) ?? "") ?? .dark)
     }
 }

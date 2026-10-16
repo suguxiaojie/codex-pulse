@@ -162,7 +162,60 @@ enum PricingCatalogTests {
             "catalog models do not inherit an undocumented surcharge"
         )
 
-        print("Pricing catalog tests passed (27 checks).")
+        await testOfficialPricing()
+        print("Pricing catalog tests passed (official refresh and fallback checks included).")
+    }
+
+    private static func testOfficialPricing() async {
+        let document = try! String(contentsOfFile: "Tests/Fixtures/official-standard-pricing.md", encoding: .utf8)
+        let parsed = OfficialPricingCatalog.parse(document)
+        check(parsed?.rates.count == 7, "parse all supported official Standard models")
+        check(parsed?.rates["gpt-6.1-sol"]?.inputPerMillion == 2, "Batch data cannot override Standard")
+        check(parsed?.multipliers["gpt-6.1-sol"] == .init(inputAndCache: 2, output: 1.5), "read long-context ratios")
+        check(OfficialPricingCatalog.parse(document.replacingOccurrences(of: "### Standard pricing data", with: "### Batch pricing data")) == nil, "reject missing Standard section")
+        check(OfficialPricingCatalog.parse(document.replacingOccurrences(of: "Short context cached input", with: "Other price")) == nil, "reject changed header schema")
+        check(OfficialPricingCatalog.parse(document.replacingOccurrences(of: "| gpt-6-astra |", with: "| missing-model |")) == nil, "reject incomplete official model set")
+        check(OfficialPricingCatalog.parse(document.replacingOccurrences(of: "$10.00", with: "$NaN")) == nil, "reject nonfinite prices")
+        check(OfficialPricingCatalog.parse(document.replacingOccurrences(of: "$10.00", with: "$-10.00")) == nil, "reject negative prices")
+        check(OfficialPricingCatalog.parse(document.replacingOccurrences(of: "≤272K", with: "≤300K")) == nil, "reject unrecognized long-context boundary")
+        let line = document.split(separator: "\n").first { $0.hasPrefix("| gpt-6-astra |") }!
+        check(OfficialPricingCatalog.parse(document.replacingOccurrences(of: "### Batch", with: String(line) + "\n### Batch")) == nil, "reject duplicate model rows")
+        let cache = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".tmp/test-runtime/official-pricing-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let start = Date(timeIntervalSince1970: 1_900_000_000)
+        func response(_ status: Int) -> HTTPURLResponse {
+            HTTPURLResponse(url: OfficialPricingCatalog.endpoint, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["ETag": "official-test"])!
+        }
+        let empty304 = await OfficialPricingCatalog.refreshIfNeeded(now: start, cache: cache, fetch: { _ in (Data(), response(304)) })
+        check(empty304 == .failed, "304 without a usable official cache is not success")
+        let updatedDocument = document.replacingOccurrences(of: "| gpt-6.1-sol | $2.00 | $0.10 | $2.50 | $10.00 | $4.00 | $0.20 | $5.00 | $15.00 |", with: "| gpt-6.1-sol | $3.00 | $0.10 | $2.50 | $10.00 | $9.00 | $0.30 | $7.50 | $15.00 |")
+        let updated = await OfficialPricingCatalog.refreshIfNeeded(now: start.addingTimeInterval(6 * 3600), cache: cache, fetch: { _ in (Data(updatedDocument.utf8), response(200)) })
+        check(updated == .updated, "install successfully parsed official prices")
+        check(ModelPricing.resolvedRates(for: "gpt-6.1-sol")?.inputPerMillion == 3, "online official price overrides bundled snapshot and community")
+        check(ModelPricing.multipliers(for: "gpt-6.1-sol", totalInputTokens: 272001).inputAndCache == 3, "updated official long-context ratio affects calculation")
+        check(ModelPricing.resolvedRates(for: "gpt-5.6")?.outputPerMillion == 20, "legacy alias retains the supported official Sol mapping")
+        let savedStatus = OfficialPricingCatalog.statusText
+        let throttled = await OfficialPricingCatalog.refreshIfNeeded(now: start.addingTimeInterval(7 * 3600), cache: cache, fetch: { _ in fatalError("fresh prices must not trigger a network request") })
+        check(throttled == .notNeeded, "successful official sync is reused for 24 hours")
+        let malformed = await OfficialPricingCatalog.refreshIfNeeded(now: start.addingTimeInterval(31 * 3600), cache: cache, fetch: { _ in (Data("bad document".utf8), response(200)) })
+        check(malformed == .failed, "malformed page cannot replace effective rates")
+        check(ModelPricing.resolvedRates(for: "gpt-6.1-sol")?.inputPerMillion == 3, "last valid official price survives parse failure")
+        check(OfficialPricingCatalog.statusText.hasPrefix(savedStatus), "failure does not advance the successful-sync timestamp")
+        let notModified = await OfficialPricingCatalog.refreshIfNeeded(now: start.addingTimeInterval(38 * 3600), cache: cache, fetch: { request in
+            check(request.value(forHTTPHeaderField: "If-None-Match") == "official-test", "send conditional ETag")
+            return (Data(), response(304))
+        })
+        check(notModified == .unchanged, "304 revalidates an existing official snapshot")
+        check(!OfficialPricingCatalog.statusText.contains("更新失败"), "successful revalidation clears the error status")
+        check(FileManager.default.fileExists(atPath: cache.path), "official prices persist outside account/session storage")
+        let noETagResponse = HTTPURLResponse(url: OfficialPricingCatalog.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+        let withoutETag = await OfficialPricingCatalog.refreshIfNeeded(now: start.addingTimeInterval(63 * 3600), cache: cache, fetch: { _ in (Data(updatedDocument.utf8), noETagResponse) })
+        check(withoutETag == .updated, "accept valid newer document without an ETag")
+        let afterClearedETag = await OfficialPricingCatalog.refreshIfNeeded(now: start.addingTimeInterval(88 * 3600), cache: cache, fetch: { request in
+            check(request.value(forHTTPHeaderField: "If-None-Match") == nil, "new 200 response without ETag clears obsolete conditional tag")
+            return (Data(updatedDocument.utf8), noETagResponse)
+        })
+        check(afterClearedETag == .updated, "continue updating after the server drops ETags")
     }
 
     private static func check(_ condition: @autoclosure () -> Bool, _ label: String) {

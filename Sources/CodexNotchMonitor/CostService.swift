@@ -167,6 +167,7 @@ struct CostScopeSnapshot: Equatable {
     var estimatedModelAliases: [String: String]
     var usage: UsageSnapshot
     var costActivity: [DailyCostActivity]
+    var lifetimeTokens: Int? = nil
 
     func totals(for period: UsagePeriod) -> CostTotals {
         switch period {
@@ -268,6 +269,7 @@ final class CostService {
 
     init() {
         PricingCatalog.prepare()
+        OfficialPricingCatalog.prepare()
     }
 
     func fetch(
@@ -297,7 +299,7 @@ final class CostService {
             DispatchQueue.main.async { completion(snapshot) }
 
             let extendedEvents = Self.remapEvents(
-                Self.scanCodex(lookbackDays: 180),
+                Self.scanCodex(lookbackDays: nil),
                 sessionPathOverrides: sessionPathOverrides,
                 catalog: catalog
             )
@@ -313,7 +315,10 @@ final class CostService {
             // public pricing in the background, then recalculate only when a
             // new catalog was actually installed.
             Task {
-                guard await PricingCatalog.refreshIfNeeded() == .updated else { return }
+                async let official = OfficialPricingCatalog.refreshIfNeeded()
+                async let community = PricingCatalog.refreshIfNeeded()
+                let results = await (official, community)
+                guard results.0 != .notNeeded || results.1 != .notNeeded else { return }
                 self.queue.async {
                     let refreshed = Self.summarize(
                         extendedEvents,
@@ -367,16 +372,16 @@ final class CostService {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         now: Date = Date(),
         calendar: Calendar = .current,
-        lookbackDays: Int = 180
+        lookbackDays: Int? = 180
     ) -> [TokenUsageEvent] {
         let root = homeDirectory.appendingPathComponent(".codex/sessions", isDirectory: true)
         let todayStart = calendar.startOfDay(for: now)
         let activityStart = calendar.date(
             byAdding: .day,
-            value: -(max(1, lookbackDays) - 1),
+            value: -(max(1, lookbackDays ?? 180) - 1),
             to: todayStart
         ) ?? todayStart
-        let earliestRelevantDate = activityStart
+        let earliestRelevantDate = lookbackDays == nil ? Date.distantPast : activityStart
         // A thread can continue receiving token events long after the month in
         // which its rollout file was created. Filter the complete live tree by
         // modification time so rolling windows do not omit such long-running
@@ -395,6 +400,8 @@ final class CostService {
         let archivedFiles = jsonlFiles(in: archiveRoot).filter {
             modificationDate(of: $0) >= earliestRelevantDate
         }
+        // A resumed plain file may contain newer events while a compressed
+        // sibling retains older history. Merge records, not filename stems.
         let events = (liveFiles + archivedFiles).flatMap(cachedParseCodexFile)
         return deduplicated(events)
     }
@@ -462,7 +469,7 @@ final class CostService {
         var sessionID = url.deletingPathExtension().lastPathComponent
         var projectPath = "未归类"
         var result: [TokenUsageEvent] = []
-        relevantLines(at: url) { row in
+        let consume: (Data) -> Void = { row in
             guard let object = try? JSONSerialization.jsonObject(with: row) as? [String: Any],
                   let type = object["type"] as? String,
                   let payload = object["payload"] as? [String: Any]
@@ -500,6 +507,16 @@ final class CostService {
                 cacheRead: cached
             ))
         }
+        if RolloutReader.isCompressed(url) {
+            let markers = ["session_meta", "turn_context", "token_count"].map { Data(("\"" + $0 + "\"").utf8) }
+            do {
+                try RolloutReader.forEachLine(at: url) { row in
+                    guard markers.contains(where: { row.range(of: $0) != nil }) else { return }
+                    consume(row)
+                }
+            }
+            catch { return [] }
+        } else { relevantLines(at: url, body: consume) }
         return result
     }
 
@@ -575,7 +592,7 @@ final class CostService {
             options: [.skipsHiddenFiles]
         ) else { return [] }
         return enumerator.compactMap { item -> URL? in
-            guard let url = item as? URL, url.pathExtension == "jsonl",
+            guard let url = item as? URL, RolloutReader.isRollout(url),
                   let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                   values.isRegularFile == true
             else { return nil }
@@ -736,7 +753,13 @@ final class CostService {
             ),
             costActivity: includeActivity
                 ? dailyCostActivity(costByDay, now: now, calendar: calendar)
-                : []
+                : [],
+            lifetimeTokens: includeActivity ? events.filter { include($0) && $0.timestamp <= now }.reduce(0) { total, event in
+                [event.input, event.output, event.cacheCreate, event.cacheRead].reduce(total) { sum, count in
+                    let next = sum.addingReportingOverflow(max(0, count))
+                    return next.overflow ? Int.max : next.partialValue
+                }
+            } : nil
         )
     }
 

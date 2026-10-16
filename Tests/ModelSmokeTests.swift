@@ -4,7 +4,27 @@ import SQLite3
 
 @main
 enum ModelSmokeTests {
+    private static var checks = 0
     static func main() {
+        let usageNow = ISO8601DateFormatter().date(from: "2026-10-16T12:00:00Z")!
+        let officialUsage = AccountUsageSnapshot.parse([
+            "summary": ["lifetimeTokens": 900],
+            "dailyUsageBuckets": [
+                ["startDate": "2026-10-16", "tokens": 100],
+                ["startDate": "2026-10-16", "tokens": 100],
+                ["startDate": "2026-09-17", "tokens": 50],
+                ["startDate": "2026-09-16", "tokens": 200],
+                ["startDate": "2026-10-17", "tokens": 999],
+                ["startDate": "invalid", "tokens": 99],
+                ["startDate": "2026-10-15", "tokens": -2]
+            ], "threadUsage": ["ignored": "not retained"]
+        ], now: usageNow)
+        check(officialUsage?.lifetimeTokens == 900, "official lifetime uses account summary")
+        check(officialUsage?.days?.count == 3 && officialUsage?.monthlyTokens == 150,
+            "official history deduplicates dates, bounds thirty days, ignores future and invalid values")
+        check(officialUsage?.recentTokens == 100, "official latest-day value follows newest valid bucket")
+        check(AccountUsageSnapshot.parse([:]) == nil, "unavailable official usage falls back without inventing zero")
+        check(AccountUsageSnapshot.parse(["summary": ["lifetimeTokens": true]]) == nil, "boolean is not a token count")
         let resolvedCodex = CodexAppServerClient.resolveCodexExecutable()
         check(
             resolvedCodex?.path == "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
@@ -190,12 +210,6 @@ enum ModelSmokeTests {
             "reset-credit request lets the backend select a credit when details are absent"
         )
 
-        let idleGlow = RippleGlowStyles.style(for: nil)
-        let workingGlow = RippleGlowStyles.style(for: .working)
-        let toolGlow = RippleGlowStyles.style(for: .usingTool)
-        let approvalGlow = RippleGlowStyles.style(for: .waitingApproval)
-        let failedGlow = RippleGlowStyles.style(for: .failed)
-        let endedGlow = RippleGlowStyles.style(for: .ended)
         let statusNow = Date(timeIntervalSince1970: 1_700_000_000)
         let statusWindow = RateLimitWindow(
             usedPercent: 4,
@@ -301,16 +315,6 @@ enum ModelSmokeTests {
             ).contains("同时运行 2 个项目"),
             "menu bar tooltip preserves full task detail"
         )
-        check(toolGlow.speed > workingGlow.speed, "tool glow moves faster than thinking glow")
-        check(workingGlow.speed > idleGlow.speed, "working glow moves faster than idle glow")
-        check(approvalGlow.speed < workingGlow.speed, "approval glow slows down to hold attention")
-        check(failedGlow.accent.x > failedGlow.accent.y, "failed glow uses a red-orange accent")
-        check(endedGlow.exposure < workingGlow.exposure, "ended glow settles to lower exposure")
-        check(
-            RippleGlowStyle.mix(idleGlow, toward: toolGlow, factor: 1) == toolGlow,
-            "glow interpolation reaches its target"
-        )
-
         check(HookEventMapper.phase(for: "PermissionRequest") == .waitingApproval, "approval mapping")
         check(HookEventMapper.phase(for: "Stop") == .completed, "completion mapping")
         check(HookEventMapper.phase(for: "PreToolUse") == .usingTool, "tool mapping")
@@ -714,10 +718,11 @@ enum ModelSmokeTests {
         )
         try? FileManager.default.removeItem(at: fixtureURL)
 
-        print("Model smoke tests passed (114 checks).")
+        print("Model smoke tests passed (\(checks) checks).")
     }
 
     private static func check(_ condition: @autoclosure () -> Bool, _ label: String) {
+        checks += 1
         guard condition() else {
             fputs("FAILED: \(label)\n", stderr)
             exit(1)

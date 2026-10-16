@@ -15,10 +15,20 @@
 </div>
 
 > [!IMPORTANT]
-> The latest version is [`v1.6.10 (Build 24)`](https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.6.10). The Release provides separate DMGs for Apple Silicon `arm64` and Intel `x86_64`; choose the package that matches your Mac.
+> The latest version is [`v1.7.0 (Build 25)`](https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.7.0). The Release provides separate DMGs for Apple Silicon `arm64` and Intel `x86_64`; choose the package that matches your Mac.
 
 > [!TIP]
 > **Sponsor: CoverAI top-up service** — [Visit CoverAI](https://www.coverai.store/)
+
+## What's new in v1.7.0
+
+- Read-only task monitoring uses desktop IPC and local logs. Hook ingestion is disabled in this release while existing Hook configuration is preserved. The island does not submit approvals, answers, or messages. Completion feedback retains per-turn tokens and confetti before returning to a persistent quota/idle banner.
+- The island includes a usage dashboard and in-panel quota-reset details. Resetting uses the real account endpoint, requires a second confirmation, and cannot be undone.
+- Session management handles App Server pagination and compressed history. Markdown/HTML exports preserve question grouping, collapsible progress, redaction, and backups. HTML embeds recovered images with zoom, pan, and reset; Markdown uses a matching assets directory. Missing images are explicitly identified.
+- Usage and Cost share cyan charts, smooth trends, and slender short-period bars. Official prices refresh automatically; model mappings and unknown rates remain visible. Community reset associations retain their original detection evidence.
+- The menu bar always shows a quota ring and percentage. Settings, session tools, and quiet text refresh buttons share a consistent dark style.
+
+Separate Apple Silicon and Intel DMGs are ad-hoc signed and are not notarized by Apple. Intel compilation and package validation are covered; Intel hardware testing and some animation-frame checks remain pending.
 
 ## Table of contents
 
@@ -42,7 +52,7 @@ Codex Monitor is a native macOS menu bar app built with SwiftUI and AppKit. It o
 
 1. **Menu bar and Glance panel**: quickly check the current account's quota, reset time, Credits, cost estimate, and token activity.
 2. **Activity Island and task status**: follow task execution, tool calls, approval waits, and completion without switching back to Codex.
-3. **Monitor Center**: inspect Usage, Cost, Dynamic Center, Session Management, Panel Settings, Setup & Permissions, and Activity Island Settings in full detail.
+3. **Monitor Center**: inspect Usage Analysis, Cost Estimates, Dynamic Center, Session Management, Menu Bar & Panel, Setup & Permissions, and Activity Island Settings in full detail.
 
 The app does not collapse “official quota,” “local statistics,” “community forecasts,” and “local inference” into one confidence level. Both the UI and this document label their sources explicitly.
 
@@ -88,19 +98,19 @@ Session Management treats all local user sessions as a searchable library with p
   <img src="docs/images/activity-island-settings-retina.png" alt="Codex Monitor Activity Island Settings page" width="49%">
 </p>
 
-Panel Settings controls which quota, Credits, reset, token, and cost modules appear in Glance. Activity Island Settings switches between the floating island and menu-bar-only modes and configures information density, opacity, scale, animation, and completion feedback.
+The menu bar always shows a quota ring and percentage; the former task, density, and content selectors have been retired without rewriting saved preferences. Content/Appearance uses sliding navigation, and opacity uses the continuous island slider. Session toolbar controls and quiet text refresh actions share the same dark styling.
 
-### Running menu bar and quota ring
+Settings retains the original Monitor Center sidebar and other feature entries. Activity Island is one child page, following QuotaView's Material, Glass Degree, Privacy, Width, Task Effects and Automatic Opening controls with a wallpaper-backed live preview. Panel Settings still controls which quota, Credits, reset, token, and cost modules appear in Glance.
 
-<p align="center">
-  <img src="docs/images/menu-bar-running-retina.png" alt="Codex Monitor menu bar while a task is running" width="82%">
-</p>
+### Menu-bar quota ring
+
+
 
 <p align="center">
   <img src="docs/images/menu-bar-quota-rings.png" alt="Codex Monitor menu bar quota ring states" width="58%">
 </p>
 
-The quota ring and percentage form a stable menu-bar baseline. While a task is running, its phase, project, and current-turn tokens follow that baseline, with K/M/B token abbreviations. When space is limited, task content can progressively compact by priority or rotate project and current-turn token pages inside a fixed width. Reset countdowns remain in the tooltip and Glance. Project names truncate by measured width, and multi-project token counts remain isolated by session.
+The quota ring and percentage form a stable menu-bar baseline. The native button sizes to its current content without reserving empty task or rotation slots. While a task is running, its phase, project, and current-turn tokens follow that baseline, with K/M/B token abbreviations. When space is limited, task content can progressively compact by priority or rotate project and current-turn token pages within available space. Reset countdowns remain in the tooltip and Glance. Project names truncate by measured width, and multi-project token counts remain isolated by session.
 
 ## Feature details
 
@@ -127,27 +137,27 @@ Usage calculates tokens from local structured Codex session logs. It does not de
 
 - Scans both `~/.codex/sessions/` and `~/.codex/archived_sessions/`.
 - Deduplicates structured token events so a session that briefly exists in both active and archived storage is not counted twice.
-- Keeps Token Activity first with 30 Days / 90 Days / Six Months, independent from Trend.
-- Places Token Trend next with Week / Month / Three Months; Project Usage follows immediately and displays the period inherited from Trend.
+- Shows Token Summary and Trend first; activity follows the summary period by default, with optional independent 30 Days / 90 Days / Six Months.
+- Combines account scope and Week / Month / Three Months in one filter bar. Metrics show their local account scope; the main reading surface is opaque. Project ranking supports all projects, detail sheets, and navigation to all local sessions for that project.
 - Shows total tokens split into input, output, and cache.
 - Displays session count, project count, and per-project usage ranking.
 - Uses the full project path as the stable aggregation key while preferring the local Codex sidebar alias as the display name.
 - Trend displays non-cumulative calendar-day buckets and drives the project ranking for the same period.
-- The Activity card uses a token-density heatmap with an independent range.
+- The Activity card labels its scope. Ranges up to 30 days use daily bars; 90-day and six-month ranges use heatmaps.
 - Hovering a trend point or activity cell reveals the exact time and token count.
 - When reliable structured evidence shows that a session's project path changed, the latest path updates its project attribution.
 - Account scope can show combined statistics, an observed account, or unattributed history. Baseline history is never guessed to belong to the current account.
 
 ### 3. Cost: API-equivalent estimates
 
-Cost reuses the same local structured-log scan as Usage and keeps the same period, account, and project scope.
+Cost reuses the same local structured-log scan and account scope as Usage, with periods suited to cost analysis.
 
-- Keeps Cost Activity first with 30 Days / 90 Days / Six Months and the page-wide account scope.
+- Combines account scope and period filters. Activity follows the selected period by default; an explicitly labeled independent 30 Days / 90 Days / Six Months range is available. Daily cost uses hourly bars, weekly/monthly cost uses daily bars, and ranges over 30 days use heatmaps. Future hours remain empty.
 - Uses Day / Week / Month for API-equivalent Cost Trend.
-- Places Log Sources directly after Trend with a `Follows Trend · Period` context label.
+- Log Sources aligns Token totals and API-equivalent cost in two columns, lists official and supplementary synchronization times separately, and folds model mappings into pricing details. Unknown-price warnings remain visible.
 - Calculates input, output, cache-write, and cache-read tokens separately.
 - Displays token throughput, hourly or daily cost trends, and local log sources.
-- Verified official OpenAI rates take precedence. The public [CodexIsland Model Catalog](https://ericjypark.github.io/codex-island-model-catalog/v1/models.json) refreshes daily to fill in other models, with a bundled fallback table.
+- Official Standard prices refresh every 24 hours from the public OpenAI Markdown pricing page, then costs are recalculated. Only successful synchronization advances its displayed timestamp; failures retain valid cached prices or the bundled official snapshot and retry after six hours. The public community catalog fills in other models and cannot override official prices.
 - Validates the remote catalog's schema, size, numeric ranges, and cache. If refresh fails, the app continues with the latest verified cache or embedded fallback.
 - GPT-6 Astra, GPT-6.1 Sol, GPT-6 Sol, GPT-6 Luna, and the GPT-5.6 family use official OpenAI standard rates, including the documented long-context multipliers above 272K input tokens.
 - Unknown models are never assigned a guessed price. They are listed in the UI and counted as `$0` in the estimate.
@@ -158,7 +168,7 @@ Cost reuses the same local structured-log scan as Usage and keeps the same perio
 
 ### 4. Dynamic Center: official quota, Tibo posts, and reset timeline
 
-Dynamic Center preserves the complete feed while using hierarchy and filters to reduce visual noise.
+Dynamic Center preserves the complete feed while using hierarchy and filters to reduce visual noise. Live posts, the reset timeline, and local recovery use shared sliding navigation with a compact content filter.
 
 - The top Official Quota card reads `account/rateLimits/read` and displays real quota windows and health status.
 - Community forecasts are labeled separately with their confidence level and are never presented as official conclusions.
@@ -193,24 +203,41 @@ The app compares before-and-after states for the same quota window and account, 
 | Scheduled reset | The quota window recovers near `resetsAt` | Normal window expiration |
 | Manual reset | The user consumes a reset credit from this app's reset card | User-initiated reset |
 
-Quota jumps without enough evidence first enter a pending-verification state, so first launch, account switching, or transient API responses do not immediately trigger false notifications. Recovery history supports type filters and lets the user correct the **display type**. A correction writes only `userDisplayType`; the original reason remains intact, and a timestamped backup is created before saving.
+Quota jumps without enough evidence first enter a pending-verification state, so first launch, account switching, or transient API responses do not immediately trigger false notifications. New snapshots retain an available account identifier and account changes establish a fresh baseline. After three hours, unresolved recoveries are labeled historical and unclassified. Community refreshes automatically persist eligible historical associations and display them as Tibo resets without requiring individual confirmation. The original reason and quota changes remain intact, manual classifications take precedence, and an automatic backup precedes the update. Reloading does not repeat tagging or backups; historical account ownership is not guessed and old notifications are not sent. Details distinguish recovery, timeline and available post-publication times. Source-time discrepancies remain visible in association details and still prevent strict live confirmation; reset-credit events do not prove an executed reset. Recovery history supports type filters and lets the user correct the **display type**. A correction writes only `userDisplayType`; the original reason remains intact, and a timestamped backup is created before saving.
 
 ### 6. Live tasks and Activity Island
 
-The app combines local structured session activity with optional lifecycle Hooks to display task state.
+The expanded Island's quota button or floating quota capsule opens a QuotaView-style usage page with back, pin, collapse and refresh controls. Account quota, Credits and reset credits belong to the current login; Tokens and activity prefer current-account account/usage/read summaries (UTC dates); usage-page costs follow QuotaView’s fixed $0.50-per-million-token proxy over official UTC daily totals; the latest day is the last known bucket. The dedicated Cost page retains local model-specific input/output/cache pricing. If official usage is unavailable, tokens fall back to local history, with lifetime totals populated after the full background scan and 180 days of local activity. Heatmaps support daily, weekly and cumulative modes. Both cost methods are estimates, not bills. Privacy mode hides usage content; the reset ticket opens an in-Island detail page with a reversible card flight. Reset requires a separate explicit confirmation before the existing official API is called; unavailable/stale quota, unknown account, privacy mode and in-flight requests disable submission. See [implementation notes](docs/quotaview-usage-panel.md).
+
+Session inventory and local detailed usage support both `.jsonl` and Zstandard `.jsonl.zst` rollouts through read-only streaming, with session/event deduplication and separate internal-thread classification. Newly discovered history does not imply current-account ownership. Readable exports decode streams directly; portable exports normalize to JSONL only inside their staging directory and preserve source files. See [compressed rollout reading](docs/compressed-rollouts.md).
+
+The current local trial build pauses Hook data ingestion and uses read-only desktop IPC plus incremental local logs for task state. Hook installation and configuration remain intact, but the app does not poll, read or consume the Hook inbox. Setup & Permissions displays the paused status.
 
 - Supports starting, using tools, thinking, waiting for approval, completed, and session-ended phases.
 - Aggregates multiple sessions under the same project path and shows the number of running sessions.
 - Distinguishes reading, searching, editing, validation, image inspection, and ordinary commands.
 - Truncates command summaries and masks common token, key, and password arguments.
-- Offers Automatic, Detailed, Compact, or Icon-only menu bar density. Automatic uses the widest safe layout that currently fits, progressively compacts only after crowding, and expands again in small steps when space returns.
+- Retains menu-bar capacity protection and adaptive layout. Automatic uses the widest safe layout that currently fits, progressively compacts after crowding, and expands again in small steps when space returns.
 - When space is limited, rotates project and current-turn token pages or progressively compacts them by status priority. The quota ring and percentage remain stable; hover retains reset timing and complete per-project and per-session context.
-- Projects current-turn tokens from local structured session events and isolates them by session and turn. An incomplete local boundary stays explicitly incomplete instead of presenting session totals as turn usage.
-- The floating Activity Island supports show/hide, scale, opacity, position, content density, and animation settings.
+- Menu-bar current-turn tokens are projected from structured session events and isolated by session and turn. An incomplete boundary remains explicit. Island cards follow QuotaView's session-cumulative count; the two accounting scopes remain independent.
+- Completion feedback requires explicit terminal evidence for the matching turn. Cancellation, inactivity timeouts, and disappearing sources do not imply success. Unchanged cached logs are reevaluated for freshness, and retired-turn events cannot replace an observed newer turn.
+- Expanded mode presents one card per session with cumulative session tokens and status counts. Up to four rows are visible; native scrolling preserves the reading anchor. Cumulative counts read legacy `token_count.total_token_usage` or native `token_usage_record.thread_token_usage` totals without adding cached/reasoning breakdowns again; missing totals show “— tokens”. Active tools show their current summary; thinking shows the latest public assistant progress rather than stale tool output.
+- The primary banner remains resident. Completion feedback transitions to a quota/idle banner, showing “All tasks completed” while receipts remain and “No running tasks” afterward. Idle content has no task orb, task card or running effect; hover/click still opens the empty state. Unavailable/private quota shows “—”. The floating capsule toggle does not hide the primary banner; lock/sleep can temporarily hide it.
+- Compact mode reuses QuotaView's fitting layout: status orb and scrolling “status · current action” on the left, session count and attention indicators on the right, with camera clearance. Cold-start tasks form a compact baseline. New task/turn/completion events open an automatic preview with a fixed deadline; token/tool/text updates and entering an already automatic preview do not postpone it. Hovering compact mode for about 0.15 seconds or clicking opens manually; leaving for 0.45 seconds or clicking outside closes it. Pinning and pending confirmation keep it open. New completions briefly take compact focus, and reserved-width session/completion counts alternate every three seconds.
+- An optional floating usage capsule appears below the visible island, enabled by default with Dark/Light tones. It shows official Codex 5-hour and weekly quota/reset countdowns and narrows for weekly-only accounts. It follows compact/expanded geometry, hides in privacy mode, reuses existing quota snapshots without additional requests, and shows unknown values after failed refreshes. Settings previews use isolated sample data.
+- The expanded surface defaults to 680 pt and offers Liquid Glass or Classic material with adjustable glass degree. Cards show model, reasoning effort and observed duration. The selected card uses the complete QuotaView State Smoke, Quantum Noise or Liquid Wave renderer; decorative effects are not measured completion percentages.
+- Native and custom tool calls share the activity parser. Read-only file-change observation coalesces recent session updates while periodic discovery and reconciliation remain enabled, reducing short-call display lag. Only safe action summaries are extracted; argument bodies are not displayed.
+- The panel supports pinning, session selection, refresh and settings. Settings previews share the production card and effect components and preview all three effects.
+- Island settings share Panel Settings' cards, typography, spacing and native controls, grouped into preview, material and size, display and privacy, task effects, and automatic expansion. QuotaView's live preview and effect rendering are retained. Glass degree and expanded width use continuous damped sliders with preview updates capped at 20 per second and an exact value commit on release, plus keyboard and accessibility adjustments; capsule tone uses a sliding selection plate. These transitions respect Reduce Motion. Privacy mode masks task, project, action, model and token data, including accessibility text. Automatic popups can be disabled independently of hover; duration is 1–10 seconds, defaulting to 3. Legacy scale, placement, selectable orb, opacity, disable/mode and completion-hide settings and runtime branches are removed. Their stored values no longer affect the island. Menu-bar density, overflow and task activity remain independent controls in Panel Settings.
+- Completed cards show a green check orb and both turn consumption and cumulative session tokens, using “—” for missing turn data. A real active-to-completed transition triggers a brief confetti burst from the island edges. Repeated refreshes, historical completions, resuming a hidden panel and Reduce Motion do not replay it. Status text is deduplicated. Sparse updates retain known metadata within the same turn; terminal evidence freezes duration while final cumulative tokens can still arrive. Classic/Glass material applies consistently to the native task list and settings preview.
+- Footer counts follow the actual starting, thinking, working, awaiting-confirmation, completed, cancelled and failed phases, grouping concurrent sessions independently.
+- Manual hover previews remain readable while hovered and can be collapsed explicitly. Automatic-preview deadlines remain independent of manual and pinned states. Routine action/token updates do not reopen compact mode, while new approval waits draw attention. Transparent canvas space releases pointer events.
+- Expansion and collapse share a 380 ms native path transition with 230 ms content fades. Rapid reversals continue from the displayed geometry. Hidden/occluded content and system reduced-motion states stop continuous effects. Classic material is opaque black. Production and preview share screen/notch width constraints and fixed compact geometry. Unpinning collapses immediately; new approval waits gain focus and use the upstream edge reminder and breathing effect.
 - Approval waits use a high-priority state; normal work and idle states use different colors and breathing rhythms.
-- When a floating island does not fit the workflow, the app can run in menu-bar-only mode.
 
-Without Hooks, the app can still infer some activity from local structured session records. Fine-grained phases such as waiting for approval require trusted lifecycle Hooks.
+Session initialization follows QuotaView's distinction between a session and an active turn: ordinary `SessionStart` does not create a task. Hooks in every phase may only supplement an independently verified active user session/turn; they never create standalone cards. Unassociated working/tool/waiting events, internal threads and settled turns cannot be revived by Hooks. Incoming Hooks prioritize the indexed rollout path; project paths never establish conversation identity.
+
+Hooks are optional: read-only desktop IPC supplies owner/epoch/turn/revision-validated running, waiting, completion, cancellation and failure states, while incremental local logs supply tool activity and tokens. Unavailable desktop connections fall back to local logs, with Hook data excluded during this trial and no invented confirmation evidence. Setup & Permissions reports native connectivity independently. The island does not submit approvals, answers or messages.
 
 ### 7. Session Management and account continuity
 
@@ -238,7 +265,7 @@ Monitor Center currently contains seven pages:
 | Session Management | Account continuity, local sessions, import, export, and recovery |
 | Panel Settings | Controls quota, usage, cost, and actions in Glance |
 | Setup & Permissions | First-run setup, notification permission, Hook installation/review, connection verification, and app updates |
-| Activity Island Settings | Appearance, position, scale, and animation for menu bar and floating island modes |
+| Activity Island Settings | A child page for material, privacy, width, task effects and automatic opening |
 
 The Setup & Permissions maintenance page includes an app-update card. It checks GitHub Latest Release after launch, repeats automatically every 30 minutes while the app runs, reuses cache younger than 30 minutes when Settings opens, and also supports an immediate manual check. When an update is available, it selects the correct DMG for Apple Silicon or Intel Mac, shows release notes, file size, and a shortened SHA-256 digest, and offers Remind Later, View Notes, and Download DMG actions. The icon rotates while checking and uses a subtle breathing effect for an available update; Reduce Motion disables continuous animation. This version guides the user through download and manual installation and never replaces `/Applications` automatically. Only a Release with a higher semantic version is an update; pushing `main` or replacing same-version assets is not.
 
@@ -250,7 +277,7 @@ The Setup & Permissions maintenance page includes an app-update card. It checks 
 |---|---|---|---|
 | Current account and quota windows | Codex App Server: `account/read`, `account/rateLimits/read` | Official local interface | Manual refresh, app refresh cycle, and App Server updates; stale values or `--%` are shown when unavailable |
 | Usage tokens | Structured `token_count` events from local `sessions` / `archived_sessions` | First-party local record | Scanned and cached on refresh; limited to local history that remains readable on this Mac |
-| Live task phase | Codex lifecycle Hooks plus local structured events | Local events produced by an official mechanism | Fine-grained state is incomplete when Hooks are missing or untrusted |
+| Live task phase | Desktop IPC and incremental local logs, with optional lifecycle Hooks | Local events and a version-specific desktop protocol | Falls back when IPC is unavailable; no approval/answer submissions |
 | Cost | Local tokens × public model prices | Local estimate | API-equivalent estimate, not a subscription bill; unknown models are not priced |
 | Tibo posts and reset timeline | `codex-reset.com` aggregation of public X content | Third-party community source | Refreshes every 3 minutes by default; older than 10 minutes is considered potentially stale; a validated cache survives upstream failure |
 | 24h / 48h reset probability | `codex-reset.com` forecast | Third-party forecast | An observational aid, not an OpenAI commitment |
@@ -260,7 +287,7 @@ The Setup & Permissions maintenance page includes an app-update card. It checks 
 
 - Does not read or output `auth.json`, cookies, tokens, API keys, or passwords.
 - Hook Helper retains only `session_id`, `turn_id`, `cwd`, `hook_event_name`, `model`, `tool_name`, and receive time.
-- Normal Usage, Cost, and task monitoring do not read prompt bodies, complete model responses, reasoning content, or full tool output.
+- Usage/Cost extract usage fields. Task logs retain structural events and bounded, sanitized public assistant progress, without displaying private reasoning or full tool output. Desktop IPC transiently parses conversation state and passes only the title, current turn, phase, start time and waiting indicators to the monitoring model; raw state streams are neither saved nor logged.
 - Does not scan project source code to calculate Usage or Cost.
 - Does not upload local account, project, session, token-usage, or quota data to the dynamic source or model-price catalog.
 
@@ -409,7 +436,7 @@ Command-line users can also run `scripts/install-hooks.py`. Inspect `/hooks` aft
 | `PostToolUse` | Thinking |
 | `PermissionRequest` | Waiting for your approval |
 | `SubagentStart` | Thinking |
-| `SubagentStop` | Completed |
+| `SubagentStop` | Child task stopped; does not independently confirm parent completion |
 | `Stop` | Completed |
 | `SessionEnd` | Session ended |
 
@@ -421,7 +448,10 @@ Helper always exits successfully so a monitoring failure cannot block normal Cod
 
 - **Markdown**: suitable for private reading and handoff, with sensitive-text masking by default.
 - **Self-contained HTML**: styled and directly viewable in a browser, with the same redaction behavior.
+- Readable Markdown and HTML group content by user question, separate prompts from answers, and collapse progress updates. Explicit `commentary` / `final_answer` phases take precedence; legacy logs use the last reply. HTML uses a 736 px reading column with right-aligned prompts and includes nested lists, question navigation, offline search, tables, and code copying with a local-file fallback. Markdown folding depends on the viewer. Redaction and recoverable backups retain their existing behavior.
 - Export shows permission, scanning, generation, compression, and completion states. It never calls `thread/start` or `turn/start`, creates no new session, and consumes no quota.
+
+User-referenced images are recovered from embedded log data or existing local image files. HTML embeds static PNGs with thumbnails and a keyboard-accessible viewer, including cursor-centered wheel zoom, pointer dragging, double-click / 0 / button reset, and a fresh view on image switches. Markdown writes a sibling `<filename>.assets/` directory with relative references; move it together with the `.md` file. Missing, corrupt, or oversized images are reported, and remote-only references are not downloaded. Re-encoding does not copy source EXIF/GPS metadata; image pixels are not automatically masked. Text redaction and recoverable backups retain their separate behavior.
 
 ### Raw session backup
 
@@ -470,6 +500,7 @@ Run recovery or cleanup only after Codex has fully quit, so a running Codex proc
 |---|---|---|
 | Local Codex App Server process | Account, quota, and state-database visibility | Local IPC, not a public network request |
 | `codex-reset.com` | Feed, timeline, and forecasts | No |
+| `developers.openai.com` | Public official Standard pricing table; no API key | No |
 | `ericjypark.github.io` | Public model-price catalog | No |
 | `api.github.com` | Daily or manual Codex Monitor Latest Release check | No |
 | `coverai.store` | Website link opened by the user | Only after a click; no local data appended |
@@ -479,6 +510,8 @@ Run recovery or cleanup only after Codex has fully quit, so a running Codex proc
 
 ### Run the full test suite
 
+The full test suite keeps fixture panels hidden by default. Run `CODEX_ISLAND_VISIBLE_QA=1 zsh scripts/test.sh` to briefly show an independent sample-data panel and check WindowServer visibility, scroll playback, interrupted transitions, and focus preservation. It does not create real Codex tasks or change Hook configuration.
+
 ```bash
 ./scripts/test.sh
 ```
@@ -486,7 +519,7 @@ Run recovery or cleanup only after Codex has fully quit, so a running Codex proc
 The script covers:
 
 - App Server model parsing, quota windows, and menu bar quota ring.
-- Ripple/Particle Orb runtime and Activity Island lifecycle.
+- Fixed Ripple Glow, three full-card Metal effects, completion/confirmation feedback and Activity Island lifecycle.
 - Activity Island preferences and layout state.
 - First-run setup, Hook merge, path quoting, review state, and connection state.
 - GitHub Release decoding, version comparison, architecture matching, asset and SHA-256 validation, check cadence, and notification deduplication.
@@ -521,6 +554,7 @@ Sources/CodexNotchMonitor/
   QuotaResetMonitor.swift            Recovery evidence and three reset categories
   SessionContinuityService.swift     Local session inventory and App Server visibility
   SessionExportService.swift         Markdown/HTML/session-bundle export
+  SessionExportImages.swift          Readable-export image recovery and assets
   SessionImportService.swift         Session-bundle preflight, import, backup, and rollback
   ProjectTransferService.swift       Full project transfer
   CodexSetupService.swift            First-run setup, Hook installation, and review state
@@ -566,7 +600,7 @@ Dynamic Center depends on the third-party `codex-reset.com` service. If the netw
 
 The model may not yet exist in the public price catalog, or it may be an internal route without a verifiable public price. The app does not invent a price for unknown models, so they contribute `$0` and remain listed in the source card.
 
-GPT-6 Astra, GPT-6.1 Sol, GPT-6 Sol, GPT-6 Luna, and the GPT-5.6 family prefer verified official OpenAI rates embedded in the app; the third-party catalog cannot override them. Above 272K input tokens, input and cache rates use a 2x multiplier and output uses 1.5x. Tool fees, Fast mode, and Batch/Flex discounts are outside this standard estimate.
+GPT-6 Astra, GPT-6.1 Sol, GPT-6 Sol, GPT-6 Luna, and the GPT-5.6 family prefer the latest successfully synchronized official Standard rates, falling back to the verified embedded snapshot; the third-party catalog cannot override them. Above 272K input tokens, input and cache rates use a 2x multiplier and output uses 1.5x. Tool fees, Fast mode, and Batch/Flex discounts are outside this standard estimate.
 
 ### Are Hooks required?
 
@@ -599,7 +633,16 @@ Local JSONL presence, App Server indexing, and Codex UI visibility are three dif
 - Cost semantics, `last_token_usage` handling, API-equivalent estimation, and parts of the interaction language were informed by the MIT-licensed [ericjypark/codex-island](https://github.com/ericjypark/codex-island) project.
 - Dynamic Center reads the public aggregation API from [codex-reset.com](https://codex-reset.com/zh/tibo), which is not an official OpenAI service.
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party components and license notices.
+- Task cards, fixed-canvas native transitions, pointer routing, and scroll anchors are adapted from [QuotaView f632288](https://github.com/Duoasa/QuotaView/tree/f632288fb706b83e691000e365004f6ed9654d94). The full MIT notice is bundled at `Contents/Resources/ThirdPartyNotices.txt`.
 
 ## License
 
 This project is licensed under the [MIT License](LICENSE), Copyright (c) 2026 CoverAI. You may use, copy, modify, merge, publish, distribute, sublicense, or sell the Software as long as the copyright and permission notices are retained. The Software is provided “as is,” without warranty of any kind.
+
+Monitor Center activity heatmaps follow the summary period by default, with an optional independent range. Token totals include cache; input labels exclude cache. Menu settings hide task density and overflow until task display is enabled; legacy Detailed preferences remain readable and map to Automatic in the settings UI. Hook configuration remains in a collapsed advanced section and does not resume paused Hook ingestion.
+
+Activity bars and heatmap cells share a cyan fill palette, corner radius, subtle outline, neutral zero state, and immediate hover feedback. Readouts occupy the same upper-right position; cost readouts include corresponding tokens. Range changes crossfade and respect Reduce Motion.
+
+Usage and Cost share a compact account/period toolbar, sliding period indicator, white primary metrics, layered neutral cards and cyan charts. Equal-period line/area coordinates interpolate; period or point-count changes crossfade. Bars and heatmap colors animate incoming values, and project rows share hover, press and expansion feedback. Scope explanations remain available through an accessible information popover.
+
+Trend lines and areas share monotone cubic interpolation through the actual samples, with bounded controls to avoid overshoot. Readouts remain above the plot. Seven-day activity uses capped-width vertical columns, one date per column, and full-column hit regions; zero values stay empty. Period button hover and selection layers share slot geometry with only the outer three-point inset.

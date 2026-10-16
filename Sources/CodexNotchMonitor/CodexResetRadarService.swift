@@ -199,6 +199,20 @@ struct CodexResetRadarSnapshot: Codable, Equatable {
     let evidenceFeed: TiboFeed
     let rejectedTimelineEventCount: Int?
 
+    var associationEvidenceFeed: TiboFeed {
+        let posts = Dictionary(tweets.map { ($0.id, $0.at) }, uniquingKeysWith: { first, _ in first })
+        let times = Dictionary(timelineEvents.map { ($0.id, $0.announcedAt) }, uniquingKeysWith: { first, _ in first })
+        let events = evidenceFeed.events.map { event in
+            var event = event
+            event.publishedAt = posts[event.id] ?? event.publishedAt
+            event.timelineAt = times[event.id] ?? event.timelineAt
+            return event
+        }
+        return TiboFeed(schemaVersion: evidenceFeed.schemaVersion, generatedAt: evidenceFeed.generatedAt,
+                        lastSuccessfulCheckAt: evidenceFeed.lastSuccessfulCheckAt, monitor: evidenceFeed.monitor,
+                        events: events, resetTimeline: evidenceFeed.resetTimeline)
+    }
+
     var fetchedDate: Date? { TiboFeedDate.parse(fetchedAt) }
 }
 
@@ -539,7 +553,9 @@ final class CodexResetRadarService {
                 rationale: [event.sourceLabel, event.resetVerificationStatus]
                     .compactMap { $0?.nonEmpty }
                     .joined(separator: " · "),
-                text: event.displayText
+                text: event.displayText,
+                publishedAt: tweet?.at,
+                timelineAt: event.announcedAt
             )
         }
         return TiboFeed(

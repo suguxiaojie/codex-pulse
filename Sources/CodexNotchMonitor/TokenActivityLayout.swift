@@ -3,6 +3,18 @@ import Foundation
 enum TokenActivityLayout {
     static let columnCount = 16
 
+    static func usesBars(rangeDays: Int) -> Bool { rangeDays <= 30 }
+
+    static func observedHourCount(seriesCount: Int, now: Date, calendar: Calendar = .current) -> Int {
+        min(max(0, seriesCount), calendar.component(.hour, from: now) + 1, 24)
+    }
+
+    static func visibleColumns(for dayCount: Int) -> Int { max(1, min(columnCount, dayCount)) }
+
+    static func activityDays(following days: Int, independentDays: Int?) -> Int {
+        max(1, independentDays ?? days)
+    }
+
     static func placeholderCount(for dayCount: Int) -> Int {
         guard dayCount > 0 else { return 0 }
         return (columnCount - dayCount % columnCount) % columnCount

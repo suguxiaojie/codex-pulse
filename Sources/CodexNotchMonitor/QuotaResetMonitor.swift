@@ -59,6 +59,15 @@ struct QuotaResetConfirmationCandidate: Identifiable, Equatable {
     let id: String
     let detectedAt: Date
     let changes: [QuotaResetChange]
+    var isWaiting = true
+    var historyEventID: String? = nil
+    var communityEvidence: [TiboEvent] = []
+    var associationNote = ""
+
+    var title: String {
+        if isWaiting { return "额度已恢复，正在等待社区证据" }
+        return communityEvidence.isEmpty ? "历史恢复 · 原因未明" : "历史恢复 · 发现社区重置线索"
+    }
 }
 
 struct QuotaResetChange: Codable, Equatable {
@@ -85,6 +94,7 @@ struct QuotaResetEvent: Codable, Identifiable, Equatable {
     let sourcePostID: String?
     let sourceURL: String?
     var userDisplayType: QuotaResetDisplayType?
+    var communityAssociation: TiboEvent? = nil
 
     init(
         id: String,
@@ -105,7 +115,7 @@ struct QuotaResetEvent: Codable, Identifiable, Equatable {
     }
 
     var displayReason: QuotaResetReason {
-        userDisplayType?.representativeReason ?? reason
+        userDisplayType?.representativeReason ?? (communityAssociation == nil ? reason : .officialCompleted)
     }
 }
 
@@ -153,12 +163,14 @@ final class QuotaResetMonitor {
     private struct Snapshot: Codable {
         let capturedAt: Date
         let contextSignature: String
+        var accountID: String? = nil
         let windows: [WindowSnapshot]
     }
 
     private struct Pending: Codable {
         let detectedAt: Date
         let changes: [QuotaResetChange]
+        var plans: [String]? = nil
     }
 
     private struct State: Codable {
@@ -170,6 +182,7 @@ final class QuotaResetMonitor {
 
     private let stateURL: URL
     private var state: State
+    private var evidenceFeed: TiboFeed?
 
     init(stateURL: URL = AppPaths.supportDirectory.appendingPathComponent("quota-reset-state.json")) {
         self.stateURL = stateURL
@@ -183,13 +196,40 @@ final class QuotaResetMonitor {
 
     var history: [QuotaResetEvent] { state.history }
 
+    func updateEvidence(_ feed: TiboFeed) {
+        evidenceFeed = feed
+        associateHistoricalRecoveries()
+    }
+
+    private func associateHistoricalRecoveries() {
+        let matches = state.history.indices.compactMap { index -> (Int, TiboEvent)? in
+            let record = state.history[index]
+            guard record.reason == .unverified, record.userDisplayType == nil, record.communityAssociation == nil,
+                  let evidence = nearbyEvidence(in: evidenceFeed, detectedAt: record.detectedAt, changes: record.changes, plans: nil, now: Date()).first
+            else { return nil }
+            return (index, evidence)
+        }
+        guard !matches.isEmpty else { return }
+        let previous = state.history
+        do {
+            try backupStateBeforeClassificationChange()
+            for (index, evidence) in matches { state.history[index].communityAssociation = evidence }
+            try writeState()
+        } catch {
+            state.history = previous
+        }
+    }
+
     var confirmableRecoveries: [QuotaResetConfirmationCandidate] {
         var seen = Set<String>()
         let candidates = state.pending.map { pending in
-            Self.confirmationCandidate(detectedAt: pending.detectedAt, changes: pending.changes)
+            decorate(Self.confirmationCandidate(detectedAt: pending.detectedAt, changes: pending.changes), plans: pending.plans)
         } + state.history.compactMap { event in
-            guard event.reason == .unverified else { return nil }
-            return Self.confirmationCandidate(detectedAt: event.detectedAt, changes: event.changes)
+            guard event.reason == .unverified, event.userDisplayType == nil, event.communityAssociation == nil else { return nil }
+            var candidate = Self.confirmationCandidate(detectedAt: event.detectedAt, changes: event.changes)
+            candidate.isWaiting = false
+            candidate.historyEventID = event.id
+            return decorate(candidate, plans: nil)
         }
         return candidates
             .filter { seen.insert($0.id).inserted }
@@ -212,7 +252,7 @@ final class QuotaResetMonitor {
         }
 
         if let index = state.history.firstIndex(where: { event in
-            event.reason == .unverified
+            event.reason == .unverified && event.userDisplayType == nil && event.communityAssociation == nil
                 && Self.confirmationCandidate(detectedAt: event.detectedAt, changes: event.changes).id == candidateID
         }) {
             let unverified = state.history.remove(at: index)
@@ -257,7 +297,8 @@ final class QuotaResetMonitor {
         }
     }
 
-    func evaluate(buckets: [RateLimitBucket], feed: TiboFeed?, now: Date = Date()) -> QuotaResetEvaluation {
+    func evaluate(buckets: [RateLimitBucket], feed: TiboFeed?, now: Date = Date(), accountID: String? = nil) -> QuotaResetEvaluation {
+        if let feed { evidenceFeed = feed }
         if let requestedAt = state.manualResetRequestedAt,
            now.timeIntervalSince(requestedAt) > 10 * 60 {
             state.manualResetRequestedAt = nil
@@ -265,12 +306,13 @@ final class QuotaResetMonitor {
         let hasManualResetEvidence = state.manualResetRequestedAt.map {
             now.timeIntervalSince($0) >= -60 && now.timeIntervalSince($0) <= 10 * 60
         } ?? false
-        let current = makeSnapshot(buckets: buckets, now: now)
+        let current = makeSnapshot(buckets: buckets, now: now, accountID: accountID)
         var events = expirePending(now: now)
 
         guard let previous = state.snapshot,
               now.timeIntervalSince(previous.capturedAt) <= 6 * 60 * 60,
-              previous.contextSignature == current.contextSignature else {
+              previous.contextSignature == current.contextSignature,
+              previous.accountID == current.accountID else {
             state.snapshot = current
             persist()
             return QuotaResetEvaluation(events: events, needsFeedRefresh: false)
@@ -307,7 +349,7 @@ final class QuotaResetMonitor {
             if let event = record(changes: changes, reason: .manualCredit, source: nil, now: now) {
                 events.append(event)
             }
-        } else if let official = matchingOfficialEvent(in: feed, since: previous.capturedAt, now: now) {
+        } else if let official = matchingOfficialEvent(in: feed, detectedAt: now, changes: changes, plans: buckets.compactMap(\.planType), now: now) {
             let reason: QuotaResetReason
             if naturalEvidence {
                 reason = .mixed
@@ -322,7 +364,7 @@ final class QuotaResetMonitor {
                 events.append(event)
             }
         } else {
-            state.pending.append(Pending(detectedAt: now, changes: changes))
+            state.pending.append(Pending(detectedAt: now, changes: changes, plans: buckets.compactMap(\.planType)))
         }
 
         persist()
@@ -330,11 +372,12 @@ final class QuotaResetMonitor {
     }
 
     func reconcile(feed: TiboFeed, now: Date = Date()) -> [QuotaResetEvent] {
+        evidenceFeed = feed
         var events = expirePending(now: now)
         var remaining: [Pending] = []
 
         for pending in state.pending {
-            if let official = matchingOfficialEvent(in: feed, since: pending.detectedAt.addingTimeInterval(-30 * 60), now: now),
+            if let official = matchingOfficialEvent(in: feed, detectedAt: pending.detectedAt, changes: pending.changes, plans: pending.plans ?? [], now: now),
                let event = record(
                     changes: pending.changes,
                     reason: official.kind == .resetCompleted ? .officialCompleted : .officialScheduled,
@@ -347,11 +390,12 @@ final class QuotaResetMonitor {
             }
         }
         state.pending = remaining
+        associateHistoricalRecoveries()
         persist()
         return events
     }
 
-    private func makeSnapshot(buckets: [RateLimitBucket], now: Date) -> Snapshot {
+    private func makeSnapshot(buckets: [RateLimitBucket], now: Date, accountID: String?) -> Snapshot {
         let signature = buckets
             .map { "\($0.id):\($0.planType ?? "-")" }
             .sorted()
@@ -369,7 +413,7 @@ final class QuotaResetMonitor {
                 )
             }
         }
-        return Snapshot(capturedAt: now, contextSignature: signature, windows: windows)
+        return Snapshot(capturedAt: now, contextSignature: signature, accountID: accountID, windows: windows)
     }
 
     private func isNaturalReset(old: WindowSnapshot, current: WindowSnapshot, now: Date) -> Bool {
@@ -384,28 +428,63 @@ final class QuotaResetMonitor {
         return true
     }
 
-    private func matchingOfficialEvent(in feed: TiboFeed?, since: Date, now: Date) -> TiboEvent? {
-        guard let feed else { return nil }
-        return feed.officialEvidenceEvents(now: now)
-            .filter { event in
-                switch event.kind {
-                case .resetCompleted:
-                    guard let announced = event.announcedDate else { return false }
-                    return announced >= since.addingTimeInterval(-30 * 60)
-                        && announced <= now.addingTimeInterval(30 * 60)
-                case .resetScheduled:
-                    if let effective = event.effectiveDate {
-                        return abs(effective.timeIntervalSince(now)) <= 3 * 60 * 60
-                    }
-                    guard let announced = event.announcedDate else { return false }
-                    return announced >= now.addingTimeInterval(-12 * 60 * 60)
-                        && announced <= now.addingTimeInterval(30 * 60)
-                default:
-                    return false
-                }
+    private func decorate(_ original: QuotaResetConfirmationCandidate, plans: [String]?) -> QuotaResetConfirmationCandidate {
+        var candidate = original
+        candidate.communityEvidence = nearbyEvidence(in: evidenceFeed, detectedAt: candidate.detectedAt, changes: candidate.changes, plans: plans, now: Date())
+        if !candidate.isWaiting {
+            candidate.associationNote = "历史记录未保存账号证据；社区线索不等于该账号已获 Tibo 重置。"
+        } else if evidenceFeed == nil {
+            candidate.associationNote = "等待社区数据同步；不会仅凭满额跳变确认原因。"
+        } else {
+            candidate.associationNote = "尚无时间、类型与适用范围一致的充分证据。"
+        }
+        if candidate.communityEvidence.isEmpty, let evidenceFeed,
+           evidenceFeed.events.contains(where: { event in
+               event.kind == .bankedReset && event.announcedDate.map { abs($0.timeIntervalSince(candidate.detectedAt)) <= 12 * 3600 } == true
+           }) {
+            candidate.associationNote += " 附近只有额度重置卡线索，不能证明已执行重置。"
+        }
+        return candidate
+    }
+
+    private func nearbyEvidence(in feed: TiboFeed?, detectedAt: Date, changes: [QuotaResetChange], plans: [String]?, now: Date) -> [TiboEvent] {
+        guard let feed else { return [] }
+        return feed.officialEvidenceEvents(now: now).filter { event in
+            guard [.resetCompleted, .resetScheduled].contains(event.kind), event.confidence >= 0.65,
+                  let time = event.effectiveDate ?? event.announcedDate,
+                  abs(time.timeIntervalSince(detectedAt)) <= 3 * 3600,
+                  time <= now.addingTimeInterval(30 * 60),
+                  scopeMatches(event, changes: changes, plans: plans)
+            else { return false }
+            return event.kind != .resetScheduled || event.effectiveDate != nil
+        }.sorted {
+            abs(($0.effectiveDate ?? $0.announcedDate ?? .distantPast).timeIntervalSince(detectedAt))
+                < abs(($1.effectiveDate ?? $1.announcedDate ?? .distantPast).timeIntervalSince(detectedAt))
+        }
+    }
+
+    private func scopeMatches(_ event: TiboEvent, changes: [QuotaResetChange], plans: [String]?) -> Bool {
+        let audience = Set(event.scope.plans.map { $0.lowercased() })
+        let generic: Set<String> = ["all", "codex", "chatgpt_work", "unknown"]
+        if audience.isDisjoint(with: generic), let plans {
+            guard !audience.isDisjoint(with: Set(plans.map { $0.lowercased() })) else { return false }
+        }
+        let windows = event.scope.windows.map { $0.lowercased().replacingOccurrences(of: " ", with: "") }
+        return windows.contains { window in
+            if ["all", "unknown", "codex"].contains(window) { return true }
+            if window.contains("week") || window.contains("周") || window == "7d" { return changes.contains { $0.windowDurationMinutes == 10080 } }
+            if window.contains("5h") || window.contains("5小时") { return changes.contains { $0.windowDurationMinutes == 300 } }
+            return false
+        }
+    }
+
+    private func matchingOfficialEvent(in feed: TiboFeed?, detectedAt: Date, changes: [QuotaResetChange], plans: [String], now: Date) -> TiboEvent? {
+        nearbyEvidence(in: feed, detectedAt: detectedAt, changes: changes, plans: plans, now: now)
+            .first { event in
+                guard !event.hasDifferentSourceTimes else { return false }
+                let time = event.effectiveDate ?? event.announcedDate ?? .distantPast
+                return event.kind == .resetScheduled || abs(time.timeIntervalSince(detectedAt)) <= 30 * 60
             }
-            .sorted { ($0.announcedDate ?? .distantPast) > ($1.announcedDate ?? .distantPast) }
-            .first
     }
 
     private func expirePending(now: Date) -> [QuotaResetEvent] {

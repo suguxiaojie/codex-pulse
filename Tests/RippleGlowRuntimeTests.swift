@@ -7,10 +7,6 @@ enum RippleGlowRuntimeTests {
             fputs("Ripple Glow runtime test failed: \(error)\n", stderr)
             exit(1)
         }
-        if let error = ParticleOrbRuntimeValidator.validationError() {
-            fputs("Particle Orb runtime test failed: \(error)\n", stderr)
-            exit(1)
-        }
-        print("QuotaView orb runtime test passed: Ripple Glow and Particle Orb Metal pipelines are available.")
+        print("QuotaView orb runtime test passed: fixed Ripple Glow Metal pipeline is available.")
     }
 }

@@ -69,11 +69,12 @@ enum ModelPricing {
 
     static func resolvedRates(for rawModel: String) -> Rates? {
         let canonical = canonicalModelName(rawModel)
-        return official[canonical] ?? PricingCatalog.rates(for: canonical) ?? seed[canonical]
+        return OfficialPricingCatalog.rates(for: canonical) ?? official[canonical] ?? PricingCatalog.rates(for: canonical) ?? seed[canonical]
     }
 
     static func multipliers(for rawModel: String, totalInputTokens: Int) -> Multipliers {
         let canonical = canonicalModelName(rawModel)
+        if let refreshed = OfficialPricingCatalog.multipliers(for: canonical, totalInputTokens: totalInputTokens) { return refreshed }
         guard totalInputTokens > longContextThreshold,
               longContextModels.contains(canonical)
         else { return .standard }
@@ -113,5 +114,171 @@ enum ModelPricing {
             cacheCreationPerMillion: create,
             cacheReadPerMillion: read
         )
+    }
+}
+
+
+/// Reads only the Standard table from OpenAI's public Markdown pricing page.
+/// A failed download or a changed schema never replaces the last usable rates.
+enum OfficialPricingCatalog {
+    static let endpoint = URL(string: "https://developers.openai.com/api/docs/pricing.md")!
+    static let requiredModels: Set<String> = ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+
+    struct Snapshot: Equatable {
+        let rates: [String: CatalogRates]
+        let multipliers: [String: ModelPricing.Multipliers]
+        let threshold: Int
+    }
+
+    private struct Cache: Codable {
+        let document: String
+        let fetchedAt: Date
+        let etag: String?
+    }
+
+    private static let lock = NSLock()
+    private static var snapshot: Snapshot?
+    private static var cached: Cache?
+    private static var loaded = false
+    private static var refreshing = false
+    private static var lastAttempt: Date?
+    private static var failed = false
+
+    static func cacheURL() -> URL? {
+        PricingCatalog.cacheURL()?.deletingLastPathComponent().appendingPathComponent("official-model-prices.json")
+    }
+
+    static func prepare(cache: URL? = cacheURL()) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !loaded else { return }
+        loaded = true
+        guard let cache, let data = try? Data(contentsOf: cache), data.count <= 1_024 * 1_024,
+              let restored = try? JSONDecoder().decode(Cache.self, from: data),
+              let parsed = parse(restored.document)
+        else { return }
+        cached = restored
+        snapshot = parsed
+    }
+
+    static func rates(for model: String) -> CatalogRates? {
+        lock.lock(); defer { lock.unlock() }
+        return snapshot?.rates[model == "gpt-5.6" ? "gpt-5.6-sol" : model]
+    }
+
+    static func multipliers(for model: String, totalInputTokens: Int) -> ModelPricing.Multipliers? {
+        lock.lock(); defer { lock.unlock() }
+        let model = model == "gpt-5.6" ? "gpt-5.6-sol" : model
+        guard let snapshot, snapshot.rates[model] != nil else { return nil }
+        return totalInputTokens > snapshot.threshold ? snapshot.multipliers[model] : .standard
+    }
+
+    static var syncStatus: (date: Date?, failed: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        return (cached?.fetchedAt, failed)
+    }
+
+    static var statusText: String {
+        lock.lock(); defer { lock.unlock() }
+        if let stamp = cached?.fetchedAt {
+            return "OpenAI 官方 Standard 费率 · 同步于 " + dateLabel(stamp)
+                + (failed ? " · 更新失败，沿用上次费率" : "")
+        }
+        return "内置官方费率 · 核验于 " + ModelPricing.officialRateVerifiedAt
+            + (failed ? " · 在线更新失败" : " · 等待在线同步")
+    }
+
+    static func dateLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: date)
+    }
+
+    static func parse(_ document: String) -> Snapshot? {
+        guard document.utf8.count <= 512 * 1_024,
+              let heading = document.range(of: "### Standard pricing data"),
+              let end = document.range(of: "### ", range: heading.upperBound..<document.endIndex),
+              document.contains("Short context: ≤272K input tokens. Long context: >272K input tokens.")
+        else { return nil }
+        let table = String(document[heading.upperBound..<end.lowerBound])
+        let header = "| Model | Short context input | Short context cached input | Short context cache writes | Short context output | Long context input | Long context cached input | Long context cache writes | Long context output |"
+        guard table.contains(header) else { return nil }
+        var rates: [String: CatalogRates] = [:]
+        var multipliers: [String: ModelPricing.Multipliers] = [:]
+        for line in table.split(separator: "\n") where line.hasPrefix("|") {
+            let fields = line.split(separator: "|", omittingEmptySubsequences: false).dropFirst().dropLast().map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let model = fields.first, requiredModels.contains(model) else { continue }
+            guard fields.count == 9, rates[model] == nil else { return nil }
+            let values = fields.dropFirst().compactMap { field -> Double? in
+                guard field.first == "$", let value = Double(field.dropFirst()), value.isFinite, value >= 0, value <= 1_000_000 else { return nil }
+                return value
+            }
+            guard values.count == 8, values[0] > 0, values[3] > 0 else { return nil }
+            let inputRatio = values[4] / values[0]
+            let outputRatio = values[7] / values[3]
+            guard (1...10).contains(inputRatio), (1...10).contains(outputRatio),
+                  abs(values[5] - values[1] * inputRatio) < 0.000_001,
+                  abs(values[6] - values[2] * inputRatio) < 0.000_001
+            else { return nil }
+            let rate = CatalogRates(displayName: nil, inputPerMillion: values[0], outputPerMillion: values[3], cacheCreationPerMillion: values[2], cacheReadPerMillion: values[1])
+            guard rate.isValid else { return nil }
+            rates[model] = rate
+            multipliers[model] = .init(inputAndCache: inputRatio, output: outputRatio)
+        }
+        guard Set(rates.keys) == requiredModels else { return nil }
+        return Snapshot(rates: rates, multipliers: multipliers, threshold: 272_000)
+    }
+
+    private struct Context { let etag: String? }
+    private static func begin(at now: Date) -> Context? {
+        lock.lock(); defer { lock.unlock() }
+        guard !refreshing else { return nil }
+        if let last = cached?.fetchedAt, (0..<PricingCatalog.refreshInterval).contains(now.timeIntervalSince(last)) { return nil }
+        if let lastAttempt, (0..<PricingCatalog.retryInterval).contains(now.timeIntervalSince(lastAttempt)) { return nil }
+        refreshing = true
+        lastAttempt = now
+        return Context(etag: cached?.etag)
+    }
+
+    private static func finish(success: Bool?) {
+        lock.lock(); defer { lock.unlock() }
+        refreshing = false
+        if let success { failed = !success }
+    }
+
+    private static func install(document: String?, etag: String?, at now: Date, cache: URL?) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let text = document ?? cached?.document
+        guard let text, let parsed = parse(text) else { return false }
+        let replacement = Cache(document: text, fetchedAt: now, etag: document == nil ? cached?.etag : etag)
+        snapshot = parsed
+        cached = replacement
+        if let cache, let data = try? JSONEncoder().encode(replacement) { try? data.write(to: cache, options: .atomic) }
+        return true
+    }
+
+    static func refreshIfNeeded(
+        now: Date = Date(),
+        cache: URL? = cacheURL(),
+        fetch: (URLRequest) async throws -> (Data, URLResponse) = { try await URLSession.shared.data(for: $0) }
+    ) async -> CatalogRefreshResult {
+        guard let context = begin(at: now) else { return .notNeeded }
+        var succeeded = false
+        defer { finish(success: succeeded) }
+        var request = URLRequest(url: endpoint)
+        request.timeoutInterval = 15
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("text/markdown", forHTTPHeaderField: "Accept")
+        if let etag = context.etag { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        guard let (data, response) = try? await fetch(request), let http = response as? HTTPURLResponse,
+              http.url?.host == endpoint.host, http.url?.path == endpoint.path
+        else { return .failed }
+        if http.statusCode == 304 {
+            succeeded = install(document: nil, etag: nil, at: now, cache: cache)
+            return succeeded ? .unchanged : .failed
+        }
+        guard http.statusCode == 200, data.count <= 512 * 1_024, let text = String(data: data, encoding: .utf8) else { return .failed }
+        succeeded = install(document: text, etag: http.value(forHTTPHeaderField: "ETag"), at: now, cache: cache)
+        return succeeded ? .updated : .failed
     }
 }
