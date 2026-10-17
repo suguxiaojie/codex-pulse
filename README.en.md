@@ -6,7 +6,7 @@
 
 **Keep Codex quotas, live tasks and local usage in your menu bar and Activity Island.**
 
-[简体中文](README.md) · [Download v1.8.0](https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.8.0) · [MIT License](LICENSE)
+[简体中文](README.md) · [Download v1.8.1](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.1) · [MIT License](LICENSE)
 
 macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -66,18 +66,20 @@ Task monitoring uses read-only desktop IPC and local logs without installing Hoo
 
 ## Download and install
 
-Current version: **v1.8.0 (Build 26)**. Choose the installer for your processor from [GitHub Releases](https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.8.0).
+Current version: **v1.8.1 (Build 27)**. Choose the installer for your processor from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.1).
 
 | Mac processor | Installer |
 |---|---|
-| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-notch-monitor/releases/download/v1.8.0/CodexNotchMonitor-v1.8.0-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-notch-monitor/releases/download/v1.8.0/CodexNotchMonitor-v1.8.0-x86_64.dmg) |
+| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.1/CodexNotchMonitor-v1.8.1-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.1/CodexNotchMonitor-v1.8.1-x86_64.dmg) |
 
 1. Open the DMG and drag the app into Applications.
 2. Launch it with Codex/ChatGPT Desktop installed and signed in.
 3. Enable notifications if wanted and check monitoring connectivity in Setup & Permissions.
 
 The app is ad-hoc signed and has not been notarized by Apple. If macOS blocks the first launch, verify the download source and allow it in System Settings → Privacy & Security.
+
+If you use v1.8.0, manually download and install v1.8.1 once to update the in-app GitHub repository address. Existing configuration and data are retained.
 
 The display name changed from Codex Monitor to Codex Pulse. The Bundle ID, `CodexNotchMonitor.app` filename, preference keys and data directories remain unchanged to retain existing configuration and data. Update checks open a download URL; installation remains under your control.
 
@@ -102,8 +104,8 @@ The display name changed from Codex Monitor to Codex Pulse. The Bundle ID, `Code
 Requires a Swift 6 toolchain and standard macOS build tools. No additional third-party Swift Package installation is needed.
 
 ```bash
-git clone https://github.com/suguxiaojie/codex-notch-monitor.git
-cd codex-notch-monitor
+git clone https://github.com/suguxiaojie/codex-pulse.git
+cd codex-pulse
 ./scripts/build-app.sh native
 open build/CodexNotchMonitor.app
 ```

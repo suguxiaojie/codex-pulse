@@ -14,6 +14,8 @@ v1.8.0（Build 26）已正式发布，源码提交为 f7ec22a9dd047abe25705f906d
 
 ## 进行中与待办
 
+- 2026-10-17 12:32：GitHub 仓库与 origin 已更名为 suguxiaojie/codex-pulse，简介同步；v1.8.1（Build 27）双架构 Release 包已构建并核对签名／CRC／镜像 App 一致性，本机已备份安装 arm64 版并确认进程，待提交推送和发布。AppUpdateService、测试夹具与 README 使用新地址，严格仓库校验保留，v1.8.0 用户需手动安装一次。构建使用已发布提交加本轮文件的独立快照，未混入同时发生的 AnalysisPresentation.swift 界面改动；该文件保持工作区原状且不纳入提交。未运行测试或 UI 验收，Intel 无真机验收。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-v1.8.1-20261017-123214.app 。证据：.tmp/repo-rename/。
+
 - 2026-10-17 12:20：v1.8.0 运行验收由用户自行执行：本轮未运行自动化测试、截图或交互检查，Intel 尚无真机验收。双架构构建／镜像与公开附件校验、Git 推送及 Release 发布均已完成，详见最近完成与最近验证。
 
 - 2026-10-17 12:07：会话管理项目行会话摘要已实现并备份覆盖安装，待用户自行验收。折叠／展开项目行都汇总当前搜索和筛选后的 threads：最近会话更新时间、单账号／多账号／部分归属／未归属、待恢复与路径缺失异常。只按 observed＋已有账号标识分组，基线前与未知分别计数并在悬停明细保留，不推断当前登录账号；缺少可靠标识的 observed 记录归入未确认展示。会话数量移至项目名旁，部分匹配显示匹配数／总数；表头、项目和会话行共用列宽／间距，灰阶摘要与异常橙色沿用 CDS，保留原生 List、选择／展开／详情／菜单、完整项目操作范围和所有原筛选口径。新增只读 SessionProjectSummary 展示模型，中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或 UI 验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-session-project-summary-20261017-120721.app 。证据：.tmp/session-project-summary/。
@@ -141,6 +143,8 @@ v1.8.0（Build 26）已正式发布，源码提交为 f7ec22a9dd047abe25705f906d
 
 ## 最近验证
 
+- 2026-10-17 12:32：v1.8.1 改名修正版包检查通过：arm64／x86_64 为 1.8.1 Build 27，签名有效、DMG CRC 有效，镜像 App 与各自快照逐文件 SHA-256 相同，Applications 链接正确，SHA256SUMS.txt 已生成。发行快照的可执行源码相较 v1.8.0 仅更新仓库常量，另变更版本元数据；界面源码与已发布版本一致，工作区界面改动排除。本机完整备份及安装包比对一致，进程已确认；新仓库 Release 元数据 URL 与修正后的严格前缀一致。README 链接与 9 张图片引用有效；未运行测试或 UI 验收。证据：.tmp/repo-rename/package-review.json、source-scope-review.json、install.json、arm64-isolated-build.log、x86_64-isolated-build.log。
+
 - 2026-10-17 12:20：v1.8.0 公开发布复核：GitHub latest API 确认为 v1.8.0 正式版，main 与远端 tag 均为源码提交 f7ec22a9dd047abe25705f906dc822709585fa09；arm64／x86_64 DMG 与 SHA256SUMS.txt 三份公开附件下载后 SHA-256 与本地产物逐一一致，GitHub 资产 digest 亦一致。未运行应用测试或 UI 验收。证据：.tmp/release-v1.8.0/public-release.json、public-download-review.json。
 
 - 2026-10-17 12:18：v1.8.0 双架构发行包检查完成：arm64 与 x86_64 均为 1.8.0 Build 26／Codex Pulse，单架构准确、ad-hoc 签名有效，DMG CRC 有效；只读挂载后的 App 与对应构建快照逐文件 SHA-256 一致，Applications 链接正确。已生成 SHA256SUMS.txt。本机覆盖前 App 备份与目标一致，新安装与 arm64 源包一致，启动进程确认。README 各 9 张图片及本地链接核对通过，git diff --check 通过；未运行自动化测试或 UI 验收。证据：.tmp/release-v1.8.0/package-review.json、install.json、readme-review.json、arm64-build-final.log、x86_64-build.log；产物：build/releases/v1.8.0/。
@@ -178,8 +182,6 @@ v1.8.0（Build 26）已正式发布，源码提交为 f7ec22a9dd047abe25705f906d
 - 2026-10-17 10:47：背景与卡片层级改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；表面层级、阴影、浅深色／增强对比及原有界面交互由用户自行验收。证据：.tmp/surface-depth-cds/release-build.log、install.json。
 
 - 2026-10-17 10:44：数据配色与摘要改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；浅深色可读性、窄窗口布局、图表悬停／切换与玻璃呈现由用户自行验收。证据：.tmp/data-color-cds/release-build.log、install.json。
-
-- 2026-10-17 03:45：轻量滑杆 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，完整备份与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；滑杆拖动、键盘／辅助功能、范围边界及预览由用户自行验收。证据：.tmp/light-sliders-cds/release-build.log、install.json。
 
 ## 验证与产物入口
 

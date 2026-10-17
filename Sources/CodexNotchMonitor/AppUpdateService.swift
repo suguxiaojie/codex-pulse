@@ -167,7 +167,7 @@ enum AppUpdateError: LocalizedError, Equatable {
 }
 
 final class AppUpdateService {
-    static let repository = "suguxiaojie/codex-notch-monitor"
+    static let repository = "suguxiaojie/codex-pulse"
     static let latestReleaseEndpoint = URL(
         string: "https://api.github.com/repos/\(repository)/releases/latest"
     )!

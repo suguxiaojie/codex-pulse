@@ -130,7 +130,7 @@ enum AppUpdateServiceTests {
             label: "reject prerelease"
         )
         try expectDecodeFailure(
-            replacing: "https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.6.0",
+            replacing: "https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.6.0",
             with: "https://example.com/v1.6.0",
             label: "reject external release page"
         )
@@ -165,7 +165,7 @@ enum AppUpdateServiceTests {
         check(missingAsset.asset == nil && missingAsset.message != nil, "missing asset falls back to release page")
 
         let fallback = try AppUpdateService.releaseFromLatestPage(
-            finalURL: URL(string: "https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.6.0")!
+            finalURL: URL(string: "https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.6.0")!
         )
         check(fallback.tagName == "v1.6.0", "latest page fallback extracts tag")
         check(fallback.assets.count == 2, "latest page fallback creates two architecture assets")
@@ -211,7 +211,7 @@ enum AppUpdateServiceTests {
           "draft":false,
           "prerelease":false,
           "published_at":"2026-08-27T00:00:00Z",
-          "html_url":"https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.6.0",
+          "html_url":"https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.6.0",
           "assets":[
             {
               "name":"CodexNotchMonitor-v1.6.0-arm64.dmg",
@@ -220,7 +220,7 @@ enum AppUpdateServiceTests {
               "content_type":"application/x-apple-diskimage",
               "size":5458361,
               "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "browser_download_url":"https://github.com/suguxiaojie/codex-notch-monitor/releases/download/v1.6.0/CodexNotchMonitor-v1.6.0-arm64.dmg"
+              "browser_download_url":"https://github.com/suguxiaojie/codex-pulse/releases/download/v1.6.0/CodexNotchMonitor-v1.6.0-arm64.dmg"
             },
             {
               "name":"CodexNotchMonitor-v1.6.0-x86_64.dmg",
@@ -229,7 +229,7 @@ enum AppUpdateServiceTests {
               "content_type":"application/x-apple-diskimage",
               "size":5585536,
               "digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              "browser_download_url":"https://github.com/suguxiaojie/codex-notch-monitor/releases/download/v1.6.0/CodexNotchMonitor-v1.6.0-x86_64.dmg"
+              "browser_download_url":"https://github.com/suguxiaojie/codex-pulse/releases/download/v1.6.0/CodexNotchMonitor-v1.6.0-x86_64.dmg"
             },
             {
               "name":"CodexNotchMonitor-v1.6.0-universal.dmg",
@@ -238,7 +238,7 @@ enum AppUpdateServiceTests {
               "content_type":"application/x-apple-diskimage",
               "size":7000000,
               "digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-              "browser_download_url":"https://github.com/suguxiaojie/codex-notch-monitor/releases/download/v1.6.0/CodexNotchMonitor-v1.6.0-universal.dmg"
+              "browser_download_url":"https://github.com/suguxiaojie/codex-pulse/releases/download/v1.6.0/CodexNotchMonitor-v1.6.0-universal.dmg"
             }
           ]
         }

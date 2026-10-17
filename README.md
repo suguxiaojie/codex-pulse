@@ -6,7 +6,7 @@
 
 **在菜单栏与灵动岛里，掌握 Codex 的额度、任务和本地用量。**
 
-[English](README.en.md) · [下载 v1.8.0](https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.8.0) · [MIT License](LICENSE)
+[English](README.en.md) · [下载 v1.8.1](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.1) · [MIT License](LICENSE)
 
 macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -66,18 +66,20 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
 ## 下载与安装
 
-当前版本：**v1.8.0（Build 26）**。前往 [GitHub Releases](https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.8.0) 下载对应安装包：
+当前版本：**v1.8.1（Build 27）**。前往 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.1) 下载对应安装包：
 
 | Mac 处理器 | 安装包 |
 |---|---|
-| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-notch-monitor/releases/download/v1.8.0/CodexNotchMonitor-v1.8.0-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-notch-monitor/releases/download/v1.8.0/CodexNotchMonitor-v1.8.0-x86_64.dmg) |
+| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.1/CodexNotchMonitor-v1.8.1-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.1/CodexNotchMonitor-v1.8.1-x86_64.dmg) |
 
 1. 打开 DMG，将 App 拖入 Applications。
 2. 启动 App，保持 Codex／ChatGPT Desktop 已安装并登录。
 3. 按需开启通知，在“安装与权限”中查看任务监控连接。
 
 应用使用临时签名，尚未通过 Apple 公证。若系统拦截首次打开，请核对下载来源后，在“系统设置 → 隐私与安全性”中允许打开。
+
+v1.8.0 用户请从本页手动下载安装一次 v1.8.1，以更新应用内的 GitHub 仓库地址；配置和数据继续沿用。
 
 由 Codex Monitor 更名为 Codex Pulse 后，Bundle ID、`CodexNotchMonitor.app` 文件名、偏好键与数据目录沿用原值，现有配置和数据继续使用。应用内检查更新会打开下载地址，由用户完成安装。
 
@@ -102,8 +104,8 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 需要 Swift 6 工具链及 macOS 系统构建工具，无需额外安装第三方 Swift Package。
 
 ```bash
-git clone https://github.com/suguxiaojie/codex-notch-monitor.git
-cd codex-notch-monitor
+git clone https://github.com/suguxiaojie/codex-pulse.git
+cd codex-pulse
 ./scripts/build-app.sh native
 open build/CodexNotchMonitor.app
 ```
