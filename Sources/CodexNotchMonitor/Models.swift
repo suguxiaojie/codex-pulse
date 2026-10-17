@@ -621,6 +621,31 @@ extension Date {
 
 /// Credits are decimal strings, never currency or binary floating-point values.
 enum CreditBalanceFormatter {
+    /// Main surfaces show a conservative integer; the full decimal stays available separately.
+    static func summary(_ raw: String?) -> String {
+        let full = string(raw)
+        guard full != "—" else { return full }
+        let parts = full.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count > 1 else { return full }
+        let integral = String(parts[0])
+        if integral == "0" { return "<1" }
+        guard integral.hasPrefix("-") else { return integral }
+
+        // A negative fraction floors to the next lower integer. Carry in the
+        // original decimal digits so even large balances never pass through Double/Int.
+        let integralDigits = String(integral.dropFirst()).replacingOccurrences(of: ",", with: "")
+        var digits = Array(integralDigits.utf8)
+        for index in digits.indices.reversed() {
+            if digits[index] < 0x39 {
+                digits[index] += 1
+                return "-" + grouped(String(decoding: digits, as: UTF8.self))
+            }
+            digits[index] = 0x30
+        }
+        digits.insert(0x31, at: 0)
+        return "-" + grouped(String(decoding: digits, as: UTF8.self))
+    }
+
     static func string(_ raw: String?) -> String {
         guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               text.range(of: #"^[+-]?[0-9]+(?:\.[0-9]+)?$"#, options: .regularExpression) != nil,
@@ -634,10 +659,13 @@ enum CreditBalanceFormatter {
         let digits = integral.isEmpty ? "0" : String(integral)
         var fraction = parts.count > 1 ? String(parts[1]) : ""
         while fraction.last == "0" { fraction.removeLast() }
-        let grouped = digits.enumerated().map { index, digit in
+        let sign = negative && (digits != "0" || !fraction.isEmpty) ? "-" : ""
+        return sign + grouped(digits) + (fraction.isEmpty ? "" : "." + fraction)
+    }
+
+    private static func grouped(_ digits: String) -> String {
+        digits.enumerated().map { index, digit in
             index > 0 && (digits.count - index) % 3 == 0 ? ",\(digit)" : String(digit)
         }.joined()
-        let sign = negative && (digits != "0" || !fraction.isEmpty) ? "-" : ""
-        return sign + grouped + (fraction.isEmpty ? "" : "." + fraction)
     }
 }

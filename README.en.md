@@ -6,7 +6,7 @@
 
 **Keep Codex quotas, live tasks and local usage in your menu bar and Activity Island.**
 
-[简体中文](README.md) · [Download v1.8.3](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.3) · [MIT License](LICENSE)
+[简体中文](README.md) · [Download v1.8.4](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.4) · [MIT License](LICENSE)
 
 macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -14,7 +14,7 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
 ## Features
 
-- **Quota at a glance**: current-account quota windows, reset countdowns, Credits and recovery records.
+- **Quota at a glance**: current-account quota windows, reset countdowns, Credits and recovery records. Credits use grouped, floored integers in the main readout, “<1” for positive balances below one, and the full decimal value on hover without changing source precision.
 - **Live tasks**: execution stages, tool progress, approval waits and result summaries, with multiple sessions, privacy mode and optional effects.
 - **Usage and cost**: Token/cache totals, project rankings and trends by period; API-equivalent cost estimates using public model prices.
 - **Dynamic Center**: official quotas, community updates, reset timelines and local recovery records with separate source labels.
@@ -66,12 +66,12 @@ Task monitoring uses read-only desktop IPC and local logs without installing Hoo
 
 ## Download and install
 
-Current version: **v1.8.3 (Build 29)**. Choose the installer for your processor from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.3).
+Current version: **v1.8.4 (Build 30)**. Choose the installer for your processor from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.4).
 
 | Mac processor | Installer |
 |---|---|
-| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.3/CodexNotchMonitor-v1.8.3-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.3/CodexNotchMonitor-v1.8.3-x86_64.dmg) |
+| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.4/CodexNotchMonitor-v1.8.4-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.4/CodexNotchMonitor-v1.8.4-x86_64.dmg) |
 
 1. Open the DMG and drag the app into Applications.
 2. Launch it with Codex/ChatGPT Desktop installed and signed in.

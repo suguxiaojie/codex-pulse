@@ -6,7 +6,7 @@
 
 **在菜单栏与灵动岛里，掌握 Codex 的额度、任务和本地用量。**
 
-[English](README.en.md) · [下载 v1.8.3](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.3) · [MIT License](LICENSE)
+[English](README.en.md) · [下载 v1.8.4](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.4) · [MIT License](LICENSE)
 
 macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -14,7 +14,7 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
 ## 功能
 
-- **额度概览**：查看当前账号的额度窗口、重置倒计时、Credits 和额度恢复记录。
+- **额度概览**：查看当前账号的额度窗口、重置倒计时、Credits 和额度恢复记录。Credits 主值向下取整并加千位分隔，正余额不足 1 时显示“<1”，悬停可查看完整数值，原始精度保留。
 - **实时任务**：灵动岛展示运行阶段、工具进展、待批准与结果摘要，支持多会话、隐私模式和任务特效。
 - **用量与成本**：按周期查看 Token、缓存、项目排行和趋势；成本按公开模型价格估算 API 等价金额。
 - **动态中心**：汇集官方额度、社区动态、重置时间轴和本地恢复记录，分别标明来源。
@@ -66,12 +66,12 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
 ## 下载与安装
 
-当前版本：**v1.8.3（Build 29）**。前往 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.3) 下载对应安装包：
+当前版本：**v1.8.4（Build 30）**。前往 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.4) 下载对应安装包：
 
 | Mac 处理器 | 安装包 |
 |---|---|
-| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.3/CodexNotchMonitor-v1.8.3-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.3/CodexNotchMonitor-v1.8.3-x86_64.dmg) |
+| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.4/CodexNotchMonitor-v1.8.4-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.4/CodexNotchMonitor-v1.8.4-x86_64.dmg) |
 
 1. 打开 DMG，将 App 拖入 Applications。
 2. 启动 App，保持 Codex／ChatGPT Desktop 已安装并登录。

@@ -14,6 +14,8 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.3（Build 29）已正式发布�
 
 ## 进行中与待办
 
+- 2026-10-17 21:09：v1.8.4（Build 30）两架构构建与发行包检查通过，本机已完整备份覆盖安装。用户已确认 Credits 显示正常；准备提交推送并公开发布。保留原始数据精度和现有功能；测试由用户自行执行，未混入工作区无关界面改动。证据：.tmp/release-v1.8.4/。
+
 - 2026-10-17 12:33：v1.8.1 已在新仓库正式发布；v1.8.0 用户需从新 Release 手动安装一次，之后沿用新仓库更新入口。测试与实机验收由用户自行执行。工作区另有 AnalysisPresentation.swift 界面改动，保持未提交且未混入本次发行快照。
 
 - 2026-10-17 12:20：v1.8.0 运行验收由用户自行执行：本轮未运行自动化测试、截图或交互检查，Intel 尚无真机验收。双架构构建／镜像与公开附件校验、Git 推送及 Release 发布均已完成，详见最近完成与最近验证。
@@ -128,7 +130,6 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.3（Build 29）已正式发布�
 
 - 2026-10-16 18:04：按用户要求将历史社区线索直接自动标记：匹配后备份并保存 communityAssociation，自动显示 Tibo 重置、进入 Tibo 分类并退出待确认列表，无需逐条操作；重启保留，重复刷新不重复标记／备份。原始 reason／ID／额度变化／来源与既有人工分类保留，人工显示分类优先，来源时间差异留在可展开依据中；不补发旧通知。实际 18 条中自动标记 5 条，2 条保留未明；Hook 继续屏蔽，已备份覆盖 arm64 安装版。
 
-
 - 2026-10-16 17:13：日志来源接入官方费率自动更新：每 24 小时只读取 OpenAI pricing.md 的 Standard 支持模型表，线上官方费率优先于内置快照与社区目录，解析长短上下文倍率后重算实际成本。分开显示官方同步时间与补充目录同步时间；网络／schema 异常保留最后有效价格与日期，6 小时后重试，304 需可用缓存，服务器取消 ETag 时清除旧标签。缓存仅在 Library/Caches，未改账号／会话／Hook，Hook 继续屏蔽；已备份覆盖安装 arm64 开发版。
 
 - 2026-10-16 17:00：成本与 Token 活动统一青蓝色视觉与交互：柱子和热力格复用同一填充／3 pt 圆角／0.7 pt 描边组件，零值中性暗灰；详情栏共用右上方排版与数字字体，热图取消半秒延迟、黑胶囊及虚线占位。悬停统一轻微提亮／细描边，成本热图补对应 Token，按有效范围触发共同淡入过渡并尊重减少动态效果。计价、账号与日志链未变，Hook 继续屏蔽；完整测试／arm64 Release 后备份覆盖安装。
@@ -142,6 +143,10 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.3（Build 29）已正式发布�
 - 2026-10-16 15:22：补齐可读导出用户引用图片链：结构化内嵌图片优先，支持现存本地图片及文本图片信封回退；静态 PNG 重编码不复制 EXIF／GPS，像素不自动遮盖。HTML 单文件内嵌缩略图与原生 dialog 大图，前后／方向键／Esc／焦点返回；Markdown 生成同名 .assets 相对素材，按内容复用，冲突拒绝覆盖，失败只清理本次新建素材。缺失／损坏／远程引用／超限明确提示。修正全局文字去重造成跨轮图片与重复问题合并，改为仅相邻双格式镜像去重；清除图片闭合信封。保留正文脱敏与备份链，Hook 仍屏蔽；已备份覆盖 arm64 安装版。
 
 ## 最近验证
+
+- 2026-10-17 21:09：v1.8.4 arm64／Intel Release 构建通过；1.8.4 Build 30、架构、签名和 DMG CRC 正确，镜像 App 与对应构建快照逐文件 SHA-256 一致，Applications 链接正确。完整备份与覆盖前 App 一致、安装包与 arm64 源包一致，启动进程已确认。三份 Credits 源码与用户确认版本相同，其他编译输入除版本元数据外沿用发布提交，未混入无关界面改动。中英文 README 版本／下载链接与图片核对通过；按用户要求未运行测试或额外 UI 验收，Intel 无真机验收。证据：.tmp/release-v1.8.4/package-review.json、source-scope-review.json、install.json、arm64-build.log、x86_64-build.log。
+
+- 2026-10-17 20:35：Credits 整数显示 arm64 Release 构建退出 0；源包、安装包和完整备份为 Codex Pulse／1.8.3 Build 29／arm64，签名有效；备份全包文件哈希与覆盖前目标一致、安装全包哈希与源包一致，启动进程已确认。三份变更源码与隔离构建输入 SHA-256 一致，其余编译输入为发布提交，无关界面改动未混入；git diff --check 通过。未运行测试或界面检查，正常／不足 1／零／悬停完整精度及辅助功能由用户自行验收。证据：.tmp/credits-integer/release-build.log、build-review.json、source-scope.json、install.json、change.diff。
 
 - 2026-10-17 18:23：v1.8.3 公开发布核对：latest API 为 v1.8.3 正式版，main 与远端 tag 的源码提交均为 dfe6fe07ed1a08fe1e4ca78b9025ad575c1d2371；两份 DMG 与 SHA256SUMS.txt 公开下载后的 SHA-256 和 GitHub digest 逐一等于本地产物。独立快照的 Sources／Resources／Package 与打包脚本逐文件等于发行提交，未混入工作区界面改动。用户已确认单次提醒、静态等待及回答后恢复；未运行自动化测试或额外 UI 验收。证据：.tmp/release-v1.8.3/public-release.json、public-download-review.json、source-scope-review.json。
 
@@ -178,10 +183,6 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.3（Build 29）已正式发布�
 - 2026-10-17 11:32：Glance 阅读层／成本状态／Token／高度改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；玻璃可读性／透明度、加载／缺失／零值／未计价、周期与开关组合、测量高度／小屏滚动及真实设置预览由用户自行验收。证据：.tmp/glance-reading-cost-cds/release-build.log、change.diff、install.json。
 
 - 2026-10-17 11:25：灵动岛可见性／语义色／文案改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；不可见时完成后恢复可见、已开始回执不重启、语义色／宽度降级、长标题／隐私与横幅操作由用户自行验收。证据：.tmp/island-visibility-copy-cds/release-build.log、change.diff、install.json。
-
-- 2026-10-17 11:19：紧凑完成回执 arm64 Release App 构建退出 0；首次安装后补充到期回调可见性保护，再次构建与覆盖通过。源 App、安装 App、两次备份均为 1.7.0 Build 25／arm64，签名有效，每次备份全包文件哈希与对应覆盖前目标一致，最终安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；自动弹出开／关、最终与混合完成、待批准／新轮次抢占、遮挡／展开／重复刷新由用户自行验收。证据：.tmp/final-compact-receipt-cds/release-build.log、release-build-attempt1.log、change.diff、install.json、install-attempt1.json。
-
-- 2026-10-17 11:13：灵动岛选中／摘要／隐私／入口精简 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；结果卡片选中、混合状态计数／窄宽度摘要、隐私与辅助功能、额度入口及原功能由用户自行验收。证据：.tmp/island-summary-selection-cds/release-build.log、change.diff、install.json。
 
 ## 验证与产物入口
 

@@ -183,13 +183,7 @@ struct ActivityIslandUsageDashboard: View {
         FloatingSurfaceTheme.quotaHealth(percent)
     }
     private var creditBalance: String {
-        guard let raw = bucket?.creditBalance else { return "—" }
-        guard let number = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")) else { return raw }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.usesGroupingSeparator = false
-        formatter.maximumFractionDigits = 10
-        return formatter.string(from: NSDecimalNumber(decimal: number)) ?? raw
+        CreditBalanceFormatter.summary(bucket?.creditBalance)
     }
     private var accountCard: some View {
         surface {
@@ -198,6 +192,10 @@ struct ActivityIslandUsageDashboard: View {
                 Text(OpenAIPlanDisplayName.resolve(bucket?.planType) ?? "—").font(.system(size: 16, weight: .semibold))
                 Spacer(minLength: 12)
                 HStack { heading("积分余额"); Spacer(); Text(creditBalance).font(FloatingSurfaceTypography.metadata).lineLimit(1).minimumScaleFactor(0.7) }
+                    .help("完整余额：" + CreditBalanceFormatter.string(bucket?.creditBalance))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("积分余额")
+                    .accessibilityValue(CreditBalanceFormatter.string(bucket?.creditBalance))
                 Divider().overlay(FloatingSurfaceTheme.separator())
                 Button { navigateReset(true) } label: {
                     HStack {
