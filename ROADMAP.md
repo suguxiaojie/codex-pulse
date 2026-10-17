@@ -6,15 +6,13 @@
 
 ## 当前阶段
 
-GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.3（Build 29）已正式发布，源码提交为 dfe6fe07ed1a08fe1e4ca78b9025ad575c1d2371，已推送 main。待回复视觉与单次提示动效已由用户实测确认：首次提醒后静态等待，回答后提示淡出并恢复运行。arm64／Intel 独立 DMG、签名、CRC、镜像内容及公开附件下载哈希核对通过，本机已备份安装 arm64 版。按用户要求未运行自动化测试或额外 UI 验收，Intel 无真机验收；工作区 AnalysisPresentation.swift 的另有界面改动保持未提交，未混入发行包。
+GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.4（Build 30）已正式发布，源码提交为 6b77d7a497151a668d462a4b556347aa9d44a1ed，已推送 main。两处 Credits 主值统一向下取整与千位分隔，正余额不足 1 显示“<1”，悬停和辅助功能保留完整数值；原始数据精度、现有功能与玻璃效果保留，用户已确认显示正常。arm64／Intel 独立 DMG、签名、CRC、镜像内容及公开附件下载哈希核对通过，本机已备份安装 arm64 版。按用户要求未运行自动化测试或额外 UI 验收，Intel 无真机验收；工作区 AnalysisPresentation.swift 的另有界面改动保持未提交，未混入发行包。
 
 当前本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
 本地开发交接笔记不随公开发行包上传；历史版本变化以 Git 历史为准。
 
 ## 进行中与待办
-
-- 2026-10-17 21:09：v1.8.4（Build 30）两架构构建与发行包检查通过，本机已完整备份覆盖安装。用户已确认 Credits 显示正常；准备提交推送并公开发布。保留原始数据精度和现有功能；测试由用户自行执行，未混入工作区无关界面改动。证据：.tmp/release-v1.8.4/。
 
 - 2026-10-17 12:33：v1.8.1 已在新仓库正式发布；v1.8.0 用户需从新 Release 手动安装一次，之后沿用新仓库更新入口。测试与实机验收由用户自行执行。工作区另有 AnalysisPresentation.swift 界面改动，保持未提交且未混入本次发行快照。
 
@@ -102,6 +100,8 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.3（Build 29）已正式发布�
 
 ## 最近完成
 
+- 2026-10-17 21:10：v1.8.4（Build 30）Credits 余额格式化已正式发布，源码 6b77d7a497151a668d462a4b556347aa9d44a1ed，main 已推送。菜单栏面板与灵动岛用量看板共用 CreditBalanceFormatter.summary，向下取整、千位分隔，正余额不足 1 显示“<1”；悬停／辅助功能保留完整数值，原始数据与统计精度不变。用户确认显示正常；两架构构建、镜像／签名及公开下载哈希通过，本机已完整备份覆盖安装 arm64。未运行自动化测试或额外 UI 验收；无关界面改动排除。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-v1.8.4-20261017-210741.app 。证据：.tmp/release-v1.8.4/。
+
 - 2026-10-17 18:23：发布 v1.8.3（Build 29）待回复视觉与单次提醒，源码提交 dfe6fe07ed1a08fe1e4ca78b9025ad575c1d2371 已推送 main，远端 tag 指向同一提交，GitHub 为最新正式 Release。按结构化问题标识在紧凑／展开界面共用去重，首次可见时轻提示，持续等待为静态图标及细轮廓，回答后恢复原运行效果；保留隐私、减少动态、玻璃及原交互。用户已实测确认核心动效流程；两架构包及三份公开附件下载校验通过，本机已完整备份安装。未运行自动化测试或额外 UI 验收，Intel 无真机验收，工作区无关界面改动排除。发布页：https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.3 。证据：.tmp/release-v1.8.3/；产物：build/releases/v1.8.3/；回滚 App：build/backups/CodexNotchMonitor-before-v1.8.3-20261017-182142.app。
 
 - 2026-10-17 18:05：v1.8.2（Build 28）已提交推送并发布双架构 Release，源码提交 f094ef28b37861fdc567b90424d6f995001a8bc3。发布内容为用户已确认的“待回复”识别与回答后恢复修正，不含后续动效调整；arm64／x86_64 DMG 和 SHA256SUMS.txt 已上传，公开下载与本地产物／GitHub digest 相同，本机已备份安装。未运行自动化测试或额外 UI 验收，Intel 无真机验收。发布页：https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.2 。证据：.tmp/release-v1.8.2/；产物：build/releases/v1.8.2/；安装前备份：build/backups/CodexNotchMonitor-before-v1.8.2-20261017-175402.app。
@@ -140,9 +140,9 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.3（Build 29）已正式发布�
 
 - 2026-10-16 15:45：HTML 大图加入鼠标锚点滚轮缩放、指针捕获拖动、双击／按钮／0 还原、+/− 键盘缩放及实际像素比例显示；切图与重开清除偏移，窗口变化重新适配并限制边界。实测发现 108×66 小图放大后仍小于画布而被锁住，修正为小图可在画布内移动、大图按边缘限位。未改图片恢复、脱敏或备份链，Hook 保持屏蔽；完整备份后覆盖 arm64 安装版并确认运行。
 
-- 2026-10-16 15:22：补齐可读导出用户引用图片链：结构化内嵌图片优先，支持现存本地图片及文本图片信封回退；静态 PNG 重编码不复制 EXIF／GPS，像素不自动遮盖。HTML 单文件内嵌缩略图与原生 dialog 大图，前后／方向键／Esc／焦点返回；Markdown 生成同名 .assets 相对素材，按内容复用，冲突拒绝覆盖，失败只清理本次新建素材。缺失／损坏／远程引用／超限明确提示。修正全局文字去重造成跨轮图片与重复问题合并，改为仅相邻双格式镜像去重；清除图片闭合信封。保留正文脱敏与备份链，Hook 仍屏蔽；已备份覆盖 arm64 安装版。
-
 ## 最近验证
+
+- 2026-10-17 21:10：v1.8.4 公开发布核对：latest API 为 v1.8.4 正式版，远端 tag 指向源码 6b77d7a497151a668d462a4b556347aa9d44a1ed；两份 DMG 与 SHA256SUMS.txt 下载后 SHA-256 及 GitHub digest 逐一等于本地产物。隔离构建的全部 Sources／Resources／Package 与打包脚本逐文件等于发行提交；工作区无关界面源码未改、未混入。用户确认 Credits 显示正常；未运行测试或额外 UI 验收，Intel 无真机验收。证据：.tmp/release-v1.8.4/public-release.json、public-download-review.json、source-scope-review.json。
 
 - 2026-10-17 21:09：v1.8.4 arm64／Intel Release 构建通过；1.8.4 Build 30、架构、签名和 DMG CRC 正确，镜像 App 与对应构建快照逐文件 SHA-256 一致，Applications 链接正确。完整备份与覆盖前 App 一致、安装包与 arm64 源包一致，启动进程已确认。三份 Credits 源码与用户确认版本相同，其他编译输入除版本元数据外沿用发布提交，未混入无关界面改动。中英文 README 版本／下载链接与图片核对通过；按用户要求未运行测试或额外 UI 验收，Intel 无真机验收。证据：.tmp/release-v1.8.4/package-review.json、source-scope-review.json、install.json、arm64-build.log、x86_64-build.log。
 
@@ -182,9 +182,9 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.3（Build 29）已正式发布�
 
 - 2026-10-17 11:32：Glance 阅读层／成本状态／Token／高度改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；玻璃可读性／透明度、加载／缺失／零值／未计价、周期与开关组合、测量高度／小屏滚动及真实设置预览由用户自行验收。证据：.tmp/glance-reading-cost-cds/release-build.log、change.diff、install.json。
 
-- 2026-10-17 11:25：灵动岛可见性／语义色／文案改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；不可见时完成后恢复可见、已开始回执不重启、语义色／宽度降级、长标题／隐私与横幅操作由用户自行验收。证据：.tmp/island-visibility-copy-cds/release-build.log、change.diff、install.json。
-
 ## 验证与产物入口
+
+- v1.8.4：build/releases/v1.8.4/；构建／镜像／公开附件证据：.tmp/release-v1.8.4/；安装前备份：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-v1.8.4-20261017-210741.app 。
 
 - v1.8.3：build/releases/v1.8.3/；构建／镜像／公开附件证据：.tmp/release-v1.8.3/；安装前备份：build/backups/CodexNotchMonitor-before-v1.8.3-20261017-182142.app。
 
