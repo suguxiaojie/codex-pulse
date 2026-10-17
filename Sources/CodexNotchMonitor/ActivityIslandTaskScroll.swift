@@ -19,6 +19,7 @@ struct ActivityIslandRowsDocument: View {
     var onSelect: ((String) -> Void)?
     var liquidGlassEnabled = true
     var glassActive = true
+    var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     @ObservedObject var visibility: ActivityIslandRowVisibility
     var body: some View {
         VStack(spacing: ActivityIslandListLayout.rowSpacing) {
@@ -40,7 +41,8 @@ struct ActivityIslandRowsDocument: View {
     private func card(_ row: ActivitySessionSnapshot) -> some View {
         ActivityIslandTaskCard(row: row,
             animated: playback && visibility.sessionIDs.contains(row.id), rowHeight: rowHeight,
-            selected: (focusedID ?? rows.first?.id) == row.id, effect: effect, reduceMotion: reduceMotion)
+            selected: (focusedID ?? rows.first?.id) == row.id, effect: effect, reduceMotion: reduceMotion,
+            claimReplyCue: claimReplyCue)
     }
 }
 
@@ -55,12 +57,14 @@ struct ActivityIslandTaskScroll: NSViewRepresentable {
     var focusedID: String?
     var reduceMotion = false
     var onSelect: ((String) -> Void)?
+    var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     func makeNSView(context: Context) -> ActivityIslandNativeScroll { ActivityIslandNativeScroll() }
     func updateNSView(_ view: ActivityIslandNativeScroll, context: Context) {
         view.configure(rows: rows, playback: playback, rowHeight: rowHeight,
                        onInteraction: onInteraction, effect: effect, focusedID: focusedID,
                        reduceMotion: reduceMotion, onSelect: onSelect,
-                       liquidGlassEnabled: liquidGlassEnabled, glassActive: glassActive)
+                       liquidGlassEnabled: liquidGlassEnabled, glassActive: glassActive,
+                       claimReplyCue: claimReplyCue)
     }
     static func dismantleNSView(_ view: ActivityIslandNativeScroll, coordinator: ()) { view.stop() }
 }
@@ -80,6 +84,7 @@ final class ActivityIslandNativeScroll: NSScrollView {
     private var documentWidth: CGFloat = 0
     var onInteraction: (() -> Void)?
     private var effect: ActivityIslandProgressEffect = .stateSmoke
+    private var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     private var focusedID: String?
     private var reduceMotion = false
     private var liquidGlassEnabled = true
@@ -118,7 +123,9 @@ final class ActivityIslandNativeScroll: NSScrollView {
     func configure(rows: [ActivitySessionSnapshot], playback: Bool,
                    rowHeight: CGFloat, onInteraction: (() -> Void)?, effect: ActivityIslandProgressEffect = .stateSmoke,
                    focusedID: String? = nil, reduceMotion: Bool = false, onSelect: ((String) -> Void)? = nil,
-                   liquidGlassEnabled: Bool = true, glassActive: Bool = true) {
+                   liquidGlassEnabled: Bool = true, glassActive: Bool = true,
+                   claimReplyCue: ((ActivitySessionSnapshot) -> Bool)? = nil) {
+        self.claimReplyCue = claimReplyCue
         let next = ActivityIslandListLayout(sessionIDs: rows.map(\.id), rowHeight: rowHeight)
         let changed = next != listLayout
         let offset = contentView.bounds.minY
@@ -145,7 +152,8 @@ final class ActivityIslandNativeScroll: NSScrollView {
             host.rootView = ActivityIslandRowsDocument(rows: rows, playback: playback,
                 width: width, rowHeight: listLayout.rowHeight, effect: effect, focusedID: focusedID,
                 reduceMotion: reduceMotion, onSelect: onSelect,
-                liquidGlassEnabled: liquidGlassEnabled, glassActive: glassActive, visibility: visibility)
+                liquidGlassEnabled: liquidGlassEnabled, glassActive: glassActive,
+                claimReplyCue: claimReplyCue, visibility: visibility)
         }
         let size = CGSize(width: width, height: max(contentSize.height, listLayout.contentHeight))
         if host.frame.size != size { host.setFrameSize(size) }

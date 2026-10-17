@@ -6,7 +6,7 @@
 
 **在菜单栏与灵动岛里，掌握 Codex 的额度、任务和本地用量。**
 
-[English](README.en.md) · [下载 v1.8.2](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.2) · [MIT License](LICENSE)
+[English](README.en.md) · [下载 v1.8.3](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.3) · [MIT License](LICENSE)
 
 macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -21,7 +21,7 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 - **会话管理**：搜索项目与会话，查看账号归属和异常摘要，支持 Markdown／HTML 导出、原始备份、导入及项目迁移。
 - **原生外观**：暖中性色与陶土强调，保留原生玻璃、浅／深／自动外观、实时设置预览及辅助功能支持。
 
-任务监控使用只读桌面 IPC 与本地日志，无需安装 Hook；批准和回答继续在 Codex 中完成。已有未答复的结构化选择题／输入请求时，灵动岛显示橙色“待回复”，与“待批准”区分；回答被接受且运行状态明确解除等待后恢复运行显示，不按普通问句推断。
+任务监控使用只读桌面 IPC 与本地日志，无需安装 Hook；批准和回答继续在 Codex 中完成。已有未答复的结构化选择题／输入请求时，灵动岛显示橙色“待回复”，与“待批准”区分。待回复提示采用首次可见时的单次图标轻脉冲与细轮廓提亮，持续等待保持静态；紧凑态使用“待回复＋会话标题”。问题标识在紧凑／展开界面共用去重，减少动态效果时只显示静态提示；回答被接受且运行状态明确解除等待后恢复运行显示，不按普通问句推断。
 
 ## 界面预览
 
@@ -66,12 +66,12 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
 ## 下载与安装
 
-当前版本：**v1.8.2（Build 28）**。前往 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.2) 下载对应安装包：
+当前版本：**v1.8.3（Build 29）**。前往 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.3) 下载对应安装包：
 
 | Mac 处理器 | 安装包 |
 |---|---|
-| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.2/CodexNotchMonitor-v1.8.2-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.2/CodexNotchMonitor-v1.8.2-x86_64.dmg) |
+| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.3/CodexNotchMonitor-v1.8.3-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.3/CodexNotchMonitor-v1.8.3-x86_64.dmg) |
 
 1. 打开 DMG，将 App 拖入 Applications。
 2. 启动 App，保持 Codex／ChatGPT Desktop 已安装并登录。

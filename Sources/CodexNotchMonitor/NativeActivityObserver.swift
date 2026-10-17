@@ -11,6 +11,7 @@ struct NativeActivityEvidence {
     let terminal: SessionEndReason?
     var waitReason: CodexActivityWaitReason? = nil
     var pendingAsyncQuestionIDs: Set<String> = []
+    var replyRequestIDs: Set<String> = []
 
     static func project(_ value: CodexDesktopInteractionProjection, previous: Self?, now: Date) -> Self? {
         guard value.sourceKind == .user || value.sourceKind == .unknown,
@@ -54,8 +55,21 @@ struct NativeActivityEvidence {
                ? (previous?.turnID == turn ? previous?.pendingAsyncQuestionIDs ?? [] : [])
                : value.authoritativeAsyncQuestionIDs)
             : []
+        var replyRequests = Set(value.authoritativeAsyncQuestionIDs.map { "async:" + $0 })
+        for request in value.authoritativePendingIdentities where
+            request.method == "item/tool/requestUserInput" || request.method == "mcpServer/elicitation/request" {
+            switch request.requestID {
+            case .string(let id): replyRequests.insert("rpc:\(request.method):string:\(id)")
+            case .integer(let id): replyRequests.insert("rpc:\(request.method):integer:\(id)")
+            }
+        }
+        if phase != .waitingApproval || waitReason != .userInput { replyRequests = [] }
+        else if replyRequests.isEmpty, previous?.turnID == turn {
+            replyRequests = previous?.replyRequestIDs ?? []
+        }
         return Self(turnID: turn, phase: phase, title: value.title, startedAt: value.startedAt,
-            receivedAt: now, terminal: terminal, waitReason: waitReason, pendingAsyncQuestionIDs: pendingQuestions)
+            receivedAt: now, terminal: terminal, waitReason: waitReason,
+            pendingAsyncQuestionIDs: pendingQuestions, replyRequestIDs: replyRequests)
     }
 
     func applying(to local: LocalSessionSnapshot) -> LocalSessionSnapshot? {
@@ -77,7 +91,7 @@ struct NativeActivityEvidence {
             startedAt: startedAt ?? (sameTurn ? local.startedAt : nil), sessionTotalTokens: local.sessionTotalTokens,
             latestAssistantSummary: sameTurn ? local.latestAssistantSummary : nil,
             nativePhase: phase == .working && toolRunning ? .usingTool : phase, sessionKind: local.sessionKind,
-            nativeWaitReason: waitReason)
+            nativeWaitReason: waitReason, nativeReplyRequestIDs: replyRequestIDs)
     }
 }
 

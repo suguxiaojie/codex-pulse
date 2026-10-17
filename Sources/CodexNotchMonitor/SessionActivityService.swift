@@ -51,6 +51,7 @@ struct LocalSessionSnapshot: Equatable {
     var nativePhase: TaskPhase? = nil
     var sessionKind: CodexActivitySessionKind = .unknown
     var nativeWaitReason: CodexActivityWaitReason? = nil
+    var nativeReplyRequestIDs: Set<String> = []
 
     func evaluated(at now: Date) -> Self {
         guard let evidence else { return self }

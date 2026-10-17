@@ -28,6 +28,7 @@ struct ActivityIslandTaskEffect: NSViewRepresentable {
     let playback: Bool
     let reduceMotion: Bool
     var preview = false
+    var replyCueActive = false
     func makeNSView(context: Context) -> NSView {
         if preview { return CodexActivityStateSmokePreviewHostView(effect: effect) }
         return ActivityIslandTaskEffectHost(frame: .zero)
@@ -38,7 +39,8 @@ struct ActivityIslandTaskEffect: NSViewRepresentable {
             view.setFallbackImage(ActivityIslandPreviewAssets.image(effect.asset))
             return
         }
-        (host as? ActivityIslandTaskEffectHost)?.update(row: row, selectedEffect: effect, playback: playback, reduceMotion: reduceMotion)
+        (host as? ActivityIslandTaskEffectHost)?.update(row: row, selectedEffect: effect,
+            playback: playback, reduceMotion: reduceMotion, replyCueActive: replyCueActive)
     }
     static func dismantleNSView(_ host: NSView, coordinator: ()) {
         (host as? ActivityIslandTaskEffectHost)?.stop()

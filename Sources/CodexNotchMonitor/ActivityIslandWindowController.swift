@@ -151,6 +151,7 @@ final class ActivityIslandWindowController: NSObject {
         refresh(animated: true)
     }
     private func consume(_ sessions: [ActivitySessionSnapshot]) {
+        model.finishReplyCues(for: sessions)
         let previous = model.sessions
         let baseline = !hasObservedSessions && !sessions.isEmpty
             && !sessions.contains { $0.startedAt.map { $0 >= startupAt } == true }

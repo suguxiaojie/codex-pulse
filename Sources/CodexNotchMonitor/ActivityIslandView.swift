@@ -41,6 +41,34 @@ final class ActivityIslandViewModel: ObservableObject {
     @Published var compactReceipt: ActivitySessionSnapshot?
     @Published var showsCompletedStatistic = false
     @Published var completionBurstSerial = 0
+    private struct ReplyCueHistory {
+        let turnID: String?
+        var requestIDs: Set<String> = []
+        var fallbackShown = false
+    }
+    private var replyCueHistory: [String: ReplyCueHistory] = [:]
+
+    /// Shared by compact and expanded surfaces, so rebuilding a view cannot replay a cue.
+    func claimReplyCue(for row: ActivitySessionSnapshot) -> Bool {
+        guard row.phase == .waitingApproval, row.waitReason == .userInput else { return false }
+        var history = replyCueHistory[row.sessionID].flatMap { $0.turnID == row.turnID ? $0 : nil }
+            ?? ReplyCueHistory(turnID: row.turnID)
+        let shouldPlay: Bool
+        if row.replyRequestIDs.isEmpty {
+            shouldPlay = !history.fallbackShown && history.requestIDs.isEmpty
+            history.fallbackShown = true
+        } else {
+            shouldPlay = !(history.fallbackShown && history.requestIDs.isEmpty)
+                && !row.replyRequestIDs.subtracting(history.requestIDs).isEmpty
+            history.requestIDs.formUnion(row.replyRequestIDs)
+        }
+        replyCueHistory[row.sessionID] = history
+        return shouldPlay
+    }
+
+    func finishReplyCues(for rows: [ActivitySessionSnapshot]) {
+        for row in rows where !row.phase.isActive { replyCueHistory.removeValue(forKey: row.sessionID) }
+    }
     // QuotaView IslandBoardState.showsCompactQuota: idle is a display branch,
     // never a fabricated activity row or a hidden primary interface.
     var showsCompactQuota: Bool {
@@ -90,7 +118,9 @@ struct ActivityIslandView: View {
                     height: model.metrics.compactRect.height, hardwareGap: model.metrics.hardwareGap,
                     animated: model.playbackVisible && model.presentation == .compact && !motionIsReduced,
                     reduceMotion: motionIsReduced,
-                    onExpand: model.onExpand)
+                    onExpand: model.onExpand,
+                    replyCueVisible: model.playbackVisible && model.presentation == .compact,
+                    claimReplyCue: { model.claimReplyCue(for: $0) })
             } else if !compact && model.showsUsagePage {
                 ActivityIslandUsageDashboard(model: model)
                     .environment(\.islandLiquidGlassEnabled, model.material == .liquidGlass)
@@ -103,7 +133,8 @@ struct ActivityIslandView: View {
                     effect: model.progressEffect, focusedID: model.focusedSessionID ?? model.snapshot?.sessionID,
                     reduceMotion: motionIsReduced, pinned: model.isPinned,
                     onPin: model.onPin, onSelect: model.onSelect, onSettings: model.onOpenSettings, onRefresh: model.onRefresh,
-                    onOpenUsage: model.onOpenUsage, quotaTitle: model.compactQuotaPercent)
+                    onOpenUsage: model.onOpenUsage, quotaTitle: model.compactQuotaPercent,
+                    claimReplyCue: { model.claimReplyCue(for: $0) })
                     .environment(\.islandLiquidGlassEnabled, model.material == .liquidGlass)
                     .transition(.opacity)
             }
@@ -182,7 +213,10 @@ private struct IslandSessionPresentation {
         return row.projectName.isEmpty ? "Codex 任务" : "项目 · " + row.projectName
     }
     var compactTitle: String {
-        (isResult ? summaryGroup : title) + " · " + (row.isPrivate ? "会话详情已隐藏" : isResult ? row.title : runningDetail)
+        if row.phase == .waitingApproval && row.waitReason == .userInput {
+            return title + " · " + (row.isPrivate ? "会话详情已隐藏" : row.title)
+        }
+        return (isResult ? summaryGroup : title) + " · " + (row.isPrivate ? "会话详情已隐藏" : isResult ? row.title : runningDetail)
     }
     var turnTokens: String {
         guard !row.isPrivate else { return "用量已隐藏" }
@@ -251,6 +285,49 @@ private struct IslandSessionSummaryView: View {
     }
 }
 
+/// Replay history belongs to the model, while this modifier owns only the brief cue.
+private struct IslandReplyCue: ViewModifier {
+    let row: ActivitySessionSnapshot
+    let visible: Bool
+    let reduceMotion: Bool
+    var claim: ((ActivitySessionSnapshot) -> Bool)?
+    @Binding var active: Bool
+    @State private var generation = 0
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { refresh() }
+            .onChange(of: row) { _ in refresh() }
+            .onChange(of: visible) { _ in refresh() }
+            .onChange(of: reduceMotion) { _ in refresh() }
+            .onDisappear { stop() }
+    }
+
+    private func refresh() {
+        guard visible, row.phase == .waitingApproval, row.waitReason == .userInput else {
+            stop(); return
+        }
+        // Consume in Reduce Motion too, so enabling motion later cannot replay it.
+        guard claim?(row) == true else {
+            if reduceMotion { stop() }
+            return
+        }
+        generation += 1
+        let current = generation
+        guard !reduceMotion else { active = false; return }
+        withAnimation(MonitorDesktopTheme.selectionMotion) { active = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard generation == current else { return }
+            withAnimation(MonitorDesktopTheme.hoverMotion) { active = false }
+        }
+    }
+
+    private func stop() {
+        generation += 1
+        withAnimation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion) { active = false }
+    }
+}
+
 struct ActivityIslandCompactContent: View {
     let row: ActivitySessionSnapshot
     let rows: [ActivitySessionSnapshot]
@@ -260,6 +337,9 @@ struct ActivityIslandCompactContent: View {
     let animated: Bool
     let reduceMotion: Bool
     var onExpand: (() -> Void)?
+    var replyCueVisible = false
+    var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
+    @State private var replyCueActive = false
     private var presentation: IslandSessionPresentation { .init(row: row) }
     private var symbol: some View {
         Group {
@@ -269,11 +349,14 @@ struct ActivityIslandCompactContent: View {
                 Image(systemName: presentation.symbol).font(.system(size: 16, weight: .medium))
                     .foregroundStyle(presentation.color)
             }
-        }.frame(width: 18, height: 18).frame(width: 30).accessibilityHidden(true)
+        }.frame(width: 18, height: 18)
+            .scaleEffect(replyCueActive ? 1.12 : 1)
+            .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: replyCueActive)
+            .frame(width: 30).accessibilityHidden(true)
     }
     private var taskText: some View {
         IslandScrollingText(text: presentation.compactTitle, font: .systemFont(ofSize: 12, weight: .semibold),
-                            visible: animated && !presentation.isResult, reduceMotion: reduceMotion)
+                            visible: animated && !presentation.isResult && row.waitReason != .userInput, reduceMotion: reduceMotion)
     }
     private var statistics: some View {
         let side = max(0, (width - 40 - hardwareGap - (hardwareGap > 0 ? 16 : 0)) / 2)
@@ -301,6 +384,8 @@ struct ActivityIslandCompactContent: View {
             .accessibilityLabel("\(presentation.accessibilitySummary)，\(rows.count) 会话")
             .accessibilityValue(IslandSessionPresentation.summary(rows))
             .accessibilityHint("悬停或点击展开会话详情")
+            .modifier(IslandReplyCue(row: row, visible: replyCueVisible,
+                reduceMotion: reduceMotion, claim: claimReplyCue, active: $replyCueActive))
     }
 }
 
@@ -313,14 +398,22 @@ struct ActivityIslandTaskCard: View {
     var effect: ActivityIslandProgressEffect = .stateSmoke
     var reduceMotion = false
     var preview = false
+    var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     @State private var hovered = false
+    @State private var replyCueActive = false
     private var presentation: IslandSessionPresentation { .init(row: row) }
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: presentation.symbol)
-                .font(.system(size: 20, weight: .medium)).foregroundStyle(presentation.color)
+            ZStack {
+                Image(systemName: presentation.symbol)
+                    .font(.system(size: 20, weight: .medium)).foregroundStyle(presentation.color)
+                    .id(presentation.symbol).transition(.opacity)
+            }
                 .frame(width: 28, height: 28)
+                .scaleEffect(replyCueActive ? 1.10 : 1)
+                .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: replyCueActive)
+                .animation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion, value: presentation.symbol)
                 .background(FloatingSurfaceTheme.accent().opacity(selected ? 0.16 : 0),
                             in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
@@ -332,6 +425,8 @@ struct ActivityIslandTaskCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text(presentation.title).font(FloatingSurfaceTypography.captionMedium)
                         .foregroundStyle(presentation.color).fixedSize()
+                        .contentTransition(.opacity)
+                        .animation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion, value: presentation.title)
                 }.frame(height: 16)
                 if row.isPrivate {
                     Text("会话详情已隐藏").font(FloatingSurfaceTypography.caption)
@@ -349,7 +444,8 @@ struct ActivityIslandTaskCard: View {
         .background {
             if selected && (!presentation.isResult || row.phase == .completed) {
                 ActivityIslandTaskEffect(row: row, effect: effect, playback: animated,
-                    reduceMotion: reduceMotion, preview: preview).allowsHitTesting(false).accessibilityHidden(true)
+                    reduceMotion: reduceMotion, preview: preview, replyCueActive: replyCueActive)
+                    .allowsHitTesting(false).accessibilityHidden(true)
             }
         }
         .islandGlass(RoundedRectangle(cornerRadius: 16, style: .continuous),
@@ -359,11 +455,13 @@ struct ActivityIslandTaskCard: View {
         .help(row.isPrivate ? presentation.accessibilitySummary : "\(row.projectName) · \(row.title)\n\(presentation.accessibilitySummary)\n\(row.actionText)")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(presentation.accessibilitySummary)
+        .modifier(IslandReplyCue(row: row, visible: animated && selected && !preview,
+            reduceMotion: reduceMotion, claim: claimReplyCue, active: $replyCueActive))
     }
 
     private var runningLine: some View {
         IslandScrollingText(text: presentation.runningDetail, font: .systemFont(ofSize: 11),
-            color: IslandTextPalette.secondary, visible: animated && selected, reduceMotion: reduceMotion)
+            color: IslandTextPalette.secondary, visible: animated && selected && row.waitReason != .userInput, reduceMotion: reduceMotion)
             .frame(maxWidth: .infinity, alignment: .leading).frame(height: 14)
     }
     private var resultLine: some View {
@@ -415,6 +513,7 @@ struct ActivityIslandExpandedList: View {
     var onRefresh: (() -> Void)?
     var onOpenUsage: (() -> Void)?
     var quotaTitle = "—"
+    var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -444,7 +543,8 @@ struct ActivityIslandExpandedList: View {
             } else {
                 ActivityIslandTaskScroll(rows: rows, playback: animated,
                     rowHeight: rowHeight, onInteraction: onInteraction, effect: effect,
-                    focusedID: focusedID ?? rows.first?.id, reduceMotion: reduceMotion, onSelect: onSelect)
+                    focusedID: focusedID ?? rows.first?.id, reduceMotion: reduceMotion, onSelect: onSelect,
+                    claimReplyCue: claimReplyCue)
                     .frame(width: width - 56, height: listHeight)
             }
             HStack(spacing: 8) {

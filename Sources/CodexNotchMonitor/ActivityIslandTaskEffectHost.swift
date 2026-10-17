@@ -591,6 +591,8 @@ final class ActivityIslandTaskEffectHost: NSView {
     private var state: CodexActivityVisualState = .standby
     private var playback = false
     private var reduced = false
+    private var awaitingReply = false
+    private var replyCueActive = false
     override var isOpaque: Bool { false }
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -610,9 +612,17 @@ final class ActivityIslandTaskEffectHost: NSView {
         outline.frame = bounds; outline.setIslandCornerRadius(16)
         effect.redrawIfPaused()
     }
-    func update(row: ActivitySessionSnapshot, selectedEffect: ActivityIslandProgressEffect, playback: Bool, reduceMotion: Bool) {
+    func update(row: ActivitySessionSnapshot, selectedEffect: ActivityIslandProgressEffect, playback: Bool,
+                reduceMotion: Bool, replyCueActive: Bool = false) {
         let next = Optional(row.phase).rippleGlowVisualState
         let receipt = identity == nil && next == .completed
+        let reply = row.phase == .waitingApproval && row.waitReason == .userInput
+        if reply != awaitingReply {
+            outline.layer?.removeAllAnimations()
+            outline.alphaValue = reply ? 0.24 : 1
+        }
+        awaitingReply = reply
+        self.replyCueActive = replyCueActive
         identity = .init(sessionID: row.sessionID, turnID: row.turnID)
         state = next; self.playback = playback; reduced = reduceMotion
         effect.setEffect(selectedEffect)
@@ -628,6 +638,26 @@ final class ActivityIslandTaskEffectHost: NSView {
         let confirming = state == .awaitingConfirmation
         effect.isHidden = confirming
         effect.setPlaybackEnabled(visible && !confirming)
+        if awaitingReply {
+            // One native contour remains; no running particles or looping glow.
+            glow.update(edgeEmphasis: .none, reduceMotion: true, playbackVisible: false)
+            glow.updateIslandConfirmationPulse(animated: false)
+            outline.update(edgeEmphasis: .confirmationReminder, reduceMotion: true, playbackVisible: visible)
+            if !visible || reduced {
+                outline.layer?.removeAllAnimations()
+                outline.alphaValue = 0.24
+                return
+            }
+            let opacity: CGFloat = replyCueActive ? 0.95 : 0.24
+            if abs(outline.alphaValue - opacity) > 0.001 {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.15
+                    context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+                    outline.animator().alphaValue = opacity
+                }
+            }
+            return
+        }
         let emphasis: CodexActivityIslandEdgeEmphasis = confirming ? .confirmationReminder : state == .completed ? .completion : .none
         glow.update(edgeEmphasis: emphasis, reduceMotion: reduced, playbackVisible: visible)
         outline.update(edgeEmphasis: emphasis, reduceMotion: true, playbackVisible: visible)

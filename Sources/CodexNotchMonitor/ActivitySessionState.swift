@@ -20,6 +20,7 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     var sessionTotalTokens: Int? = nil
     var isPrivate = false
     var waitReason: CodexActivityWaitReason? = nil
+    var replyRequestIDs: Set<String> = []
 
     var tokenTitle: String {
         guard !isPrivate, let sessionTotalTokens else { return "— tokens" }
@@ -37,7 +38,8 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     func hidingDetails() -> Self {
         Self(sessionID: sessionID, turnID: turnID, projectID: projectID, projectName: "项目",
              title: "Codex 任务", phase: phase, actionText: "任务内容已隐藏", updatedAt: updatedAt,
-             tokenUsage: nil, endReason: endReason, isPrivate: true, waitReason: waitReason)
+             tokenUsage: nil, endReason: endReason, isPrivate: true,
+             waitReason: waitReason, replyRequestIDs: replyRequestIDs)
     }
 
     var statusTitle: String {
@@ -126,7 +128,8 @@ struct ActivitySessionState {
                     reasoningEffort: task.reasoningEffort ?? local?.reasoningEffort ?? sameTurn?.reasoningEffort,
                     startedAt: task.startedAt ?? local?.startedAt ?? sameTurn?.startedAt,
                     sessionTotalTokens: [local?.sessionTotalTokens, previous?.sessionTotalTokens].compactMap { $0 }.max(),
-                    waitReason: task.phase == .waitingApproval ? local?.nativeWaitReason ?? sameTurn?.waitReason : nil
+                    waitReason: task.phase == .waitingApproval ? local?.nativeWaitReason ?? sameTurn?.waitReason : nil,
+                    replyRequestIDs: task.phase == .waitingApproval ? local?.nativeReplyRequestIDs ?? sameTurn?.replyRequestIDs ?? [] : []
                 ))
             }
         }
