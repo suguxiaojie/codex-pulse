@@ -9,26 +9,53 @@ struct NativeActivityEvidence {
     let startedAt: Date?
     let receivedAt: Date
     let terminal: SessionEndReason?
+    var waitReason: CodexActivityWaitReason? = nil
+    var pendingAsyncQuestionIDs: Set<String> = []
 
     static func project(_ value: CodexDesktopInteractionProjection, previous: Self?, now: Date) -> Self? {
         guard value.sourceKind == .user || value.sourceKind == .unknown,
               let turn = value.currentTurnID, !turn.isEmpty else { return nil }
         let phase: TaskPhase
         let terminal: SessionEndReason?
+        var waitReason: CodexActivityWaitReason? = nil
         switch value.status {
         case "inProgress":
             terminal = nil
             let waiting: Bool
-            if case .waiting = value.threadWaitStatus { waiting = true }
-            else if !value.authoritativePendingIdentities.isEmpty { waiting = true }
-            else { waiting = previous?.turnID == turn && previous?.phase == .waitingApproval && !value.provesNoPendingConfirmation }
+            if case let .waiting(reason) = value.threadWaitStatus {
+                waiting = true; waitReason = reason
+            } else if !value.authoritativePendingIdentities.isEmpty {
+                waiting = true
+                waitReason = value.authoritativePendingIdentities.allSatisfy {
+                    $0.method == "item/tool/requestUserInput" || $0.method == "mcpServer/elicitation/request"
+                } ? .userInput : .approval
+            } else if !value.authoritativeAsyncQuestionIDs.isEmpty {
+                waiting = true; waitReason = .userInput
+            } else {
+                // Accepted replies settle only the exact async questions that
+                // established this wait, even if runtime flags arrive later.
+                let answered = Set(value.asyncQuestions.filter { $0.resolvedAnswer != nil }.map(\.questionItemID))
+                let resolvedAsyncWait = previous?.turnID == turn && previous?.waitReason == .userInput
+                    && value.pendingRequestsAreAuthoritative
+                    && previous?.pendingAsyncQuestionIDs.isEmpty == false
+                    && previous?.pendingAsyncQuestionIDs.isSubset(of: answered) == true
+                waiting = previous?.turnID == turn && previous?.phase == .waitingApproval
+                    && !value.provesNoPendingConfirmation && !resolvedAsyncWait
+                waitReason = waiting ? previous?.waitReason : nil
+            }
             phase = waiting ? .waitingApproval : .working
         case "completed": phase = .completed; terminal = .completed
         case "interrupted": phase = .ended; terminal = .cancelled
         case "failed": phase = .failed; terminal = .failed
         default: return nil
         }
-        return Self(turnID: turn, phase: phase, title: value.title, startedAt: value.startedAt, receivedAt: now, terminal: terminal)
+        let pendingQuestions = phase == .waitingApproval && waitReason == .userInput
+            ? (value.authoritativeAsyncQuestionIDs.isEmpty
+               ? (previous?.turnID == turn ? previous?.pendingAsyncQuestionIDs ?? [] : [])
+               : value.authoritativeAsyncQuestionIDs)
+            : []
+        return Self(turnID: turn, phase: phase, title: value.title, startedAt: value.startedAt,
+            receivedAt: now, terminal: terminal, waitReason: waitReason, pendingAsyncQuestionIDs: pendingQuestions)
     }
 
     func applying(to local: LocalSessionSnapshot) -> LocalSessionSnapshot? {
@@ -49,7 +76,8 @@ struct NativeActivityEvidence {
             reasoningEffort: sameTurn ? local.reasoningEffort : nil,
             startedAt: startedAt ?? (sameTurn ? local.startedAt : nil), sessionTotalTokens: local.sessionTotalTokens,
             latestAssistantSummary: sameTurn ? local.latestAssistantSummary : nil,
-            nativePhase: phase == .working && toolRunning ? .usingTool : phase, sessionKind: local.sessionKind)
+            nativePhase: phase == .working && toolRunning ? .usingTool : phase, sessionKind: local.sessionKind,
+            nativeWaitReason: waitReason)
     }
 }
 

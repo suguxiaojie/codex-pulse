@@ -50,6 +50,7 @@ struct LocalSessionSnapshot: Equatable {
     var latestAssistantSummary: String? = nil
     var nativePhase: TaskPhase? = nil
     var sessionKind: CodexActivitySessionKind = .unknown
+    var nativeWaitReason: CodexActivityWaitReason? = nil
 
     func evaluated(at now: Date) -> Self {
         guard let evidence else { return self }

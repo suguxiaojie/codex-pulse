@@ -6,7 +6,7 @@
 
 **在菜单栏与灵动岛里，掌握 Codex 的额度、任务和本地用量。**
 
-[English](README.en.md) · [下载 v1.8.1](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.1) · [MIT License](LICENSE)
+[English](README.en.md) · [下载 v1.8.2](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.2) · [MIT License](LICENSE)
 
 macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -21,7 +21,7 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 - **会话管理**：搜索项目与会话，查看账号归属和异常摘要，支持 Markdown／HTML 导出、原始备份、导入及项目迁移。
 - **原生外观**：暖中性色与陶土强调，保留原生玻璃、浅／深／自动外观、实时设置预览及辅助功能支持。
 
-任务监控使用只读桌面 IPC 与本地日志，无需安装 Hook；批准和回答继续在 Codex 中完成。
+任务监控使用只读桌面 IPC 与本地日志，无需安装 Hook；批准和回答继续在 Codex 中完成。已有未答复的结构化选择题／输入请求时，灵动岛显示橙色“待回复”，与“待批准”区分；回答被接受且运行状态明确解除等待后恢复运行显示，不按普通问句推断。
 
 ## 界面预览
 
@@ -66,12 +66,12 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
 ## 下载与安装
 
-当前版本：**v1.8.1（Build 27）**。前往 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.1) 下载对应安装包：
+当前版本：**v1.8.2（Build 28）**。前往 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.2) 下载对应安装包：
 
 | Mac 处理器 | 安装包 |
 |---|---|
-| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.1/CodexNotchMonitor-v1.8.1-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.1/CodexNotchMonitor-v1.8.1-x86_64.dmg) |
+| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.2/CodexNotchMonitor-v1.8.2-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.2/CodexNotchMonitor-v1.8.2-x86_64.dmg) |
 
 1. 打开 DMG，将 App 拖入 Applications。
 2. 启动 App，保持 Codex／ChatGPT Desktop 已安装并登录。
@@ -79,7 +79,7 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
 应用使用临时签名，尚未通过 Apple 公证。若系统拦截首次打开，请核对下载来源后，在“系统设置 → 隐私与安全性”中允许打开。
 
-v1.8.0 用户请从本页手动下载安装一次 v1.8.1，以更新应用内的 GitHub 仓库地址；配置和数据继续沿用。
+v1.8.0 用户请从本页手动下载安装当前版本，以更新应用内的 GitHub 仓库地址；配置和数据继续沿用。
 
 由 Codex Monitor 更名为 Codex Pulse 后，Bundle ID、`CodexNotchMonitor.app` 文件名、偏好键与数据目录沿用原值，现有配置和数据继续使用。应用内检查更新会打开下载地址，由用户完成安装。
 

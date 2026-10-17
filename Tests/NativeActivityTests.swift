@@ -8,9 +8,9 @@ enum NativeActivityTests {
         checks += 1
         do { if try !condition() { fatalError(message) } } catch { fatalError("\(message): \(error)") }
     }
-    static func projection(status: String = "inProgress", turn: String = "turn", flags: [String]? = [], requests: [[String: Any]] = [], source: Any = "appServer") throws -> CodexDesktopInteractionProjection {
+    static func projection(status: String = "inProgress", turn: String = "turn", flags: [String]? = [], requests: [[String: Any]] = [], items: [[String: Any]] = [], source: Any = "appServer") throws -> CodexDesktopInteractionProjection {
         var state: [String: Any] = ["id": "thread", "source": source, "title": "Example", "requests": requests,
-            "turns": [["turnId": turn, "status": status, "turnStartedAtMs": 1000000, "items": []]]]
+            "turns": [["turnId": turn, "status": status, "turnStartedAtMs": 1000000, "items": items]]]
         if let flags { state["threadRuntimeStatus"] = ["type": "active", "activeFlags": flags] }
         return try CodexDesktopRequestProjector.project(conversationID: "thread", conversationStateData: JSONSerialization.data(withJSONObject: state))
     }
@@ -27,6 +27,40 @@ enum NativeActivityTests {
         let request: [String: Any] = ["id": "approval", "method": "item/commandExecution/requestApproval", "params": ["threadId": "thread", "turnId": "turn", "command": "test"]]
         expect(NativeActivityEvidence.project(try projection(requests: [request]), previous: nil, now: now)?.phase == .waitingApproval, "pending request also proves wait")
         expect(NativeActivityEvidence.project(try projection(turn: "new", requests: [request]), previous: waiting, now: now)?.phase == .working, "old-turn request cannot block new turn")
+        let questionItem: [String: Any] = ["type": "agentMessage", "id": "question-item",
+            "questions": [["title": "请选择", "options": ["A", "B"]], ["title": "确认范围", "options": ["C", "D"]]]]
+        let questionProjection = try projection(items: [questionItem])
+        expect(questionProjection.authoritativeAsyncQuestionIDs.count == 2, "current-turn async questions are explicit pending evidence")
+        expect(!questionProjection.provesNoPendingConfirmation, "running runtime flags cannot clear unanswered async questions")
+        let needsReply = NativeActivityEvidence.project(questionProjection, previous: running, now: now)!
+        expect(needsReply.phase == .waitingApproval && needsReply.waitReason == .userInput, "async questions enter user-input attention instead of thinking")
+        expect(waiting.waitReason == .approval, "approval waits retain their own reason")
+        let synchronous: [String: Any] = ["id": "input", "method": "item/tool/requestUserInput",
+            "params": ["threadId": "thread", "turnId": "turn", "questions": []]]
+        expect(NativeActivityEvidence.project(try projection(requests: [synchronous]), previous: running, now: now)?.waitReason == .userInput, "synchronous input also asks for a reply rather than approval")
+        func answer(_ question: CodexDesktopProjectedAsyncQuestion) throws -> [String: Any] {
+            let reply = [["questionItemId": question.questionItemID, "question": question.question, "answer": question.options.first ?? "已确认"]]
+            let text = CodexDesktopRequestProjector.asyncReplyOpeningTag
+                + String(decoding: try JSONSerialization.data(withJSONObject: reply), as: UTF8.self)
+                + CodexDesktopRequestProjector.asyncReplyClosingTag
+            return ["type": "steeringUserMessage", "status": "accepted", "input": [["type": "text", "text": text]]]
+        }
+        let firstAnswer = try answer(questionProjection.asyncQuestions[0])
+        let lastAnswer = try answer(questionProjection.asyncQuestions[1])
+        let partialQuestions = try projection(items: [questionItem, firstAnswer])
+        expect(partialQuestions.authoritativeAsyncQuestionIDs.count == 1 && !partialQuestions.provesNoPendingConfirmation, "answering one question retains the other pending question")
+        expect(NativeActivityEvidence.project(partialQuestions, previous: needsReply, now: now)?.waitReason == .userInput, "partial answers stay in reply attention")
+        let answered = try projection(items: [questionItem, firstAnswer, lastAnswer])
+        expect(answered.provesNoPendingConfirmation, "accepted answers and authoritative running state clear the wait")
+        let resumed = NativeActivityEvidence.project(answered, previous: needsReply, now: now)!
+        expect(resumed.phase == .working && resumed.waitReason == nil, "complete answers resume running and clear the reason")
+        expect(NativeActivityEvidence.project(try projection(flags: nil, items: [questionItem, firstAnswer, lastAnswer]), previous: needsReply, now: now)?.phase == .working, "accepted answers settle the exact async wait without delayed runtime flags")
+        expect(NativeActivityEvidence.project(try projection(flags: nil), previous: needsReply, now: now)?.phase == .waitingApproval, "missing question content and runtime flags do not falsely clear an async wait")
+        expect(NativeActivityEvidence.project(try projection(flags: nil, items: [questionItem, firstAnswer]), previous: needsReply, now: now)?.phase == .waitingApproval, "partial accepted answers with missing flags retain attention")
+        expect(NativeActivityEvidence.project(try projection(turn: "new"), previous: needsReply, now: now)?.phase == .working, "old async wait cannot block a new turn")
+        let ordinary: [String: Any] = ["type": "agentMessage", "id": "ordinary", "text": "你需要选择哪一个？"]
+        expect(NativeActivityEvidence.project(try projection(items: [ordinary]), previous: running, now: now)?.phase == .working, "ordinary assistant text never infers user-input attention")
+        expect(NativeActivityEvidence.project(try projection(status: "completed", items: [questionItem]), previous: needsReply, now: now)?.phase == .completed, "terminal evidence supersedes unresolved old questions")
         for (status, reason) in [("completed", SessionEndReason.completed), ("interrupted", .cancelled), ("failed", .failed)] {
             expect(NativeActivityEvidence.project(try projection(status: status), previous: waiting, now: now)?.terminal == reason, "native terminal preserves \(status) semantics")
         }
@@ -36,6 +70,14 @@ enum NativeActivityTests {
             updatedAt: now, activities: [.init(id: "tool", kind: .command, title: "测试", isRunning: true, updatedAt: now)], startedAt: now.addingTimeInterval(-100))
         expect(running.applying(to: local)?.nativePhase == .usingTool, "running native turn preserves local live tool")
         expect(waiting.applying(to: local)?.nativePhase == .waitingApproval, "native wait takes precedence over unfinished tool")
+        let inputLocal = needsReply.applying(to: local)!
+        expect(inputLocal.nativeWaitReason == .userInput, "native input reason reaches the local session")
+        var inputLifecycle = ActivitySessionState()
+        inputLifecycle.update(projects: ProjectActivityAggregator.projects(snapshots: [inputLocal], now: now, catalog: .empty),
+            snapshots: [inputLocal], usages: [:], now: now, completionHold: 8)
+        expect(inputLifecycle.rows.first?.statusTitle == "待回复", "session presentation distinguishes input from approval")
+        expect(inputLifecycle.rows.first?.actionText == "请在 Codex 中选择或回复", "input attention does not reuse stale tool or assistant summaries")
+        expect(inputLifecycle.rows.first?.hidingDetails().waitReason == .userInput, "privacy retains public wait semantics")
         let newer = LocalSessionSnapshot(sessionID: "thread", turnID: "new", cwd: "/Example", model: nil, isActive: true,
             updatedAt: now, activities: [], startedAt: now)
         expect(running.applying(to: newer) == nil, "old native turn cannot overwrite a newer local start")

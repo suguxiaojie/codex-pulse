@@ -156,7 +156,10 @@ private struct IslandSessionPresentation {
         case .starting: return ("开始中", "hourglass", FloatingSurfaceTheme.secondary())
         case .working: return ("思考中", "ellipsis", FloatingSurfaceTheme.accent())
         case .usingTool: return ("执行工具", "terminal.fill", FloatingSurfaceTheme.accent())
-        case .waitingApproval: return ("待批准", "hand.raised.fill", .orange)
+        case .waitingApproval:
+            return row.waitReason == .userInput
+                ? ("待回复", "questionmark.bubble.fill", .orange)
+                : ("待批准", "hand.raised.fill", .orange)
         case .completed: return ("本轮已完成", "checkmark.circle.fill", FloatingSurfaceTheme.success)
         case .failed: return ("本轮失败", "exclamationmark.circle.fill", FloatingSurfaceTheme.danger)
         case .ended: return ("会话已结束", "minus.circle", FloatingSurfaceTheme.secondary())
@@ -172,6 +175,7 @@ private struct IslandSessionPresentation {
         let action = row.actionText.trimmingCharacters(in: .whitespacesAndNewlines)
         let generic = action.isEmpty || action == row.phase.title || action == row.statusTitle
         if row.phase == .waitingApproval {
+            if row.waitReason == .userInput { return "请在 Codex 中选择或回复" }
             return generic ? "请在 Codex 中处理批准请求" : "请在 Codex 中处理 · " + action
         }
         if !generic { return action }
@@ -202,7 +206,7 @@ private struct IslandSessionPresentation {
     private var summaryGroup: String {
         if row.endReason == .cancelled { return "取消" }
         switch row.phase {
-        case .waitingApproval: return "待批准"
+        case .waitingApproval: return row.waitReason == .userInput ? "待回复" : "待批准"
         case .starting, .working, .usingTool: return "运行"
         case .failed: return "失败"
         case .completed: return "完成"
@@ -211,18 +215,18 @@ private struct IslandSessionPresentation {
     }
     static func conciseSummary(_ rows: [ActivitySessionSnapshot], maxGroups: Int = 6) -> Text {
         let counts = Dictionary(grouping: rows, by: { Self(row: $0).summaryGroup }).mapValues(\.count)
-        let groups: [(title: String, count: Int)] = ["待批准", "失败", "运行", "完成", "取消", "结束"]
+        let groups: [(title: String, count: Int)] = ["待批准", "待回复", "失败", "运行", "完成", "取消", "结束"]
             .compactMap { title in counts[title].map { (title, $0) } }
         guard !groups.isEmpty else { return Text("暂无运行任务").foregroundColor(FloatingSurfaceTheme.secondary()) }
         return groups.prefix(max(1, maxGroups)).enumerated().reduce(Text("")) { text, item in
             let group = item.element
-            let color: Color = group.title == "待批准" ? .orange : group.title == "失败" ? FloatingSurfaceTheme.danger : FloatingSurfaceTheme.secondary()
+            let color: Color = ["待批准", "待回复"].contains(group.title) ? .orange : group.title == "失败" ? FloatingSurfaceTheme.danger : FloatingSurfaceTheme.secondary()
             let separator = Text(item.offset == 0 ? "" : " · ").foregroundColor(FloatingSurfaceTheme.secondary())
             return text + separator + Text("\(group.count) \(group.title)").foregroundColor(color)
         }
     }
     static func summary(_ rows: [ActivitySessionSnapshot]) -> String {
-        let order = ["待批准", "开始中", "思考中", "执行工具", "本轮失败", "本轮已完成", "本轮已取消", "会话已结束"]
+        let order = ["待批准", "待回复", "开始中", "思考中", "执行工具", "本轮失败", "本轮已完成", "本轮已取消", "会话已结束"]
         let counts = Dictionary(grouping: rows, by: { Self(row: $0).title }).mapValues(\.count)
         return rows.isEmpty ? "暂无运行任务" : order.compactMap { title in counts[title].map { "\($0) \(title)" } }.joined(separator: " · ")
     }

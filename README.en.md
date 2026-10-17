@@ -6,7 +6,7 @@
 
 **Keep Codex quotas, live tasks and local usage in your menu bar and Activity Island.**
 
-[简体中文](README.md) · [Download v1.8.1](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.1) · [MIT License](LICENSE)
+[简体中文](README.md) · [Download v1.8.2](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.2) · [MIT License](LICENSE)
 
 macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -21,7 +21,7 @@ macOS 13+ · SwiftUI / AppKit · Apple Silicon / Intel
 - **Session management**: project/session search, ownership and exception summaries, Markdown/HTML exports, raw backups, imports and project transfers.
 - **Native appearance**: warm neutral surfaces and clay accents, native glass, Light/Dark/Auto appearance, live settings previews and accessibility support.
 
-Task monitoring uses read-only desktop IPC and local logs without installing Hooks. Approvals and answers stay in Codex.
+Task monitoring uses read-only desktop IPC and local logs without installing Hooks. Approvals and answers stay in Codex. Explicit unanswered structured questions/input requests show orange “Awaiting reply”, distinct from approval requests. Accepted replies plus authoritative running state clear the wait; ordinary assistant questions do not infer an input request.
 
 ## Screenshots
 
@@ -66,12 +66,12 @@ Task monitoring uses read-only desktop IPC and local logs without installing Hoo
 
 ## Download and install
 
-Current version: **v1.8.1 (Build 27)**. Choose the installer for your processor from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.1).
+Current version: **v1.8.2 (Build 28)**. Choose the installer for your processor from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.2).
 
 | Mac processor | Installer |
 |---|---|
-| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.1/CodexNotchMonitor-v1.8.1-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.1/CodexNotchMonitor-v1.8.1-x86_64.dmg) |
+| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.2/CodexNotchMonitor-v1.8.2-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.8.2/CodexNotchMonitor-v1.8.2-x86_64.dmg) |
 
 1. Open the DMG and drag the app into Applications.
 2. Launch it with Codex/ChatGPT Desktop installed and signed in.
@@ -79,7 +79,7 @@ Current version: **v1.8.1 (Build 27)**. Choose the installer for your processor 
 
 The app is ad-hoc signed and has not been notarized by Apple. If macOS blocks the first launch, verify the download source and allow it in System Settings → Privacy & Security.
 
-If you use v1.8.0, manually download and install v1.8.1 once to update the in-app GitHub repository address. Existing configuration and data are retained.
+If you use v1.8.0, manually download and install the current version once to update the in-app GitHub repository address. Existing configuration and data are retained.
 
 The display name changed from Codex Monitor to Codex Pulse. The Bundle ID, `CodexNotchMonitor.app` filename, preference keys and data directories remain unchanged to retain existing configuration and data. Update checks open a download URL; installation remains under your control.
 

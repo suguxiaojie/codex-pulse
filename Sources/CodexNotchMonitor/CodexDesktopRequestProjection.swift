@@ -73,6 +73,7 @@ public struct CodexDesktopInteractionProjection: Sendable {
     public var provesNoPendingConfirmation: Bool {
         status == "inProgress" && pendingRequestsAreAuthoritative
             && threadWaitStatus == .running && authoritativePendingIdentities.isEmpty
+            && authoritativeAsyncQuestionIDs.isEmpty
     }
 
     public init(currentTurnID: String?, status: String, title: String,

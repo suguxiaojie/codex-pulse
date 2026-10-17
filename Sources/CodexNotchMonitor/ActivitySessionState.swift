@@ -19,6 +19,7 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     var startedAt: Date? = nil
     var sessionTotalTokens: Int? = nil
     var isPrivate = false
+    var waitReason: CodexActivityWaitReason? = nil
 
     var tokenTitle: String {
         guard !isPrivate, let sessionTotalTokens else { return "— tokens" }
@@ -36,7 +37,7 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     func hidingDetails() -> Self {
         Self(sessionID: sessionID, turnID: turnID, projectID: projectID, projectName: "项目",
              title: "Codex 任务", phase: phase, actionText: "任务内容已隐藏", updatedAt: updatedAt,
-             tokenUsage: nil, endReason: endReason, isPrivate: true)
+             tokenUsage: nil, endReason: endReason, isPrivate: true, waitReason: waitReason)
     }
 
     var statusTitle: String {
@@ -45,7 +46,7 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
         case .starting: return "开始中"
         case .working: return "思考中"
         case .usingTool: return "工作中"
-        case .waitingApproval: return "待确认"
+        case .waitingApproval: return waitReason == .userInput ? "待回复" : "待确认"
         case .completed: return "已完成"
         case .ended: return "已结束"
         case .failed: return "失败"
@@ -54,7 +55,7 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
 
     static func statusSummary(_ rows: [Self]) -> String {
         let counts = Dictionary(grouping: rows, by: \.statusTitle).mapValues(\.count)
-        return ["待确认", "开始中", "思考中", "工作中", "失败", "已完成", "已取消", "已结束"]
+        return ["待确认", "待回复", "开始中", "思考中", "工作中", "失败", "已完成", "已取消", "已结束"]
             .compactMap { title in counts[title].map { "\($0) \(title)" } }.joined(separator: " · ")
     }
 
@@ -111,7 +112,9 @@ struct ActivitySessionState {
                 let sameTurn = task.turnID != nil && previous?.turnID == task.turnID ? previous : nil
                 let local = snapshots.first { $0.sessionID == session.id && $0.turnID == task.turnID }
                 let activity = session.activities.filter { $0.kind != .progress && $0.isRunning }.max { $0.updatedAt < $1.updatedAt }
-                let action = task.phase == .usingTool ? activity?.title ?? task.phase.title
+                let action = task.phase == .waitingApproval && local?.nativeWaitReason == .userInput
+                    ? "请在 Codex 中选择或回复"
+                    : task.phase == .usingTool ? activity?.title ?? task.phase.title
                     : local?.latestAssistantSummary ?? task.phase.title
                 incoming.append(ActivitySessionSnapshot(
                     sessionID: session.id, turnID: task.turnID, projectID: project.id,
@@ -122,7 +125,8 @@ struct ActivitySessionState {
                     modelName: task.model ?? local?.model ?? sameTurn?.modelName,
                     reasoningEffort: task.reasoningEffort ?? local?.reasoningEffort ?? sameTurn?.reasoningEffort,
                     startedAt: task.startedAt ?? local?.startedAt ?? sameTurn?.startedAt,
-                    sessionTotalTokens: [local?.sessionTotalTokens, previous?.sessionTotalTokens].compactMap { $0 }.max()
+                    sessionTotalTokens: [local?.sessionTotalTokens, previous?.sessionTotalTokens].compactMap { $0 }.max(),
+                    waitReason: task.phase == .waitingApproval ? local?.nativeWaitReason ?? sameTurn?.waitReason : nil
                 ))
             }
         }

@@ -14,6 +14,8 @@ GitHub 仓库已更名为 suguxiaojie/codex-pulse，v1.8.1（Build 27）为最�
 
 ## 进行中与待办
 
+- 2026-10-17 17:56：用户已实测确认“待回复”显示及回答后恢复，v1.8.2（Build 28）双架构发行包已构建并核对签名／CRC／只读镜像内容，本机已备份安装并确认进程，待提交推送及发布。新增回归用例未运行，Intel 无真机验收；独立快照排除工作区 AnalysisPresentation.swift 界面改动。后续待回复动效优化仅讨论，本版不新增动效。证据：.tmp/release-v1.8.2/，原修复证据：.tmp/island-user-input/。
+
 - 2026-10-17 12:33：v1.8.1 已在新仓库正式发布；v1.8.0 用户需从新 Release 手动安装一次，之后沿用新仓库更新入口。测试与实机验收由用户自行执行。工作区另有 AnalysisPresentation.swift 界面改动，保持未提交且未混入本次发行快照。
 
 - 2026-10-17 12:20：v1.8.0 运行验收由用户自行执行：本轮未运行自动化测试、截图或交互检查，Intel 尚无真机验收。双架构构建／镜像与公开附件校验、Git 推送及 Release 发布均已完成，详见最近完成与最近验证。
@@ -143,6 +145,10 @@ GitHub 仓库已更名为 suguxiaojie/codex-pulse，v1.8.1（Build 27）为最�
 
 ## 最近验证
 
+- 2026-10-17 17:56：v1.8.2 双架构包检查通过：1.8.2 Build 28／Codex Pulse，arm64 与 x86_64 架构准确、签名有效，DMG CRC 有效，镜像 App 与对应构建快照逐文件 SHA-256 相同，Applications 链接正确，SHA256SUMS.txt 已生成。本机完整备份与覆盖前目标一致，安装与 arm64 源包一致，进程确认。用户已实测确认“待回复”出现与回答后恢复；未运行自动化测试或额外 UI 验收，新增回归用例待执行。源码范围已核对，工作区另有界面改动未混入，README 图片与本地链接有效。证据：.tmp/release-v1.8.2/package-review.json、source-scope-review.json、install.json、arm64-build.log、x86_64-build.log。
+
+- 2026-10-17 17:37：待回复识别修正 arm64 Release 最终构建退出 0；首轮后补齐“明确接受回答可解除对应等待”的边界并再次构建通过。源包、安装包和备份为 1.8.1 Build 27／arm64，签名有效；完整备份与覆盖前目标一致，安装全包哈希与修正源包一致，启动进程确认。本轮五份源码与独立构建快照逐字节相同，既有 AnalysisPresentation.swift 界面改动未混入。按持续要求未运行测试或 UI 验收；回归用例已补充但待执行，真实问题弹出／部分回答／全部回答／隐私／自动弹出开关由用户自行验证。证据：.tmp/island-user-input/release-build-final.log、release-build-first.log、source-scope.json、change.diff、install.json。
+
 - 2026-10-17 12:33：v1.8.1 发布后复核：latest API 为新仓库正式版；main 与 tag 均指向源码提交 7bf4a6cce19c3aaa3b9990b4c0669595afe791e7，公开三份附件下载 SHA-256 及 GitHub digest 与本地产物一致，元数据地址满足源码的严格新仓库前缀。独立快照全部 Sources／Resources／Package 与打包脚本均与发行提交一致，未混入工作区 AnalysisPresentation.swift 改动。未运行应用测试或 UI 验收。证据：.tmp/repo-rename/public-release.json、public-download-review.json、source-scope-review.json。
 
 - 2026-10-17 12:32：v1.8.1 改名修正版包检查通过：arm64／x86_64 为 1.8.1 Build 27，签名有效、DMG CRC 有效，镜像 App 与各自快照逐文件 SHA-256 相同，Applications 链接正确，SHA256SUMS.txt 已生成。发行快照的可执行源码相较 v1.8.0 仅更新仓库常量，另变更版本元数据；界面源码与已发布版本一致，工作区界面改动排除。本机完整备份及安装包比对一致，进程已确认；新仓库 Release 元数据 URL 与修正后的严格前缀一致。README 链接与 9 张图片引用有效；未运行测试或 UI 验收。证据：.tmp/repo-rename/package-review.json、source-scope-review.json、install.json、arm64-isolated-build.log、x86_64-isolated-build.log。
@@ -178,10 +184,6 @@ GitHub 仓库已更名为 suguxiaojie/codex-pulse，v1.8.1（Build 27）为最�
 - 2026-10-17 10:59：导出控件／额度健康色／套餐标签改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；导出控件与焦点、20%／50% 边界及缺失额度颜色、标签与原功能由用户自行验收。证据：.tmp/export-quota-polish-cds/release-build.log、install.json。
 
 - 2026-10-17 10:54：记录卡／趋势悬停细节 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；卡片边界、圆点呈现与原功能由用户自行验收。证据：.tmp/record-trend-details-cds/release-build.log、install.json。
-
-- 2026-10-17 10:51：剩余卡片与选择浮层改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；卡片层级／边界、增强对比、记录类型选择及原功能由用户自行验收。证据：.tmp/remaining-card-depth-cds/release-build.log、install.json。
-
-- 2026-10-17 10:47：背景与卡片层级改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；表面层级、阴影、浅深色／增强对比及原有界面交互由用户自行验收。证据：.tmp/surface-depth-cds/release-build.log、install.json。
 
 ## 验证与产物入口
 
