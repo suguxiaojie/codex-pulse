@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16044678db5c9ef4。GitHub Release 提供独立 arm64 与 x86_64 DMG 和 SHA-256 清单；公开附件下载后校验通过。本机已备份安装基于 v1.7.0 的未发布 arm64 开发包并确认启动；Intel 已构建与镜像校验，尚无真机运行验收。当前未发布工作区已完整移除 Hook 功能与本机插件配置，IPC＋本地日志保持启用；既有未完成的实机交互边界见下方待办。
+v1.8.0（Build 26）已正式发布，源码提交为 f7ec22a9dd047abe25705f906dc822709585fa09，main 已推送。GitHub Release 提供 Apple Silicon arm64 与 Intel x86_64 独立 DMG 和 SHA-256 清单；两架构构建、签名、CRC、只读镜像内容及公开附件下载哈希核对通过。本机已完整备份覆盖安装 arm64 新版并确认启动。按用户要求本轮未运行自动化测试或 UI 验收，Intel 无真机验收；现有未完成的实机边界仍保留在下方待办。Hook、Helper 与安装链路已移除，任务监控仅使用只读桌面 IPC 和本地日志。
 
 当前本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
@@ -14,7 +14,7 @@ v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16
 
 ## 进行中与待办
 
-- 2026-10-17 12:18：v1.8.0（Build 26）Apple Silicon／Intel 两份 Release DMG 已完成构建与包校验，当前待提交、推送及 GitHub Release 发布。中英文 README 精简至各 128 行并加入 9 张用户截图，包含补充的真实运行态；所有本地引用有效。DMG 显式使用 HFS+／UDZO，修复本系统默认 APFS 镜像可读取但旧 hdiutil verify 失败的问题，最终两架构脚本退出 0、CRC／只读挂载逐文件一致性／签名通过。本机已完整备份并覆盖安装 arm64 新版，进程确认；测试及 UI 验收由用户自行执行，Intel 无真机验收。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-v1.8.0-20261017-121825.app 。记录：.tmp/release-v1.8.0/。
+- 2026-10-17 12:20：v1.8.0 运行验收由用户自行执行：本轮未运行自动化测试、截图或交互检查，Intel 尚无真机验收。双架构构建／镜像与公开附件校验、Git 推送及 Release 发布均已完成，详见最近完成与最近验证。
 
 - 2026-10-17 12:07：会话管理项目行会话摘要已实现并备份覆盖安装，待用户自行验收。折叠／展开项目行都汇总当前搜索和筛选后的 threads：最近会话更新时间、单账号／多账号／部分归属／未归属、待恢复与路径缺失异常。只按 observed＋已有账号标识分组，基线前与未知分别计数并在悬停明细保留，不推断当前登录账号；缺少可靠标识的 observed 记录归入未确认展示。会话数量移至项目名旁，部分匹配显示匹配数／总数；表头、项目和会话行共用列宽／间距，灰阶摘要与异常橙色沿用 CDS，保留原生 List、选择／展开／详情／菜单、完整项目操作范围和所有原筛选口径。新增只读 SessionProjectSummary 展示模型，中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或 UI 验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-session-project-summary-20261017-120721.app 。证据：.tmp/session-project-summary/。
 
@@ -98,6 +98,8 @@ v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16
 
 ## 最近完成
 
+- 2026-10-17 12:20：发布 Codex Pulse v1.8.0（Build 26），源码提交 f7ec22a9dd047abe25705f906dc822709585fa09 已推送 main，tag 指向同一提交，GitHub Release 为最新正式版本。汇总品牌／原生 CDS 界面／灵动岛／概览／项目摘要与完整移除 Hook；中英文 README 各 128 行，采用用户提供的 9 张截图并保留安装、数据边界与源码构建入口。双架构独立 DMG、SHA256SUMS.txt 已上传并下载复核一致；DMG 显式 HFS+／UDZO，两架构包检查通过。本机已备份覆盖安装 arm64 新版并确认启动；未运行测试或 UI 验收。发布页：https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.8.0 。证据：.tmp/release-v1.8.0/；产物：build/releases/v1.8.0/。
+
 - 2026-10-17 11:42：用户反馈本轮面板精简效果不佳，已撤回页头合并／原生周期菜单／底部入口及菜单跟踪保护，恢复上一版阅读衬底、Token 前置／并列、成本空状态和动态高度。三份源码按本轮精确反向补丁回滚，与改动前快照逐文件一致；中英文 README 撤回对应描述，保留其他未提交改动。当前 App 与 build App 从既有上一版完整备份恢复并启动，未重新构建、测试或界面验收。恢复来源：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-glance-chrome-controls-cds-20261017-113949.app 。被撤回版本完整备份：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-rollback-glance-chrome-20261017-114200.app 。证据：.tmp/rollback-glance-chrome/install.json、source-change.patch。
 
 - 2026-10-16 23:08：设置工作台按最新要求改造：菜单栏嵌入真实 GlanceView／MonitorStore 与原生玻璃，只读预览随开关联动；灵动岛完整场景在顶部独占一行，下方自适应双列控制，保留放大预览。移除其他模型额度展示／开关及高度分支，内容共 7 项；Credits 按原始十进制字符串分组去尾零并保留有效小数。中英文 README 同步，完整测试与 arm64 Release 通过，备份覆盖安装并实机检查，未提交／发布。
@@ -137,9 +139,9 @@ v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16
 
 - 2026-10-16 14:09：修复会话管理／恢复核验的 App Server 列表漏分页：服务端将 limit=1000 截为每页 100 条，19 条较早会话均在第二页，之前误标“待恢复”且恢复核验为 0/19。活动与归档列表统一追踪 nextCursor、合并去重；分页失败或重复游标返回错误而非不完整成功。无需修复会话数据；Hook 仍屏蔽。已备份安装 arm64 开发包。
 
-- 2026-10-16 13:58：支持 .jsonl.zst 压缩会话，内置官方 Zstandard decoder-only 1.5.7，统一只读流式读取、有界头尾预览、会话／事件去重与缓存；本地详细成本合并压缩历史及普通续写。可读导出支持压缩来源，完整备份仅在导出暂存目录生成兼容 JSONL，导入冲突检查同步识别压缩会话。新发现压缩历史不作为当前账号新建证据，已有归属保留；Hook 仍屏蔽。已备份覆盖安装 arm64 开发包。说明：docs/compressed-rollouts.md。
-
 ## 最近验证
+
+- 2026-10-17 12:20：v1.8.0 公开发布复核：GitHub latest API 确认为 v1.8.0 正式版，main 与远端 tag 均为源码提交 f7ec22a9dd047abe25705f906dc822709585fa09；arm64／x86_64 DMG 与 SHA256SUMS.txt 三份公开附件下载后 SHA-256 与本地产物逐一一致，GitHub 资产 digest 亦一致。未运行应用测试或 UI 验收。证据：.tmp/release-v1.8.0/public-release.json、public-download-review.json。
 
 - 2026-10-17 12:18：v1.8.0 双架构发行包检查完成：arm64 与 x86_64 均为 1.8.0 Build 26／Codex Pulse，单架构准确、ad-hoc 签名有效，DMG CRC 有效；只读挂载后的 App 与对应构建快照逐文件 SHA-256 一致，Applications 链接正确。已生成 SHA256SUMS.txt。本机覆盖前 App 备份与目标一致，新安装与 arm64 源包一致，启动进程确认。README 各 9 张图片及本地链接核对通过，git diff --check 通过；未运行自动化测试或 UI 验收。证据：.tmp/release-v1.8.0/package-review.json、install.json、readme-review.json、arm64-build-final.log、x86_64-build.log；产物：build/releases/v1.8.0/。
 
@@ -179,10 +181,9 @@ v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16
 
 - 2026-10-17 03:45：轻量滑杆 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，完整备份与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；滑杆拖动、键盘／辅助功能、范围边界及预览由用户自行验收。证据：.tmp/light-sliders-cds/release-build.log、install.json。
 
-- 2026-10-17 03:35：三项 UI 细节改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，完整备份与覆盖前目标一致、安装全包文件哈希与源包一致，已发起启动。按用户要求未运行测试、截图或界面交互检查；恢复定位、圆形焦点呈现与混排文案由用户自行验收。证据：.tmp/final-ui-details-cds/release-build.log、install.json。
-
-
 ## 验证与产物入口
+
+- v1.8.0：build/releases/v1.8.0/；构建／镜像／公开附件验证：.tmp/release-v1.8.0/；本机安装前完整备份：build/backups/CodexNotchMonitor-before-v1.8.0-20261017-121825.app。
 
 - 常驻额度／空闲横幅：build/persistent-idle-20261016-110820/；回滚：build/backups/CodexNotchMonitor-before-persistent-idle-20261016-110820.app。新标准实机连续 5 分钟验收已通过：build/persistent-idle-verified/。
 
