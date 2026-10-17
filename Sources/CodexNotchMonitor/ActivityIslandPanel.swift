@@ -9,7 +9,7 @@ final class ActivityIslandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    // QuotaView d16307f compatibility hooks (non-public AppKit selectors).
+    // QuotaView d16307f appearance compatibility (non-public AppKit selectors).
     // Keep this panel's glass optically active without making it key or
     // changing the foreground application. No process-wide appearance override.
     @objc(hasKeyAppearance)
@@ -25,6 +25,7 @@ final class ActivityIslandPanel: NSPanel {
 @MainActor
 final class ActivityIslandSurface: NSView {
     override var isFlipped: Bool { true }
+    private let model: ActivityIslandViewModel
     private let shell = CAShapeLayer()
     private let clipping = CAShapeLayer()
     private let content = NSView()
@@ -42,6 +43,7 @@ final class ActivityIslandSurface: NSView {
     private(set) var layoutCommitCount = 0
 
     init(model: ActivityIslandViewModel) {
+        self.model = model
         let geometry = IslandGlassGeometry(value: .init(rect: .zero, radius: 0, compact: true), degree: 0.45)
         usageGeometry = geometry
         usageHost = NSHostingView(rootView: IslandFloatingUsageCapsule(model: model, geometry: geometry))
@@ -58,7 +60,6 @@ final class ActivityIslandSurface: NSView {
         shell.shadowOffset = CGSize(width: 0, height: 2)
         layer?.addSublayer(shell)
         glassContainer.wantsLayer = true
-        glassContainer.appearance = NSAppearance(named: .darkAqua)
         addSubview(glassContainer)
         addSubview(content); content.layer?.mask = clipping
         content.addSubview(expandedHost); content.addSubview(compactHost)
@@ -95,7 +96,7 @@ final class ActivityIslandSurface: NSView {
                 glassGeometry.update(value: value, degree: degree, animated: animated)
             } else {
                 let geometry = IslandGlassGeometry(value: value, degree: degree)
-                let host = NSHostingView(rootView: IslandExpandedGlassBackdrop(geometry: geometry))
+                let host = NSHostingView(rootView: IslandExpandedGlassBackdrop(model: model, geometry: geometry))
                 host.sizingOptions = []; host.frame = bounds
                 glassGeometry = geometry; glassHost = host; glassContainer.addSubview(host)
             }
@@ -217,7 +218,7 @@ final class ActivityIslandPanelPresenter {
         panel.ignoresMouseEvents = true; panel.acceptsMouseMovedEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none; panel.contentView = surface
-        panel.title = "Codex Monitor · 活动会话"
+        panel.title = "Codex Pulse · 活动会话"
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown],
             handler: { [weak self] event in
                 self?.handlePointerEvent(event); return event

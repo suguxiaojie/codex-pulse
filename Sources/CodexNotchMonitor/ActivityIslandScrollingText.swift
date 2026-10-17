@@ -10,9 +10,9 @@ extension NSAttributedString.Key {
 
 // Text luminance is encoded in RGB, never by blending white over its backdrop.
 enum IslandTextPalette {
-    static let secondary = NSColor(srgbRed: 179 / 255, green: 179 / 255, blue: 179 / 255, alpha: 1)
-    static let muted = NSColor(srgbRed: 125 / 255, green: 125 / 255, blue: 125 / 255, alpha: 1)
-    static let detail = NSColor(srgbRed: 195 / 255, green: 195 / 255, blue: 195 / 255, alpha: 1)
+    static let secondary = NSColor(FloatingSurfaceTheme.secondary())
+    static let muted = NSColor(FloatingSurfaceTheme.faint())
+    static let detail = NSColor(FloatingSurfaceTheme.detail())
 }
 
 // Rich activity uses a known CoreText baseline. CATextLayer's first-line
@@ -65,7 +65,7 @@ final class IslandScrollingTextHost: NSView {
     private var attributedText: NSAttributedString?
     private var streamIdentity: String?
     private var font = NSFont.systemFont(ofSize: 13)
-    private var color = NSColor.white
+    private var color = NSColor(FloatingSurfaceTheme.primary())
     private var visible = false
     private var reduceMotion = false
     private var shimmering = false
@@ -362,7 +362,7 @@ final class IslandScrollingTextHost: NSView {
 struct IslandScrollingText: NSViewRepresentable {
     let text: String
     let font: NSFont
-    var color: NSColor = .white
+    var color: NSColor = NSColor(FloatingSurfaceTheme.primary())
     let visible: Bool
     let reduceMotion: Bool
     var shimmer = false

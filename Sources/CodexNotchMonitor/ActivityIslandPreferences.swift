@@ -86,6 +86,7 @@ struct MenuBarPreferences: Equatable {
 
 enum ActivityIslandPreferenceKey {
     static let floatingUsageEnabled = "activityIsland.floatingUsageEnabled"
+    static let glassAppearance = "activityIsland.glassAppearance"
     static let usageCapsuleTone = "activityIsland.usageCapsuleTone"
     static let expandedHold = "activityIsland.expandedHold"
     static let material = "activityIsland.material"
@@ -96,9 +97,20 @@ enum ActivityIslandPreferenceKey {
     static let progressEffect = "activityIsland.progressEffect"
 }
 
-enum ActivityIslandUsageCapsuleTone: String, CaseIterable, Identifiable {
-    case dark, light
+// Adapted from QuotaView v0.8.3 Build 1 AppPreferences (MIT).
+enum ActivityIslandGlassAppearance: String, CaseIterable, Identifiable {
+    case light, dark, automatic
     var id: String { rawValue }
+    var title: String { self == .light ? "浅色" : self == .dark ? "深色" : "自动" }
+    func colorScheme(system: ColorScheme, material: ActivityIslandMaterial = .liquidGlass,
+                     reduceTransparency: Bool = false) -> ColorScheme {
+        guard material == .liquidGlass && !reduceTransparency else { return .dark }
+        switch self {
+        case .light: return .light
+        case .dark: return .dark
+        case .automatic: return system
+        }
+    }
 }
 
 struct ActivityIslandPreferences: Equatable {
@@ -110,7 +122,7 @@ struct ActivityIslandPreferences: Equatable {
     var privacyMode = false
     var automaticPopup = true
     var floatingUsageEnabled = true
-    var usageCapsuleTone: ActivityIslandUsageCapsuleTone = .dark
+    var glassAppearance: ActivityIslandGlassAppearance = .dark
     static let defaults = Self()
     static func normalizedDuration(_ value: Double) -> Double { value.isFinite ? min(10, max(1, value.rounded())) : 3 }
     static func normalizedWidth(_ value: Double) -> Double { value.isFinite ? min(680, max(560, value)) : 680 }
@@ -123,6 +135,6 @@ struct ActivityIslandPreferences: Equatable {
              privacyMode: defaults.object(forKey: ActivityIslandPreferenceKey.privacyMode) as? Bool ?? false,
              automaticPopup: defaults.object(forKey: ActivityIslandPreferenceKey.automaticPopup) as? Bool ?? true,
              floatingUsageEnabled: defaults.object(forKey: ActivityIslandPreferenceKey.floatingUsageEnabled) as? Bool ?? true,
-             usageCapsuleTone: ActivityIslandUsageCapsuleTone(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.usageCapsuleTone) ?? "") ?? .dark)
+             glassAppearance: ActivityIslandGlassAppearance(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.glassAppearance) ?? "") ?? .dark)
     }
 }

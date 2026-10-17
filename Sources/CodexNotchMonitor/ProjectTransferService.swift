@@ -471,7 +471,7 @@ final class ProjectTransferService: @unchecked Sendable {
             format: ProjectTransferManifest.supportedFormat,
             createdAt: Self.iso8601(now()),
             source: ProjectTransferManifest.Source(
-                application: "Codex Notch Monitor",
+                application: "Codex Pulse",
                 version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
                     ?? "development",
                 platform: "macOS"
@@ -492,7 +492,7 @@ final class ProjectTransferService: @unchecked Sendable {
         let manifestData = try encoder.encode(manifest)
         try manifestData.write(to: stagingRoot.appendingPathComponent("manifest.json"), options: .atomic)
         let notice = """
-        Codex Notch Monitor 完整项目迁移包
+        Codex Pulse 完整项目迁移包
 
         此包包含项目文件快照与原始 Codex 会话。导出器已默认排除凭据、密钥、数据库、上传目录、依赖与构建产物，但项目源码和会话仍可能包含敏感信息。
         P1 会记录已脱敏的 Git 远程、分支、HEAD、dirty patch 和未跟踪文件选择，并可选包含会话中仍存在的本地附件。缺失附件只记录报告，不伪造文件。

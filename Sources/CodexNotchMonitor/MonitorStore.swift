@@ -66,11 +66,9 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var quotaResetCredits: QuotaResetCreditSummary?
     @Published private(set) var isConsumingQuotaResetCredit = false
     @Published private(set) var quotaResetOperationMessage: String?
-    @Published private(set) var tasks: [MonitoredTask] = []
     @Published private(set) var activeProjects: [ActiveProjectState] = []
     @Published private(set) var activitySessions: [ActivitySessionSnapshot] = []
     private var activitySessionState = ActivitySessionState()
-    private var activityHookState = ActivityHookState()
     @Published var selectedProjectID: String?
     @Published private(set) var costSnapshot: CostSnapshot = .empty
     @Published private(set) var usageAccountOptions: [UsageAccountOption] = []
@@ -83,10 +81,7 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var quotaResetEvents: [QuotaResetEvent] = []
     @Published private(set) var quotaNotificationStatus: QuotaNotificationStatus = .unknown
     @Published private(set) var codexSetupSnapshot: CodexSetupSnapshot?
-    @Published private(set) var codexSetupMessage: String?
-    @Published private(set) var isCodexSetupWorking = false
     @Published private(set) var isSetupOnboardingComplete = false
-    @Published private(set) var isCodexSecurityReviewLaunching = false
     @Published private(set) var appUpdateStatus = AppUpdateStatus.idle(
         currentVersion: AppUpdateService.bundleVersion,
         currentBuild: AppUpdateService.bundleBuild
@@ -165,7 +160,6 @@ final class MonitorStore: ObservableObject {
     private var exportDirectoryPresenter: ((URL, @escaping (URL?) -> Void) -> Void)?
     private var sessionExportDraftPresenter: (() -> Void)?
     private var shouldRestoreSessionExportWindowOnProgress = false
-    private var eventTimer: Timer?
     private var quotaTimer: Timer?
     private var quotaRetryWorkItem: DispatchWorkItem?
     private var consecutiveQuotaFailures = 0
@@ -177,7 +171,6 @@ final class MonitorStore: ObservableObject {
     private var costRequestID: UUID?
     private var tiboFeedTimer: Timer?
     private var notificationStatusTimer: Timer?
-    private var codexSetupTimer: Timer?
     private var appUpdateTimer: Timer?
     private var accountTimer: Timer?
     private var accountStateRefreshWorkItem: DispatchWorkItem?
@@ -321,11 +314,7 @@ final class MonitorStore: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.checkForAppUpdate(force: false) }
         }
-        codexSetupTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshCodexSetup() }
-        }
         refreshQuota()
-        consumeHookEvents()
         refreshSessionActivity()
         refreshCost()
         refreshTiboFeed()
@@ -333,11 +322,6 @@ final class MonitorStore: ObservableObject {
         accountStateWatcher.start { [weak self] detectedAt in
             Task { @MainActor in
                 self?.handleAccountStateChange(detectedAt: detectedAt)
-            }
-        }
-        if Self.hookDataEnabled {
-            eventTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.consumeHookEvents() }
             }
         }
         quotaTimer = Timer.scheduledTimer(
@@ -501,7 +485,6 @@ final class MonitorStore: ObservableObject {
         refreshQuota()
         refreshTiboFeed()
         refreshContinuity(forceInventory: true)
-        consumeHookEvents()
         refreshSessionActivity { [weak self] in
             self?.refreshCost()
         }
@@ -593,119 +576,14 @@ final class MonitorStore: ObservableObject {
     }
 
     func refreshCodexSetup() {
-        if codexSetupService.consumeSecurityReviewResult() {
-            isCodexSecurityReviewLaunching = false
-            codexSetupMessage = "当前 Hook Active 状态已确认。请完全退出并重新打开 Codex，然后发送一条真实消息。"
-        } else if let failure = codexSetupService.consumeSecurityReviewFailure() {
-            isCodexSecurityReviewLaunching = false
-            codexSetupMessage = failure
-        }
         let snapshot = codexSetupService.snapshot()
-        if codexSetupSnapshot != snapshot {
-            codexSetupSnapshot = snapshot
-        }
-        let onboardingComplete = !codexSetupService.shouldPresentOnboarding
-        if isSetupOnboardingComplete != onboardingComplete {
-            isSetupOnboardingComplete = onboardingComplete
-        }
-    }
-
-    func installCodexSetupHooks() {
-        guard !isCodexSetupWorking else { return }
-        isCodexSetupWorking = true
-        codexSetupMessage = nil
-        let service = codexSetupService
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { try service.installHooks() }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isCodexSetupWorking = false
-                switch result {
-                case let .success(outcome):
-                    self.codexSetupMessage = outcome.hooksBackupURL.map {
-                        "Hook 已安装；原配置已备份为 \($0.lastPathComponent)。下一步请在 /hooks 确认当前状态。"
-                    } ?? "Hook 已安装。下一步请在 /hooks 确认当前状态。"
-                case let .failure(error):
-                    self.codexSetupMessage = "Hook 安装失败：\(error.localizedDescription)"
-                }
-                self.refreshCodexSetup()
-            }
-        }
-    }
-
-    func openCodexHookSecurityReview() {
-        guard !isCodexSecurityReviewLaunching else {
-            codexSetupMessage = "正在打开 Hooks 管理，请稍候。"
-            return
-        }
-        do {
-            let launcher = try codexSetupService.prepareSecurityReviewLauncher()
-            guard NSWorkspace.shared.open(launcher) else {
-                codexSetupMessage = "无法打开 Terminal 安全审核窗口。"
-                return
-            }
-            isCodexSecurityReviewLaunching = true
-            codexSetupMessage = "正在打开 Codex Hooks 管理；信任仍需由你亲自确认。"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self, self.isCodexSecurityReviewLaunching else { return }
-                self.isCodexSecurityReviewLaunching = false
-                self.codexSetupMessage = "Hooks 管理已打开；如果窗口已经关闭，可以立即重新打开。"
-            }
-        } catch {
-            codexSetupMessage = "无法开始安全审核：\(error.localizedDescription)"
-        }
-        refreshCodexSetup()
-    }
-
-    func confirmCodexHookSecurityReview() {
-        guard codexSetupService.markSecurityReviewConfirmed() else {
-            codexSetupMessage = "当前 Hook 安装状态无法确认，请刷新后重试。"
-            refreshCodexSetup()
-            return
-        }
-        isCodexSecurityReviewLaunching = false
-        codexSetupMessage = "已记录当前 Hook 在 Codex 中处于 Active。请完全退出并重新打开 Codex，再发送一条真实消息。"
-        refreshCodexSetup()
-    }
-
-    func uninstallCodexSetupHooks() {
-        guard !isCodexSetupWorking else { return }
-        isCodexSetupWorking = true
-        codexSetupMessage = nil
-        let service = codexSetupService
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { try service.uninstallHooks() }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isCodexSetupWorking = false
-                switch result {
-                case let .success(backup):
-                    self.codexSetupMessage = backup.map {
-                        "Codex Monitor Hooks 已移除；操作前配置备份为 \($0.lastPathComponent)。"
-                    } ?? "当前没有需要移除的 Codex Monitor Hooks。"
-                case let .failure(error):
-                    self.codexSetupMessage = "Hook 卸载失败：\(error.localizedDescription)"
-                }
-                self.refreshCodexSetup()
-            }
-        }
+        if codexSetupSnapshot != snapshot { codexSetupSnapshot = snapshot }
+        isSetupOnboardingComplete = !codexSetupService.shouldPresentOnboarding
     }
 
     func completeSetupOnboarding() {
         codexSetupService.markOnboardingCompleted()
         isSetupOnboardingComplete = true
-    }
-
-    func resetSetupOnboarding() {
-        codexSetupService.resetOnboarding()
-        isSetupOnboardingComplete = false
-    }
-
-    func revealCodexSetupBackups() {
-        let url = FileManager.default.fileExists(
-            atPath: codexSetupService.paths.backupDirectory.path
-        ) ? codexSetupService.paths.backupDirectory : AppPaths.supportDirectory
-        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     func openNotificationSettings() {
@@ -2378,41 +2256,7 @@ final class MonitorStore: ObservableObject {
                 result[session.id] = session.task.projectPath
             }
         }
-        for task in tasks where task.phase.isActive {
-            result[task.id] = task.projectPath
-        }
         return result
-    }
-
-    // Temporary native IPC/log trial. Retain Hook installation and its inbox;
-    // restore this gate only after the trial and a queued-event freshness review.
-    static let hookDataEnabled = false
-
-    func consumeHookEvents() {
-        guard Self.hookDataEnabled else { return }
-        let manager = FileManager.default
-        guard let files = try? manager.contentsOfDirectory(
-            at: AppPaths.eventInbox,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        var consumedEvent = false
-        for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            defer { try? manager.removeItem(at: file) }
-            guard let data = try? Data(contentsOf: file),
-                  let event = try? decoder.decode(HookEvent.self, from: data)
-            else { continue }
-            consumedEvent = true
-            apply(event)
-            codexSetupService.recordConnectedEvent()
-        }
-        if consumedEvent {
-            refreshCodexSetup()
-            refreshSessionActivity()
-        }
     }
 
     func refreshSessionActivity(completion: (() -> Void)? = nil) {
@@ -2424,17 +2268,16 @@ final class MonitorStore: ObservableObject {
             return
         }
         isReadingSession = true
-        sessionActivityService.fetch(preferredSessionIDs: tasks.map(\.id)) { [weak self] snapshots, threadNames in
+        sessionActivityService.fetch(preferredSessionIDs: activeProjects.flatMap(\.sessions).map(\.id)) { [weak self] snapshots, threadNames in
             guard let self else {
                 completion?()
                 return
             }
             self.isReadingSession = false
             self.nativeActivityObserver.observe(snapshots)
-            let merged = self.nativeActivityObserver.merge(snapshots, names: threadNames, hooks: self.tasks)
+            let merged = self.nativeActivityObserver.merge(snapshots, names: threadNames)
             let snapshots = merged.snapshots
             let threadNames = merged.names
-            let activityHooks = merged.hooks
             switch self.nativeActivityObserver.state {
             case .connected:
                 self.nativeActivityStatus = "桌面已连接 · \(snapshots.filter { $0.nativePhase != nil }.count) 个会话"
@@ -2456,7 +2299,6 @@ final class MonitorStore: ObservableObject {
             self.lastProjectCatalogState = catalog
             let discovered = ProjectActivityAggregator.projects(
                 snapshots: snapshots,
-                hookTasks: activityHooks,
                 catalog: catalog,
                 threadNames: threadNames
             )
@@ -2470,7 +2312,7 @@ final class MonitorStore: ObservableObject {
                 self.activeProjects = activeProjects
             }
             self.activitySessionState.update(
-                projects: activeProjects, snapshots: snapshots, hookTasks: activityHooks,
+                projects: activeProjects, snapshots: snapshots,
                 usages: usages, now: Date(),
                 // Keep the bounded receipt through the popup plus two compact 3-second signals.
                 completionHold: ActivityIslandPreferences.load().expandedHold + 6, threadNames: threadNames
@@ -2487,25 +2329,7 @@ final class MonitorStore: ObservableObject {
         }
     }
 
-    private func apply(_ event: HookEvent) {
-        let incoming = HookEventMapper.task(from: event)
-        guard activityHookState.accepts(incoming, replacing: tasks.first(where: { $0.id == incoming.id })) else { return }
-        let previousPath = tasks.first(where: { $0.id == incoming.id })?.projectPath
-        if let index = tasks.firstIndex(where: { $0.id == incoming.id }) {
-            tasks[index] = incoming
-        } else {
-            tasks.append(incoming)
-        }
-        tasks.sort { $0.updatedAt > $1.updatedAt }
-        if tasks.count > 8 { tasks = Array(tasks.prefix(8)) }
-        activityHookState.retain(sessionIDs: Set(tasks.map(\.id)))
-        if previousPath != nil, previousPath != incoming.projectPath {
-            refreshCost()
-        }
-    }
-
     deinit {
-        codexSetupTimer?.invalidate()
         appUpdateTimer?.invalidate()
         if let codexTerminationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(codexTerminationObserver)

@@ -415,8 +415,8 @@ final class NotchWindowController: NSObject {
         return rows.compactMap { row -> CGFloat? in
             guard let layer = row[kCGWindowLayer as String] as? Int,
                   layer == Int(NSWindow.Level.statusBar.rawValue),
-                  let owner = row[kCGWindowOwnerName as String] as? String,
-                  owner != "Codex Monitor",
+                  let ownerPID = row[kCGWindowOwnerPID as String] as? NSNumber,
+                  ownerPID.int32Value != ProcessInfo.processInfo.processIdentifier,
                   let bounds = row[kCGWindowBounds as String] as? [String: Any],
                   let xNumber = bounds["X"] as? NSNumber,
                   let widthNumber = bounds["Width"] as? NSNumber,

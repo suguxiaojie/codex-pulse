@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 @main
 struct ActivityIslandPreferencesTests {
@@ -12,16 +13,27 @@ struct ActivityIslandPreferencesTests {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         expect(ActivityIslandPreferences.load(from: defaults) == .defaults, "missing preferences use upstream defaults")
-        expect(ActivityIslandPreferences.defaults.floatingUsageEnabled && ActivityIslandPreferences.defaults.usageCapsuleTone == .dark,
-            "floating capsule defaults match QuotaView")
+        expect(ActivityIslandPreferences.defaults.floatingUsageEnabled && ActivityIslandPreferences.defaults.glassAppearance == .dark,
+            "unified glass appearance defaults to dark")
         defaults.set(false, forKey: ActivityIslandPreferenceKey.floatingUsageEnabled)
         defaults.set("light", forKey: ActivityIslandPreferenceKey.usageCapsuleTone)
-        expect(!ActivityIslandPreferences.load(from: defaults).floatingUsageEnabled && ActivityIslandPreferences.load(from: defaults).usageCapsuleTone == .light,
-            "capsule toggle and tone persist independently")
-        defaults.set("unknown", forKey: ActivityIslandPreferenceKey.usageCapsuleTone)
-        expect(ActivityIslandPreferences.load(from: defaults).usageCapsuleTone == .dark, "invalid capsule tone falls back to dark")
+        expect(!ActivityIslandPreferences.load(from: defaults).floatingUsageEnabled && ActivityIslandPreferences.load(from: defaults).glassAppearance == .dark,
+            "legacy capsule light does not expand to the footer")
+        expect(defaults.string(forKey: ActivityIslandPreferenceKey.usageCapsuleTone) == "light", "legacy preference remains intact")
+        for appearance in ActivityIslandGlassAppearance.allCases {
+            defaults.set(appearance.rawValue, forKey: ActivityIslandPreferenceKey.glassAppearance)
+            expect(ActivityIslandPreferences.load(from: defaults).glassAppearance == appearance, "new appearance persists")
+            expect(appearance.colorScheme(system: .light, material: .classic) == .dark, "classic fallback stays dark")
+            expect(appearance.colorScheme(system: .light, reduceTransparency: true) == .dark, "reduced transparency stays dark")
+        }
+        expect(ActivityIslandGlassAppearance.automatic.colorScheme(system: .light) == .light, "auto resolves system light")
+        expect(ActivityIslandGlassAppearance.automatic.colorScheme(system: .dark) == .dark, "auto resolves system dark")
+        expect(ActivityIslandGlassAppearance.dark.colorScheme(system: .light) == .dark, "fixed dark ignores system")
+        expect(ActivityIslandGlassAppearance.light.colorScheme(system: .dark) == .light, "fixed light ignores system")
+        defaults.set("unknown", forKey: ActivityIslandPreferenceKey.glassAppearance)
+        expect(ActivityIslandPreferences.load(from: defaults).glassAppearance == .dark, "invalid appearance falls back to dark")
         defaults.removeObject(forKey: ActivityIslandPreferenceKey.floatingUsageEnabled)
-        defaults.removeObject(forKey: ActivityIslandPreferenceKey.usageCapsuleTone)
+        defaults.removeObject(forKey: ActivityIslandPreferenceKey.glassAppearance)
         // Deliberately hostile legacy values must not affect the new island.
         let retired: [String: Any] = ["enabled": false, "mode": "menuBar", "screen": "main", "position": "trailing",
             "visualStyle": "particleOrb", "surfaceOpacity": 0.1, "surfaceScale": 0.25,

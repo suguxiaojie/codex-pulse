@@ -141,19 +141,17 @@ final class NativeActivityObserver {
         else { evidence.removeAll(); revisionKeys.removeAll() }
         publishChange()
     }
-    func merge(_ snapshots: [LocalSessionSnapshot], names: [String: String], hooks: [MonitoredTask])
-        -> (snapshots: [LocalSessionSnapshot], names: [String: String], hooks: [MonitoredTask]) {
+    func merge(_ snapshots: [LocalSessionSnapshot], names: [String: String])
+        -> (snapshots: [LocalSessionSnapshot], names: [String: String]) {
         var titles = names
-        var nativeIDs = Set<String>()
         let internalIDs = Set(snapshots.filter { ![CodexActivitySessionKind.user, .unknown].contains($0.sessionKind) }.map(\.sessionID)).union(excluded)
         let result = snapshots.filter { !internalIDs.contains($0.sessionID) }.map { local in
             let terminal = terminalTurns[local.sessionID].flatMap { $0.turnID == local.turnID ? $0 : nil }
             guard let value = evidence[local.sessionID] ?? terminal, let merged = value.applying(to: local) else { return local }
-            nativeIDs.insert(local.sessionID)
             if !value.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { titles[local.sessionID] = value.title }
             return merged
         }
-        return (result, titles, hooks.filter { !nativeIDs.contains($0.id) && !internalIDs.contains($0.id) })
+        return (result, titles)
     }
     func stop() async {
         publishWork?.cancel(); publishWork = nil

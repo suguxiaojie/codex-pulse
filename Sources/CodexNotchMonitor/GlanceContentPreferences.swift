@@ -9,7 +9,6 @@ extension Notification.Name {
 
 enum GlanceContentPreferenceKey {
     static let showPrimaryQuota = "glance.content.primaryQuota"
-    static let showSparkQuota = "glance.content.sparkQuota"
     static let showCostEstimate = "glance.content.costEstimate"
     static let showCreditBalance = "glance.content.creditBalance"
     static let showDailyTokens = "glance.content.dailyTokens"
@@ -21,7 +20,6 @@ enum GlanceContentPreferenceKey {
 
 struct GlanceContentPreferences: Equatable {
     var showPrimaryQuota: Bool
-    var showSparkQuota: Bool
     var showCostEstimate: Bool
     var showCreditBalance: Bool
     var showDailyTokens: Bool
@@ -32,7 +30,6 @@ struct GlanceContentPreferences: Equatable {
 
     static let defaults = GlanceContentPreferences(
         showPrimaryQuota: true,
-        showSparkQuota: true,
         showCostEstimate: true,
         showCreditBalance: true,
         showDailyTokens: true,
@@ -47,8 +44,6 @@ struct GlanceContentPreferences: Equatable {
         return Self(
             showPrimaryQuota: defaults.object(forKey: GlanceContentPreferenceKey.showPrimaryQuota) as? Bool
                 ?? registered.showPrimaryQuota,
-            showSparkQuota: defaults.object(forKey: GlanceContentPreferenceKey.showSparkQuota) as? Bool
-                ?? registered.showSparkQuota,
             showCostEstimate: defaults.object(forKey: GlanceContentPreferenceKey.showCostEstimate) as? Bool
                 ?? registered.showCostEstimate,
             showCreditBalance: defaults.object(forKey: GlanceContentPreferenceKey.showCreditBalance) as? Bool
@@ -73,15 +68,11 @@ struct GlanceContentPreferences: Equatable {
     }
 
     func preferredHeight(
-        primaryQuotaWindowCount: Int,
-        supportingQuotaWindowCount: Int
+        primaryQuotaWindowCount: Int
     ) -> CGFloat {
         var height: CGFloat = 161
         if showPrimaryQuota {
             height += 24 + CGFloat(max(1, primaryQuotaWindowCount)) * 55
-        }
-        if showSparkQuota && supportingQuotaWindowCount > 0 {
-            height += 42
         }
         if showCostEstimate { height += 139 }
         if showCreditBalance { height += 31 }
@@ -101,9 +92,9 @@ private enum GlanceSettingsSection: String, CaseIterable, Identifiable {
 }
 
 struct GlanceContentSettingsView: View {
+    @ObservedObject var store: MonitorStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(GlanceContentPreferenceKey.showPrimaryQuota) private var showPrimaryQuota = true
-    @AppStorage(GlanceContentPreferenceKey.showSparkQuota) private var showSparkQuota = true
     @AppStorage(GlanceContentPreferenceKey.showCostEstimate) private var showCostEstimate = true
     @AppStorage(GlanceContentPreferenceKey.showCreditBalance) private var showCreditBalance = true
     @AppStorage(GlanceContentPreferenceKey.showDailyTokens) private var showDailyTokens = true
@@ -115,168 +106,116 @@ struct GlanceContentSettingsView: View {
     @State private var selectedSection = GlanceSettingsSection.content
 
     var body: some View {
-        VStack(spacing: 0) {
-            previewStatusBar
-
-            AnalysisPeriodPicker(options: GlanceSettingsSection.allCases.map(\.rawValue), selection: Binding(
-                get: { selectedSection.rawValue },
-                set: { if let section = GlanceSettingsSection(rawValue: $0) { selectedSection = section } }
-            ), accessibilityTitle: "面板设置分组")
-            .frame(width: 200)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
-
-            divider
-
-            ScrollView(.vertical, showsIndicators: true) {
-                Group {
-                    if selectedSection == .content {
-                        contentSettings
-                    } else {
-                        appearanceSettings
+        GeometryReader { geometry in
+            SettingsWorkbench(isAdjusting: isAdjustingOpacity) {
+                GlanceSettingsPreview(store: store, preferences: preferences)
+                    .padding(14)
+                    .background(PanelSettingsTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(PanelSettingsTheme.border.opacity(0.55), lineWidth: 0.5))
+            } controls: {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack {
+                        PanelSettingsSegments(options: GlanceSettingsSection.allCases.map(\.rawValue), selection: Binding(
+                            get: { selectedSection.rawValue },
+                            set: { if let section = GlanceSettingsSection(rawValue: $0) { selectedSection = section } }
+                        ))
+                        Spacer(minLength: 8)
+                        Text("\(visibleContentCount) / 7 项显示")
+                            .font(.system(size: 11)).monospacedDigit()
+                            .foregroundStyle(PanelSettingsTheme.secondary)
                     }
+                    Group {
+                        if selectedSection == .content { contentSettings }
+                        else { appearanceSettings }
+                    }
+                    .id(selectedSection).transition(.opacity)
                 }
-                .id(selectedSection)
-                .transition(.opacity)
-                .frame(maxWidth: 780)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
-                .padding(.bottom, 28)
             }
-            .scrollDisabled(isAdjustingOpacity)
+            .environment(\.workbenchPreviewHeight, geometry.size.width >= 700 ? max(260, geometry.size.height - 50) : 400)
         }
         .font(MonitorDesktopTypography.body)
-        .foregroundStyle(MonitorDesktopTheme.primaryText)
-        .animation(
-            reduceMotion ? .easeOut(duration: 0.16) : .spring(response: 0.3, dampingFraction: 1),
-            value: selectedSection
-        )
+        .foregroundStyle(PanelSettingsTheme.primary)
+        .tint(PanelSettingsTheme.clay)
+        .background(PanelSettingsTheme.canvas, in: RoundedRectangle(cornerRadius: 16))
+        .animation(reduceMotion ? nil : PanelSettingsTheme.selectionMotion, value: selectedSection)
         .onDisappear { isAdjustingOpacity = false }
         .onChange(of: surfaceOpacity) { opacity in
-            NotificationCenter.default.post(
-                name: .glanceSurfaceOpacityDidChange,
-                object: opacity
-            )
+            NotificationCenter.default.post(name: .glanceSurfaceOpacityDidChange, object: opacity)
         }
     }
 
-    private var previewStatusBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "rectangle.on.rectangle")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(MonitorDesktopTheme.cyanAccent)
-                .frame(width: 36, height: 36)
-                .background(
-                    MonitorDesktopTheme.cyanAccent.opacity(0.10),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("菜单栏面板预览")
-                    .font(MonitorDesktopTypography.cardTitle)
-                    .foregroundStyle(MonitorDesktopTheme.primaryText)
-                Text("预览显示在菜单栏旁，设置会立即生效。")
-                    .font(MonitorDesktopTypography.body)
-                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-            }
-            Spacer(minLength: 10)
-            Text("已启用 \(visibleContentCount) / 8 项")
-                .font(MonitorDesktopTypography.control)
-                .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                .monospacedDigit()
-                .fixedSize()
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 18)
-        .background(MonitorDesktopTheme.subtleCardFill)
-        .overlay(alignment: .bottom) {
-            divider
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("菜单栏面板实时预览")
-        .accessibilityValue("已启用 \(visibleContentCount) 项内容；有对应数据时显示")
+    private var preferences: GlanceContentPreferences {
+        .init(showPrimaryQuota: showPrimaryQuota,
+              showCostEstimate: showCostEstimate, showCreditBalance: showCreditBalance,
+              showDailyTokens: showDailyTokens, showThirtyDayTokens: showThirtyDayTokens,
+              showTokenActivity: showTokenActivity, showResetEntry: showResetEntry, surfaceOpacity: surfaceOpacity)
     }
 
     private var contentSettings: some View {
-        VStack(spacing: 20) {
-            settingsGroup(title: "额度") {
+        VStack(alignment: .leading, spacing: 22) {
+            PanelSettingsGroup(title: "额度", symbol: "gauge.with.dots.needle.33percent") {
                 contentRow(
                     title: "Codex 额度窗口",
-                    detail: "显示 5 小时、每周及其他可用额度窗口。",
+                    detail: "5 小时、每周及其他可用额度窗口。",
                     isOn: $showPrimaryQuota
                 )
-                divider
-                contentRow(
-                    title: "其他模型额度",
-                    detail: "有数据时显示 Spark 等模型剩余额度最少的窗口摘要。",
-                    isOn: $showSparkQuota
-                )
-                divider
+                rowDivider
                 contentRow(
                     title: "Credits 余额",
-                    detail: "显示当前登录账号的可用 Credits 余额。",
+                    detail: "当前账号的可用 Credits。",
                     isOn: $showCreditBalance
                 )
-                divider
+                rowDivider
                 contentRow(
                     title: "额度重置入口",
-                    detail: "显示额度卡剩余次数、到期时间和重置入口。",
+                    detail: "额度卡次数、有效期与重置操作入口。",
                     isOn: $showResetEntry
                 )
             }
-            .modifier(MonitorDesktopReveal())
-
-            settingsGroup(title: "用量") {
+            PanelSettingsGroup(title: "用量", symbol: "chart.bar") {
                 contentRow(
                     title: "最近一天 Token",
-                    detail: "显示最近一个统计日的 Token 用量。",
+                    detail: "最近一个统计日的用量。",
                     isOn: $showDailyTokens
                 )
-                divider
+                rowDivider
                 contentRow(
                     title: "30 日 Token",
-                    detail: "显示最近 30 个统计日的 Token 总量。",
+                    detail: "最近 30 个统计日的总用量。",
                     isOn: $showThirtyDayTokens
                 )
-                divider
+                rowDivider
                 contentRow(
                     title: "Token 活动图表",
-                    detail: "查看最近一周、一个月、三个月或半年的 Token 活动。",
+                    detail: "支持周、月、三月与半年范围。",
                     isOn: $showTokenActivity
                 )
             }
-            .modifier(MonitorDesktopReveal(delay: 0.04))
-
-            settingsGroup(title: "成本") {
+            PanelSettingsGroup(title: "成本", symbol: "dollarsign.circle") {
                 contentRow(
                     title: "成本估算图表",
-                    detail: "按参考 API 价格估算用量成本，支持切换统计周期。",
+                    detail: "按参考 API 价格估算，非实际账单。",
                     isOn: $showCostEstimate
                 )
             }
-            .modifier(MonitorDesktopReveal(delay: 0.08))
         }
     }
 
     private var appearanceSettings: some View {
-        VStack(spacing: 14) {
-            opacityCard
-                .modifier(MonitorDesktopReveal())
-            Text("背景不透明度只影响菜单栏面板。调整时可在顶部菜单栏旁查看效果。")
-                .font(MonitorDesktopTypography.body)
-                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 2)
-                .modifier(MonitorDesktopReveal(delay: 0.04))
+        VStack(alignment: .leading, spacing: 16) {
+            PanelSettingsGroup(title: "面板外观", symbol: "circle.lefthalf.filled") {
+                opacityCard
+            }
+            Label("仅影响菜单栏面板，灵动岛外观独立设置。", systemImage: "info.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(PanelSettingsTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var visibleContentCount: Int {
         [
             showPrimaryQuota,
-            showSparkQuota,
             showCostEstimate,
             showCreditBalance,
             showDailyTokens,
@@ -286,27 +225,9 @@ struct GlanceContentSettingsView: View {
         ].filter { $0 }.count
     }
 
-    private func settingsGroup<Content: View>(
-        title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(MonitorDesktopTypography.cardTitle)
-                .foregroundStyle(MonitorDesktopTheme.primaryText)
-                .padding(.vertical, 16)
-            divider
-            content()
-        }
-        .padding(.horizontal, 18)
-        .background(
-            MonitorDesktopTheme.cardFill,
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(MonitorDesktopTheme.separator, lineWidth: 1)
-        }
+    private var rowDivider: some View {
+        Rectangle().fill(PanelSettingsTheme.border.opacity(0.45)).frame(height: 0.5)
+            .accessibilityHidden(true)
     }
 
     private func contentRow(
@@ -314,62 +235,31 @@ struct GlanceContentSettingsView: View {
         detail: String,
         isOn: Binding<Bool>
     ) -> some View {
-        HStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 5) {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(MonitorDesktopTypography.rowTitle)
-                    .foregroundStyle(MonitorDesktopTheme.primaryText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(PanelSettingsTheme.primary)
                 Text(detail)
-                    .font(MonitorDesktopTypography.body)
-                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(PanelSettingsTheme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             Toggle(title, isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(SwitchToggleStyle(tint: MonitorDesktopTheme.selection))
-                .controlSize(.regular)
+                .toggleStyle(PanelSettingsToggleStyle())
                 .accessibilityLabel(title)
                 .accessibilityValue(isOn.wrappedValue ? "显示" : "隐藏")
         }
-        .padding(.vertical, 14)
-        .frame(minHeight: 68)
-    }
-
-    private var divider: some View {
-        Divider().overlay(MonitorDesktopTheme.separator)
+        .padding(.vertical, 12)
+        .frame(minHeight: 62)
     }
 
     private var opacityCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("背景不透明度")
-                        .font(MonitorDesktopTypography.cardTitle)
-                    Text("数值越高，黑色背景越深。")
-                        .font(MonitorDesktopTypography.body)
-                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                }
-                Spacer()
-                Text("\(Int((surfaceOpacity * 100).rounded()))%")
-                    .font(.system(size: 23, weight: .semibold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-            }
-            IslandSettingsSlider(value: $surfaceOpacity, range: 0.10...0.90, step: 0.01,
-                                 title: "背景不透明度", onEditingChanged: { isAdjustingOpacity = $0 })
-                .accessibilityValue("\(Int((surfaceOpacity * 100).rounded()))%")
-            HStack {
-                Text("更透明")
-                Spacer()
-                Text("更深")
-            }
-            .font(MonitorDesktopTypography.metadata)
-            .foregroundStyle(MonitorDesktopTheme.secondaryText)
-            .accessibilityHidden(true)
-        }
-        .padding(20)
-        .background(.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.065), lineWidth: 0.7))
+        IslandSettingsSliderRow(title: "背景不透明度", detail: "数值越高，黑色背景越深。",
+            value: $surfaceOpacity, range: 0.10...0.90, step: 0.01,
+            display: "\(Int((surfaceOpacity * 100).rounded()))%", lowerLabel: "更透明", upperLabel: "更深",
+            onEditingChanged: { isAdjustingOpacity = $0 })
     }
 }

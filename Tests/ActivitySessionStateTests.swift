@@ -122,8 +122,8 @@ enum ActivitySessionStateTests {
         expect(usageSnapshot.turnTokenUsage?.total == 6_900_000, "turn-token evidence remains separately scoped")
         expect(usageSnapshot.latestAssistantSummary == "紧凑态已经改成原项目的布局，正在验证当前动作。", "public assistant progress survives later tool output and ignores private analysis")
         var display = ActivitySessionState()
-        let usageProjects = ProjectActivityAggregator.projects(snapshots: [usageSnapshot], hookTasks: [], now: now, catalog: .empty)
-        display.update(projects: usageProjects, snapshots: [usageSnapshot], hookTasks: [],
+        let usageProjects = ProjectActivityAggregator.projects(snapshots: [usageSnapshot],  now: now, catalog: .empty)
+        display.update(projects: usageProjects, snapshots: [usageSnapshot],
                        usages: ["usage-session": usageSnapshot.turnTokenUsage!], now: now, completionHold: 3)
         expect(display.rows.first?.tokenTitle == "95.3M tokens", "card formats the upstream session total instead of the 6.9M turn count")
         expect(display.rows.first?.actionText == usageSnapshot.latestAssistantSummary, "thinking card shows public progress instead of stale file-read output")
@@ -131,8 +131,8 @@ enum ActivitySessionStateTests {
         let runningFile = try fixture("public-running", [event("task_started", "tool"), publicMessage,
             ["type": "response_item", "payload": ["type": "function_call", "call_id": "tool", "name": "read", "arguments": "{\"title\":\"检查当前文件\"}"]]])
         let runningSnapshot = service.readSnapshot(from: runningFile)!
-        let runningProjects = ProjectActivityAggregator.projects(snapshots: [runningSnapshot], hookTasks: [], now: now, catalog: .empty)
-        display.update(projects: runningProjects, snapshots: [runningSnapshot], hookTasks: [], usages: [:], now: now, completionHold: 3)
+        let runningProjects = ProjectActivityAggregator.projects(snapshots: [runningSnapshot],  now: now, catalog: .empty)
+        display.update(projects: runningProjects, snapshots: [runningSnapshot],  usages: [:], now: now, completionHold: 3)
         expect(display.rows.first?.phase == .usingTool && display.rows.first?.actionText == "检查当前文件", "working card prioritizes the active tool over earlier commentary")
         let nativeUsage: [String: Any] = ["thread_id": "thread", "turn_id": "turn",
             "thread_token_usage": ["total_tokens": 100000000], "turn_token_usage": ["total_tokens": 7000000], "usage": ["total_tokens": 1000]]
@@ -247,12 +247,8 @@ enum ActivitySessionStateTests {
                 evidence: .init(lifecycleState: active, hasRunningTool: active, fileModifiedAt: now,
                                 endReason: reason, endedAt: reason == nil ? nil : now))
         }
-        func hook(_ id: String, turn: String = "turn", phase: TaskPhase, offset: Double = 0) -> MonitoredTask {
-            MonitoredTask(id: id, turnID: turn, projectName: "Demo", projectPath: "/Demo", model: "test",
-                          phase: phase, updatedAt: now.addingTimeInterval(offset), confirmsTurnEnd: !phase.isActive)
-        }
-        func projects(_ snapshots: [LocalSessionSnapshot], hooks: [MonitoredTask] = []) -> [ActiveProjectState] {
-            ProjectActivityAggregator.projects(snapshots: snapshots, hookTasks: hooks, now: now,
+        func projects(_ snapshots: [LocalSessionSnapshot]) -> [ActiveProjectState] {
+            ProjectActivityAggregator.projects(snapshots: snapshots,  now: now,
                 catalog: .empty, threadNames: ["a": "Session A", "b": "Session B"])
         }
         var state = ActivitySessionState()
@@ -261,11 +257,10 @@ enum ActivitySessionStateTests {
         rich.startedAt = now.addingTimeInterval(-180)
         rich.reasoningEffort = "medium"
         rich.sessionTotalTokens = 122_100_000
-        retained.update(projects: projects([rich]), snapshots: [rich], hookTasks: [], usages: [:], now: now, completionHold: 8)
-        let thin = hook("a", phase: .working)
+        retained.update(projects: projects([rich]), snapshots: [rich],  usages: [:], now: now, completionHold: 8)
         let sparse = snapshot("a")
-        retained.update(projects: ProjectActivityAggregator.projects(snapshots: [sparse], hookTasks: [thin], now: now, catalog: .empty),
-            snapshots: [sparse], hookTasks: [thin], usages: [:], now: now, completionHold: 8)
+        retained.update(projects: ProjectActivityAggregator.projects(snapshots: [sparse],  now: now, catalog: .empty),
+            snapshots: [sparse],  usages: [:], now: now, completionHold: 8)
         expect(retained.rows.first?.title == "Session A", "verified sparse refresh retains known thread title")
         expect(retained.rows.first?.reasoningEffort == "medium" && retained.rows.first?.durationTitle(at: now) == "3m",
             "same-turn sparse refresh retains effort and start time")
@@ -273,7 +268,7 @@ enum ActivitySessionStateTests {
         var final = snapshot("a", active: false, reason: .completed)
         final.reasoningEffort = "high"
         final.sessionTotalTokens = 123_000_000
-        retained.update(projects: [], snapshots: [final], hookTasks: [], usages: [:], now: now.addingTimeInterval(2), completionHold: 8,
+        retained.update(projects: [], snapshots: [final],  usages: [:], now: now.addingTimeInterval(2), completionHold: 8,
             threadNames: ["a": "Resolved title"])
         expect(retained.rows.first?.title == "Resolved title" && retained.rows.first?.reasoningEffort == "high",
             "terminal snapshot and catalog hydrate completed metadata")
@@ -281,20 +276,20 @@ enum ActivitySessionStateTests {
         expect(retained.rows.first?.durationTitle(at: now.addingTimeInterval(60)) == "3m", "receipt duration freezes at terminal evidence")
         expect(retained.rows.first?.sessionTotalTokens == 123_000_000, "late terminal total replaces earlier cumulative value")
         let newTurn = snapshot("a", turn: "new")
-        retained.update(projects: projects([newTurn]), snapshots: [newTurn], hookTasks: [], usages: [:], now: now, completionHold: 8)
+        retained.update(projects: projects([newTurn]), snapshots: [newTurn],  usages: [:], now: now, completionHold: 8)
         expect(retained.rows.first?.startedAt == nil && retained.rows.first?.reasoningEffort == nil,
             "new turn cannot inherit previous turn timing or effort")
         expect(retained.rows.first?.sessionTotalTokens == 123_000_000, "session total survives turn boundary")
-        retained.update(projects: projects([snapshot("b")]), snapshots: [snapshot("b")], hookTasks: [], usages: [:], now: now.addingTimeInterval(20), completionHold: 8)
+        retained.update(projects: projects([snapshot("b")]), snapshots: [snapshot("b")],  usages: [:], now: now.addingTimeInterval(20), completionHold: 8)
         expect(retained.rows.first?.sessionTotalTokens == nil, "different session cannot inherit metadata")
         let a = snapshot("a"), b = snapshot("b", offset: 1), c = snapshot("c", path: "/Other")
         let usages: [String: TurnTokenUsage] = [
             "a": .init(sessionID: "a", turnID: "turn", total: 100),
             "b": .init(sessionID: "b", turnID: "turn", total: 200)
         ]
-        func update(_ locals: [LocalSessionSnapshot], hooks: [MonitoredTask] = [],
+        func update(_ locals: [LocalSessionSnapshot],
                     tokens: [String: TurnTokenUsage] = [:], offset: Double = 0) {
-            state.update(projects: projects(locals, hooks: hooks), snapshots: locals, hookTasks: hooks,
+            state.update(projects: projects(locals), snapshots: locals,
                          usages: tokens, now: now.addingTimeInterval(offset), completionHold: 8)
         }
         update([a, b, c], tokens: usages)
@@ -307,7 +302,8 @@ enum ActivitySessionStateTests {
         let order = state.rows.map(\.id)
         update([snapshot("a", offset: 5), b, c], tokens: usages, offset: 5)
         expect(state.rows.map(\.id) == order, "activity timestamps do not reorder resident rows")
-        update([a, b, c], hooks: [hook("c", phase: .waitingApproval)], offset: 6)
+        var waitingC = c; waitingC.nativePhase = .waitingApproval
+        update([a, b, waitingC], offset: 6)
         expect(state.rows.first?.id == "c", "approval is promoted to the attention area")
         update([a, b, c], offset: 6)
         expect(state.rows.map(\.id) == order, "resolved approval returns to stable resident order")
@@ -338,48 +334,29 @@ enum ActivitySessionStateTests {
         update([aComplete], tokens: ["a": .init(sessionID: "a", turnID: "turn", total: 120, isCompleted: true)], offset: 21)
         expect(state.rows.first?.phase == .completed, "matching explicit terminal proves completion")
         expect(state.rows.first?.tokenUsage?.total == 120, "late final tokens update the completed turn")
-        update([snapshot("a", turn: "next", offset: 22)], hooks: [hook("a", phase: .completed)], tokens: usages, offset: 22)
+        update([snapshot("a", turn: "next", offset: 22)], tokens: usages, offset: 22)
         expect(state.rows.first?.turnID == "next" && state.rows.first?.phase.isActive == true,
-               "old Hook completion does not replace a new local turn")
+               "new local turn supersedes the completion receipt")
         expect(state.rows.first?.tokenUsage == nil, "new turn does not inherit old tokens")
         update([snapshot("a", turn: "next", active: false, reason: .completed, offset: 23)],
-               hooks: [hook("a", phase: .completed, offset: 100)], offset: 23)
+               offset: 23)
         expect(state.rows.first?.turnID == "next" && state.rows.first?.phase == .completed,
-               "foreign terminal delivery cannot discard a current-turn completion receipt")
+               "current-turn terminal evidence creates a completion receipt")
         update([snapshot("a", turn: "third", offset: 24)], offset: 24)
-        update([snapshot("a", turn: "third", offset: 24)], hooks: [hook("a", turn: "third", phase: .completed, offset: 25)], offset: 25)
-        expect(state.rows.first?.phase == .completed, "Hook terminal closes stale active snapshot of the same turn")
+        update([snapshot("a", turn: "third", active: false, reason: .completed, offset: 25)], offset: 25)
+        expect(state.rows.first?.phase == .completed, "local terminal closes the same turn")
 
         var cold = ActivitySessionState()
-        cold.update(projects: [], snapshots: [aComplete], hookTasks: [], usages: usages, now: now, completionHold: 8)
+        cold.update(projects: [], snapshots: [aComplete],  usages: usages, now: now, completionHold: 8)
         expect(cold.rows.isEmpty, "cold startup never replays historic completion")
         let abortedLocal = snapshot("a", active: false, reason: .cancelled)
-        expect(projects([abortedLocal], hooks: [hook("a", phase: .usingTool, offset: 10)]).isEmpty,
-               "late same-turn Hook cannot resurrect a cancelled local turn")
-        let newLocal = snapshot("a", turn: "new", offset: 10)
-        expect(projects([newLocal], hooks: [hook("a", phase: .waitingApproval)]).first?.task.phase != .waitingApproval,
-               "old-turn approval cannot contaminate the current phase")
-        expect(projects([newLocal], hooks: [hook("a", phase: .waitingApproval, offset: 100)]).first?.task.turnID == "new",
-               "late-delivered old Hook cannot replace canonical local identity")
+        expect(projects([abortedLocal]).isEmpty, "cancelled local turns never become active cards")
         try FileManager.default.removeItem(at: unknown)
         expect(service.cachedSnapshot(for: unknown) == nil, "deleted source cannot leave its cached session active")
 
-        let initialization = HookEventMapper.task(from: HookEvent(sessionID: "orphan", turnID: nil, cwd: "/Demo",
-            hookEventName: "SessionStart", model: "gpt-6.1-sol", toolName: nil, receivedAt: now))
-        var initializationGate = ActivityHookState()
-        expect(!initializationGate.accepts(initialization, replacing: nil), "ordinary session initialization cannot create a user task")
-        expect(projects([], hooks: [initialization]).isEmpty, "unassociated SessionStart never creates an empty card")
-        let pendingPrompt = HookEventMapper.task(from: HookEvent(sessionID: "a", turnID: "turn", cwd: "/Demo",
-            hookEventName: "UserPromptSubmit", model: "gpt-6.1-sol", toolName: nil, receivedAt: now))
-        expect(initializationGate.accepts(pendingPrompt, replacing: nil), "real prompt remains buffered for native association")
-        expect(projects([], hooks: [pendingPrompt]).isEmpty, "prompt alone is not a verified task card")
-        expect(projects([b], hooks: [pendingPrompt]).flatMap(\.sessions).map(\.id) == ["b"], "same project cannot associate different session IDs")
-        let delayed = projects([a], hooks: [pendingPrompt]).flatMap(\.sessions)
-        expect(delayed.count == 1 && delayed.first?.task.id == "a" && delayed.first?.task.phase != .starting,
-            "matching rollout admits one rich task without replaying starting phase")
-        expect(projects([a], hooks: [initialization]).flatMap(\.sessions).count == 1, "orphan initialization cannot displace native task")
+        expect(projects([]).isEmpty, "no local or native execution creates no card")
         var internalSnapshot = a; internalSnapshot.sessionKind = .internalTask
-        expect(projects([internalSnapshot], hooks: [pendingPrompt]).isEmpty, "internal session cannot authorize a user startup card")
+        expect(projects([internalSnapshot]).isEmpty, "internal sessions never create a user card")
         var finishedTokens = ActivitySessionSnapshot(sessionID: "a", turnID: "turn", projectID: "p", projectName: "P",
             title: "T", phase: .completed, actionText: "已完成", updatedAt: now,
             tokenUsage: .init(sessionID: "a", turnID: "turn", total: 6_900_000), sessionTotalTokens: 122_100_000)
@@ -391,51 +368,14 @@ enum ActivitySessionStateTests {
         expect(finishedTokens.hidingDetails().displayedTokenTitle == "— tokens", "privacy hides both token values")
         finishedTokens.phase = .working
         expect(finishedTokens.displayedTokenTitle == "122.1M tokens", "running card keeps the established cumulative display")
-        for phase in [TaskPhase.starting, .usingTool, .working, .waitingApproval] {
-            expect(projects([], hooks: [hook("unassociated", phase: phase)]).isEmpty,
-                "unassociated \(phase.rawValue) Hook cannot create an independent card")
-        }
-        expect(projects([internalSnapshot], hooks: [hook("a", phase: .working)]).isEmpty,
-            "internal-thread PostToolUse cannot create a user thinking card")
         let settled = snapshot("a", active: false, reason: .completed)
-        expect(projects([settled], hooks: [hook("a", phase: .working, offset: 100)]).isEmpty,
-            "late PostToolUse cannot revive a completed native/log turn")
+        expect(projects([settled]).isEmpty, "settled local turns never create active cards")
         var nativeRunning = a; nativeRunning.nativePhase = .working
-        expect(projects([nativeRunning], hooks: [hook("a", phase: .completed, offset: 100)]).first?.task.phase == .working,
-            "Hook terminal cannot override authoritative running IPC")
-        expect(projects([nativeRunning], hooks: [hook("a", phase: .waitingApproval, offset: 100)]).first?.task.phase == .working,
-            "Hook wait cannot override authoritative running IPC")
-        expect(projects([a], hooks: [hook("a", phase: .waitingApproval)]).first?.task.phase == .waitingApproval,
-            "matching Hook still supplements verified local task when IPC is absent")
+        expect(projects([nativeRunning]).first?.task.phase == .working, "native phase is authoritative over tool detail")
         var vanished = ActivitySessionState()
-        vanished.update(projects: projects([a]), snapshots: [a], hookTasks: [], usages: [:], now: now, completionHold: 8)
-        vanished.update(projects: projects([], hooks: [thin]), snapshots: [], hookTasks: [thin], usages: [:], now: now, completionHold: 8)
-        expect(vanished.rows.isEmpty, "unassociated Hook cannot keep a vanished task alive")
-        var hooks = ActivityHookState()
-        let first = hook("a", turn: "one", phase: .working)
-        let next = hook("a", turn: "two", phase: .starting, offset: 1)
-        expect(hooks.accepts(next, replacing: first), "new Hook turn supersedes old turn")
-        expect(!hooks.accepts(hook("a", turn: "one", phase: .completed, offset: 2), replacing: next),
-               "old Hook completion is rejected")
-        expect(!hooks.accepts(hook("a", turn: "one", phase: .starting, offset: 3), replacing: next),
-               "retired Hook start cannot rewind identity")
-        expect(!hooks.accepts(hook("a", turn: "two", phase: .working, offset: -1), replacing: next),
-               "older Hook timestamps cannot overwrite current state")
-        let finished = hook("a", turn: "two", phase: .completed, offset: 4)
-        expect(!hooks.accepts(hook("a", turn: "two", phase: .usingTool, offset: 5), replacing: finished),
-               "same-turn late tool Hook cannot resurrect a terminal task")
-
-        let stop = HookEventMapper.task(from: HookEvent(sessionID: "a", turnID: "turn", cwd: "/Demo",
-            hookEventName: "Stop", model: nil, toolName: nil, receivedAt: now))
-        let childStop = HookEventMapper.task(from: HookEvent(sessionID: "a", turnID: "turn", cwd: "/Demo",
-            hookEventName: "SubagentStop", model: nil, toolName: nil, receivedAt: now))
-        expect(stop.confirmsTurnEnd, "main Stop carries explicit end evidence")
-        expect(!childStop.confirmsTurnEnd, "SubagentStop cannot prove that its parent turn completed")
-        let emptyStop = HookEventMapper.task(from: HookEvent(sessionID: "a", turnID: "", cwd: "/Demo",
-            hookEventName: "Stop", model: nil, toolName: nil, receivedAt: now))
-        expect(!emptyStop.confirmsTurnEnd, "empty Hook turn identity does not prove completion")
-        expect(!projects([a], hooks: [childStop]).isEmpty, "subagent termination cannot suppress active parent transcript")
-        expect(!hooks.accepts(childStop, replacing: first), "subagent stop does not replace parent Hook state")
+        vanished.update(projects: projects([a]), snapshots: [a], usages: [:], now: now, completionHold: 8)
+        vanished.update(projects: [], snapshots: [], usages: [:], now: now, completionHold: 8)
+        expect(vanished.rows.isEmpty, "vanished sources do not leave a running card")
 
         print("Activity session state: \(checks - failures)/\(checks) passed")
         if failures > 0 { exit(1) }

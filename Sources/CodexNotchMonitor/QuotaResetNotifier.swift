@@ -92,7 +92,7 @@ final class QuotaResetNotifier: NSObject, UNUserNotificationCenterDelegate {
         releaseURL: String
     ) {
         let content = UNMutableNotificationContent()
-        content.title = "Codex Monitor v\(version) 可用"
+        content.title = "Codex Pulse v\(version) 可用"
         content.body = architecture.map { "已找到适用于 \($0) 的安装包。" }
             ?? "新版本已经可以下载。"
         content.sound = .default

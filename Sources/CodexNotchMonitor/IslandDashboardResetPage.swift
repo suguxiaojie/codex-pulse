@@ -68,7 +68,7 @@ struct IslandDashboardResetPage: View {
         DashboardPageLayout(maximumHeight: model.metrics.maximumUsageHeight - 36, onHeightChange: onHeightChange) {
             VStack(alignment: .leading, spacing: 18) {
                 if model.privacyMode {
-                    Text("隐私模式已开启").font(AstaSans.semiBold(14)).padding(.vertical, 20)
+                    Text("隐私模式已开启").font(FloatingSurfaceTypography.cardTitle).padding(.vertical, 20)
                 } else {
                     HStack(spacing: 18) {
                         DashboardResetTicket(playbackEnabled: model.playbackVisible && !hidesTicket,
@@ -77,35 +77,35 @@ struct IslandDashboardResetPage: View {
                             .anchorPreference(key: DashboardResetTicketAnchors.self, value: .bounds) { [.reset: $0] }
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("可用重置次数").font(AstaSans.regular(11)).foregroundStyle(.white.opacity(0.55))
-                            Text(credits.map { "\($0.availableCount) 次" } ?? "—").font(AstaSans.semiBold(26)).monospacedDigit()
-                            Text(expiry).font(AstaSans.regular(10)).foregroundStyle(.white.opacity(0.6))
+                            Text("可用重置次数").font(FloatingSurfaceTypography.caption).foregroundStyle(FloatingSurfaceTheme.secondary())
+                            Text(credits.map { "\($0.availableCount) 次" } ?? "—").font(FloatingSurfaceTypography.resetMetric).monospacedDigit()
+                            Text(expiry).font(FloatingSurfaceTypography.metadata).foregroundStyle(FloatingSurfaceTheme.secondary())
                         }
                         Spacer(minLength: 0)
                     }
-                    Divider().overlay(.white.opacity(0.08))
+                    Divider().overlay(FloatingSurfaceTheme.separator())
                     VStack(spacing: 9) {
                         HStack {
                             Text(IslandFloatingQuotaPeriods.current(model.quotaState) ? "当前可用额度" : "上次额度")
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(FloatingSurfaceTheme.detail())
                             Spacer()
                             Text(remaining.map { "\($0)%" } ?? "—").monospacedDigit()
-                        }.font(AstaSans.medium(12))
+                        }.font(FloatingSurfaceTypography.control)
                         GeometryReader { proxy in
                             ZStack(alignment: .leading) {
-                                Capsule().fill(.white.opacity(0.12))
-                                Capsule().fill(Color.green).frame(width: proxy.size.width * CGFloat(remaining ?? 0) / 100)
+                                Capsule().fill(FloatingSurfaceTheme.track())
+                                Capsule().fill(FloatingSurfaceTheme.success).frame(width: proxy.size.width * CGFloat(remaining ?? 0) / 100)
                             }
                         }.frame(height: 5).accessibilityHidden(true)
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("关于这次重置").font(AstaSans.medium(11)).foregroundStyle(.white.opacity(0.82))
+                        Text("关于这次重置").font(FloatingSurfaceTypography.captionMedium).foregroundStyle(FloatingSurfaceTheme.detail())
                         Text("使用 1 次重置机会，重置符合条件的 Codex 用量周期。完成后无法撤销。")
-                            .font(AstaSans.regular(11)).foregroundStyle(.white.opacity(0.52))
+                            .font(FloatingSurfaceTypography.caption).foregroundStyle(FloatingSurfaceTheme.tertiary())
                             .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
                     }
                     HStack {
-                        Text("确认后才会使用次数").font(AstaSans.regular(10)).foregroundStyle(.white.opacity(0.45))
+                        Text("确认后才会使用次数").font(FloatingSurfaceTypography.metadata).foregroundStyle(FloatingSurfaceTheme.tertiary())
                         Spacer(minLength: 8)
                         Button {
                             guard available else { return }
@@ -114,32 +114,31 @@ struct IslandDashboardResetPage: View {
                         } label: {
                             HStack(spacing: 6) {
                                 if model.resetBusy { ProgressView().controlSize(.small) }
-                                Text(actionTitle).font(AstaSans.semiBold(12))
+                                Text(actionTitle).font(FloatingSurfaceTypography.action)
                             }.padding(.horizontal, 18).frame(height: 32)
                         }.buttonStyle(DashboardResetActionStyle(primary: false, destructive: true, emphasized: true)).disabled(!available)
                             .accessibilityLabel(actionTitle).accessibilityHint("打开二次确认，不立即消耗次数")
                     }
                     if let message = model.resetMessage {
-                        Text(message).font(AstaSans.regular(11)).foregroundStyle(.white.opacity(0.75))
+                        Text(message).font(FloatingSurfaceTypography.caption).foregroundStyle(FloatingSurfaceTheme.detail())
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
             .padding(20)
             .background(Color.black, in: RoundedRectangle(cornerRadius: 16))
-            .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.10), lineWidth: 0.5).allowsHitTesting(false) }
+            .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(FloatingSurfaceTheme.outline(), lineWidth: 0.5).allowsHitTesting(false) }
             .padding(.horizontal, 28).padding(.top, 10).padding(.bottom, 6)
         } footer: {
             HStack {
-                Text(model.privacyMode ? "隐私模式" : "额度重置").font(AstaSans.regular(10)).foregroundStyle(.white.opacity(0.5))
+                Text(model.privacyMode ? "隐私模式" : "额度重置").font(FloatingSurfaceTypography.metadata).opacity(0.65)
                 Spacer()
                 Button { model.onRefresh?() } label: {
-                    Image(systemName: "arrow.clockwise").frame(width: 24, height: 24)
-                        .islandGlass(Circle(), tint: .white.opacity(0.04), clearSurface: true)
-                }.buttonStyle(.plain).disabled(model.resetBusy).accessibilityLabel("刷新重置数据")
+                    IslandChromeIcon(name: "arrow.clockwise")
+                }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true)).disabled(model.resetBusy).accessibilityLabel("刷新重置数据")
             }.padding(.horizontal, 28).frame(height: 32)
         }
-        .foregroundStyle(.white).accessibilityElement(children: .contain).accessibilityLabel("额度重置详情")
+        .foregroundStyle(FloatingSurfaceTheme.primary()).accessibilityElement(children: .contain).accessibilityLabel("额度重置详情")
     }
     private var confirmationCard: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -147,39 +146,39 @@ struct IslandDashboardResetPage: View {
                 DashboardResetTicket(playbackEnabled: false, size: CGSize(width: 44, height: 26.2))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("使用一次重置").font(AstaSans.semiBold(15))
-                    Text("Codex 额度").font(AstaSans.regular(10.5)).foregroundStyle(.white.opacity(0.45))
+                    Text("使用一次重置").font(FloatingSurfaceTypography.title)
+                    Text("Codex 额度").font(FloatingSurfaceTypography.label).foregroundStyle(FloatingSurfaceTheme.tertiary())
                 }
             }
             VStack(alignment: .leading, spacing: 14) {
                 Text("将重置符合条件的用量周期。确认后消耗 1 次机会，操作无法撤销。")
-                    .font(AstaSans.regular(12)).foregroundStyle(.white.opacity(0.62))
+                    .font(FloatingSurfaceTypography.body).foregroundStyle(FloatingSurfaceTheme.secondary())
                     .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
-                    Text("剩余次数").font(AstaSans.regular(11)).foregroundStyle(.white.opacity(0.45))
+                    Text("剩余次数").font(FloatingSurfaceTypography.caption).foregroundStyle(FloatingSurfaceTheme.tertiary())
                     Spacer()
                     Text(confirmedCredits.map { "\($0.availableCount)" } ?? "—")
-                        .foregroundStyle(.white.opacity(0.38))
-                    Image(systemName: "arrow.right").font(.system(size: 10)).foregroundStyle(.white.opacity(0.28))
+                        .foregroundStyle(FloatingSurfaceTheme.faint())
+                    Image(systemName: "arrow.right").font(FloatingSurfaceTypography.metadata).foregroundStyle(FloatingSurfaceTheme.faint())
                     Text(confirmedCredits.map { "\(max(0, $0.availableCount - 1)) 次" } ?? "—")
-                }.font(AstaSans.medium(13)).monospacedDigit()
+                }.font(Font.system(size: 13, weight: .medium)).monospacedDigit()
             }
-            Rectangle().fill(.white.opacity(0.10)).frame(height: 0.5)
+            Rectangle().fill(FloatingSurfaceTheme.separator()).frame(height: 0.5)
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 Button { cancelConfirmation() } label: {
-                    Text("取消").font(AstaSans.medium(11.5))
+                    Text("取消").font(FloatingSurfaceTypography.dialogAction)
                         .padding(.horizontal, 14).frame(height: 32)
                 }.buttonStyle(DashboardResetActionStyle(primary: false))
                     .keyboardShortcut(.cancelAction)
                 Button { submitConfirmedReset() } label: {
-                    Text("消耗 1 次并重置").font(AstaSans.semiBold(11.5))
+                    Text("消耗 1 次并重置").font(FloatingSurfaceTypography.dialogPrimaryAction)
                         .padding(.horizontal, 14).frame(height: 32)
                 }.buttonStyle(DashboardResetActionStyle(primary: false, destructive: true, emphasized: true)).disabled(!available)
             }
-        }.padding(22).foregroundStyle(.white)
+        }.padding(22).foregroundStyle(FloatingSurfaceTheme.primary())
             .background(Color.black, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.14), lineWidth: 0.5).allowsHitTesting(false) }
+            .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(FloatingSurfaceTheme.outline(), lineWidth: 0.5).allowsHitTesting(false) }
             .accessibilityElement(children: .contain).accessibilityLabel("重置额度二次确认")
     }
     private func cancelConfirmation() {

@@ -454,7 +454,7 @@ final class AppUpdateService {
         }
         return AppRelease(
             tagName: tag,
-            name: "Codex Notch Monitor \(tag)",
+            name: "Codex Pulse \(tag)",
             body: "GitHub API 请求受限，已通过公开 Latest Release 页面确认版本。请打开 Release 页面查看完整更新说明和文件校验值。",
             draft: false,
             prerelease: false,

@@ -59,17 +59,15 @@ private final class MonitorCenterGlassChromeView: NSView {
         )
         // Preserve a subdued sidebar surface, but mask the reading area fully
         // so text from windows behind the monitor cannot mix with its data.
-        NSColor.black.withAlphaComponent(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : 0.92).setFill()
+        NSColor(MonitorDesktopTheme.sidebarBackground).setFill()
         shape.fill()
         NSGraphicsContext.saveGraphicsState()
         shape.addClip()
-        NSColor(calibratedWhite: 0.055, alpha: 1).setFill()
+        NSColor(MonitorDesktopTheme.windowBackground).setFill()
         NSBezierPath(rect: NSRect(x: MonitorCenterLayout.sidebarWidth, y: 0,
             width: max(0, bounds.width - MonitorCenterLayout.sidebarWidth), height: bounds.height)).fill()
         NSGraphicsContext.restoreGraphicsState()
-        NSColor.white
-            .withAlphaComponent(0.10)
-            .setStroke()
+        NSColor(MonitorDesktopTheme.separator).setStroke()
         shape.lineWidth = 0.5
         shape.stroke()
     }
@@ -128,7 +126,7 @@ final class MonitorCenterWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Codex Monitor"
+        window.title = "Codex Pulse"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.backgroundColor = .clear

@@ -1576,7 +1576,7 @@ final class SessionExportService {
             format: SessionPortableManifest.supportedFormat,
             createdAt: Self.iso8601(now()),
             source: SessionPortableManifest.Source(
-                application: "Codex Notch Monitor",
+                application: "Codex Pulse",
                 version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development",
                 platform: "macOS"
             ),
@@ -1591,7 +1591,7 @@ final class SessionExportService {
         checksums["manifest.json"] = Self.sha256(manifestData)
 
         let notice = """
-        Codex Notch Monitor 可恢复会话备份
+        Codex Pulse 可恢复会话备份
 
         此文件包含原始 Codex 会话 JSONL，可能包含提示词、源码、终端输出、绝对路径、图片以及意外输出的凭据。
         请勿公开上传或发送给不可信的第三方。此备份不包含 auth.json、Cookie、Token 或其他独立账号凭据文件。

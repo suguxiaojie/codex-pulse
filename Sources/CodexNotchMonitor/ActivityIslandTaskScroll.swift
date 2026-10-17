@@ -26,6 +26,8 @@ struct ActivityIslandRowsDocument: View {
                 Group {
                     if let onSelect {
                         Button { onSelect(row.id) } label: { card(row) }.buttonStyle(.plain)
+                            .accessibilityValue((focusedID ?? rows.first?.id) == row.id ? "已选择" : "未选择")
+                            .accessibilityAddTraits((focusedID ?? rows.first?.id) == row.id ? .isSelected : [])
                     } else { card(row) }
                 }
             }

@@ -1,8 +1,10 @@
-# Codex Notch Monitor 项目规范
+# Codex Pulse 项目规范
 
 ## 适用范围
 
+- 应用展示名称为 Codex Pulse；为兼容现有配置与数据，保留 CodexNotchMonitor target／可执行文件／安装路径、com.coverai.codex-notch-monitor Bundle ID、既有偏好键与数据目录，不随品牌名称迁移。
 - 本项目是 Swift 实现的原生 macOS 应用，保持现有 Swift Package 结构和 AppKit／SwiftUI 技术栈。
+- 任务监控仅使用只读桌面 IPC 与本地日志；已移除 lifecycle Hook、Helper 及客户端配置写入，不重新引入安装／审核链路。
 - 只修改与当前需求直接相关的文件，不清理、回滚或覆盖用户已有的未提交改动。
 
 ## 本地数据安全

@@ -27,8 +27,11 @@ build_one_architecture() {
   swift build -c release --arch "$architecture" --scratch-path "$scratch_path" --show-bin-path
 }
 
-mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Contents/Helpers"
+mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 mkdir -p "$app_dir/Contents/Resources/Fonts"
+# Remove the retired helper from reused build bundles.
+rm -f "$app_dir/Contents/Helpers/CodexMonitorHook"
+rmdir "$app_dir/Contents/Helpers" 2>/dev/null || true
 
 if [[ "$build_arch" == "universal" ]]; then
   arm64_bin_dir="$(build_one_architecture arm64 | tail -n 1)"
@@ -38,14 +41,9 @@ if [[ "$build_arch" == "universal" ]]; then
     "$arm64_bin_dir/CodexNotchMonitor" \
     "$x86_64_bin_dir/CodexNotchMonitor" \
     -output "$app_dir/Contents/MacOS/CodexNotchMonitor"
-  lipo -create \
-    "$arm64_bin_dir/CodexMonitorHook" \
-    "$x86_64_bin_dir/CodexMonitorHook" \
-    -output "$app_dir/Contents/Helpers/CodexMonitorHook"
 else
   bin_dir="$(build_one_architecture "$build_arch" | tail -n 1)"
   cp "$bin_dir/CodexNotchMonitor" "$app_dir/Contents/MacOS/CodexNotchMonitor"
-  cp "$bin_dir/CodexMonitorHook" "$app_dir/Contents/Helpers/CodexMonitorHook"
 fi
 
 verify_architectures() {
@@ -66,7 +64,6 @@ verify_architectures() {
 }
 
 verify_architectures "$app_dir/Contents/MacOS/CodexNotchMonitor"
-verify_architectures "$app_dir/Contents/Helpers/CodexMonitorHook"
 
 cp "$project_dir/Resources/Info.plist" "$app_dir/Contents/Info.plist"
 cp \
@@ -77,14 +74,15 @@ rm -f "$app_dir/Contents/Resources/CodexActivityParticleOrbShader.txt"
 cp \
   "$project_dir/Resources/CoverAI-Logo.png" \
   "$app_dir/Contents/Resources/CoverAI-Logo.png"
+cp "$project_dir/Resources/Pulse-Logo.svg" "$app_dir/Contents/Resources/Pulse-Logo.svg"
+cp "$project_dir/Resources/Pulse-AppIcon.icns" "$app_dir/Contents/Resources/Pulse-AppIcon.icns"
 ditto "$project_dir/Resources/Fonts" "$app_dir/Contents/Resources/Fonts"
 cp "$project_dir/Resources/ThirdPartyNotices.txt" "$app_dir/Contents/Resources/ThirdPartyNotices.txt"
 for asset in "$project_dir"/Resources/DashboardReset*.svg "$project_dir"/Resources/IslandPreview-*.png "$project_dir/Resources/Island-Codex.svg"; do
   cp "$asset" "$app_dir/Contents/Resources/"
 done
-chmod 755 "$app_dir/Contents/MacOS/CodexNotchMonitor" "$app_dir/Contents/Helpers/CodexMonitorHook"
+chmod 755 "$app_dir/Contents/MacOS/CodexNotchMonitor"
 codesign --force --deep --sign - "$app_dir"
 
 echo "主程序架构：$(lipo -archs "$app_dir/Contents/MacOS/CodexNotchMonitor")"
-echo "Hook 架构：$(lipo -archs "$app_dir/Contents/Helpers/CodexMonitorHook")"
 echo "$app_dir"

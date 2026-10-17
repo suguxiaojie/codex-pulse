@@ -33,30 +33,27 @@ struct IslandSettingsSlider: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let travel = max(1, geometry.size.width - 22)
+            let travel = max(1, geometry.size.width - 16)
             ZStack(alignment: .leading) {
-                Capsule().fill(.black.opacity(0.25)).frame(height: 6)
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
-                Capsule().fill(LinearGradient(colors: [Color.accentColor.opacity(0.55), Color.accentColor], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: 11 + travel * progress, height: 6)
-                Circle().fill(LinearGradient(colors: [.white, Color(white: 0.78)], startPoint: .top, endPoint: .bottom))
-                    .overlay(Circle().strokeBorder(.white.opacity(0.7), lineWidth: 0.5))
-                    .overlay(Circle().fill(Color.accentColor.opacity(dragging ? 0.8 : 0.35)).frame(width: 5, height: 5))
-                    .shadow(color: .black.opacity(0.4), radius: dragging ? 5 : 3, y: 2)
-                    .frame(width: 22, height: 22)
-                    .scaleEffect(dragging ? 1.12 : hovered ? 1.04 : 1)
+                Capsule().fill(PanelSettingsTheme.track).frame(height: 4)
+                Capsule().fill(PanelSettingsTheme.clay)
+                    .frame(width: 8 + travel * progress, height: 4)
+                Circle().fill(PanelSettingsTheme.sliderThumb)
+                    .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
+                    .frame(width: 16, height: 16)
+                    .scaleEffect(enabled && !reduceMotion ? (dragging ? 1.06 : hovered ? 1.03 : 1) : 1)
+                    .animation(reduceMotion ? nil : PanelSettingsTheme.pressMotion, value: dragging)
+                    .animation(reduceMotion ? nil : PanelSettingsTheme.hoverMotion, value: hovered)
                     .offset(x: travel * progress)
             }
-            .frame(height: 30).contentShape(Rectangle())
-            .animation(reduceMotion ? nil : .interactiveSpring(response: 0.24, dampingFraction: 0.9, blendDuration: 0.08), value: progress)
-            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.78), value: dragging)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hovered)
+            .frame(height: 32).contentShape(Rectangle())
+            .animation(reduceMotion || dragging ? nil : PanelSettingsTheme.selectionMotion, value: progress)
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { gesture in
                     guard enabled else { return }
                     if dragOrigin == nil {
-                        let center = 11 + travel * progress
-                        dragOrigin = abs(gesture.startLocation.x - center) <= 16 ? progress : min(1, max(0, (gesture.startLocation.x - 11) / travel))
+                        let center = 8 + travel * progress
+                        dragOrigin = abs(gesture.startLocation.x - center) <= 16 ? progress : min(1, max(0, (gesture.startLocation.x - 8) / travel))
                         focused = true
                     }
                     if !dragging { onEditingChanged(true) }
@@ -66,9 +63,9 @@ struct IslandSettingsSlider: View {
                 }
                 .onEnded { _ in finishDrag() })
         }
-        .frame(height: 30)
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(focused ? 0.6 : 0), lineWidth: 1).padding(-3))
-        .opacity(enabled ? 1 : 0.4)
+        .frame(height: 32)
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(PanelSettingsTheme.clay.opacity(enabled && focused ? 0.7 : 0), lineWidth: 1.5).padding(-3))
+        .opacity(enabled ? 1 : 0.45)
         .focusable(enabled).focused($focused)
         .onMoveCommand { direction in
             switch direction {
@@ -110,52 +107,50 @@ struct IslandSettingsSlider: View {
     }
 }
 
-struct IslandSettingsTonePicker: View {
-    @Binding var selection: String
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.isEnabled) private var enabled
+struct IslandSettingsSliderRow: View {
+    let title: String
+    let detail: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let display: String
+    let lowerLabel: String
+    let upperLabel: String
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     var body: some View {
-        GeometryReader { geometry in
-            let width = (geometry.size.width - 8) / 2
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 11).fill(.black.opacity(0.22))
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(LinearGradient(colors: [.white.opacity(0.20), .white.opacity(0.09)], startPoint: .top, endPoint: .bottom))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.25), radius: 3, y: 2)
-                    .frame(width: width, height: 28)
-                    .offset(x: 4 + (selection == ActivityIslandUsageCapsuleTone.light.rawValue ? width : 0))
-                HStack(spacing: 0) {
-                    option("深色", symbol: "moon.fill", value: .dark)
-                    option("浅色", symbol: "sun.max.fill", value: .light)
-                }.padding(4)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(PanelSettingsTheme.primary)
+                Spacer(minLength: 4)
+                Text(display).font(.system(size: 12, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(PanelSettingsTheme.clay)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(PanelSettingsTheme.clay.opacity(0.10), in: Capsule())
+                    .fixedSize().accessibilityHidden(true)
             }
-            .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
-        }
-        .frame(height: 36).opacity(enabled ? 1 : 0.4)
-        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82), value: selection)
-        .accessibilityElement(children: .contain).accessibilityLabel("胶囊配色")
-    }
-
-    private func option(_ title: String, symbol: String, value: ActivityIslandUsageCapsuleTone) -> some View {
-        Button { selection = value.rawValue } label: {
-            HStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
-                Text(title).font(MonitorDesktopTypography.control)
+            Text(detail).font(.system(size: 11))
+                .foregroundStyle(PanelSettingsTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            IslandSettingsSlider(value: $value, range: range, step: step, title: title,
+                                 onEditingChanged: onEditingChanged)
+                .accessibilityValue(display)
+                .accessibilityHint(detail)
+            HStack {
+                Text(lowerLabel)
+                Spacer()
+                Text(upperLabel)
             }
-            .foregroundStyle(.white.opacity(selection == value.rawValue ? 1 : 0.45))
-            .frame(maxWidth: .infinity).frame(height: 28).contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityLabel(title).accessibilityValue(selection == value.rawValue ? "已选择" : "未选择")
+            .font(.system(size: 11)).foregroundStyle(PanelSettingsTheme.secondary)
+            .accessibilityHidden(true)
+        }.padding(.vertical, 14)
     }
 }
 
 enum IslandSettingsEffectPreviewMetrics {
     static let previewCornerRadius: CGFloat = 8
-    static let inset: CGFloat = 6
-    static let outerCornerRadius: CGFloat = 12
-    static let height: CGFloat = 44
+    static let height: CGFloat = 36
 }
 
 struct IslandSettingsEffectOptionStyle: ButtonStyle {
@@ -163,6 +158,7 @@ struct IslandSettingsEffectOptionStyle: ButtonStyle {
     let selected: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
+    @Environment(\.isFocused) private var focused
     func makeBody(configuration: Configuration) -> some View {
         VStack(spacing: 8) {
             // The grid owns the viewport width; an aspect-fill image must not
@@ -176,19 +172,25 @@ struct IslandSettingsEffectOptionStyle: ButtonStyle {
             }
                 .frame(height: IslandSettingsEffectPreviewMetrics.height)
                 .clipShape(RoundedRectangle(cornerRadius: IslandSettingsEffectPreviewMetrics.previewCornerRadius, style: .continuous))
-                .padding(IslandSettingsEffectPreviewMetrics.inset)
-                .background(Color.primary.opacity(configuration.isPressed ? 0.10 : hovered ? 0.06 : 0.025),
-                            in: RoundedRectangle(cornerRadius: IslandSettingsEffectPreviewMetrics.outerCornerRadius, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: IslandSettingsEffectPreviewMetrics.outerCornerRadius, style: .continuous)
-                        .strokeBorder(selected ? MonitorDesktopTheme.selection : MonitorDesktopTheme.hairline, lineWidth: selected ? 1.5 : 0.5)
+                .opacity(selected || hovered ? 1 : 0.65)
+                .overlay(alignment: .topTrailing) {
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(PanelSettingsTheme.clay)
+                            .background(PanelSettingsTheme.surface, in: Circle()).padding(4)
+                    }
                 }
                 .allowsHitTesting(false).accessibilityHidden(true)
-            configuration.label.font(MonitorDesktopTypography.control).foregroundStyle(MonitorDesktopTheme.primaryText)
+            configuration.label.font(.system(size: 11, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? PanelSettingsTheme.clay : PanelSettingsTheme.secondary)
                 .lineLimit(1).minimumScaleFactor(0.85)
         }
         .frame(maxWidth: .infinity).contentShape(Rectangle())
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? PanelSettingsTheme.clay : .clear, lineWidth: 1.5).padding(-3))
+        .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+        .animation(reduceMotion ? nil : PanelSettingsTheme.hoverMotion, value: hovered)
+        .animation(reduceMotion ? nil : PanelSettingsTheme.pressMotion, value: configuration.isPressed)
         .onHover { hovered = $0 }.onDisappear { hovered = false }
     }
 }

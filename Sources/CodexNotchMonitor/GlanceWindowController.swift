@@ -12,7 +12,7 @@ private final class GlancePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-private final class GlanceGlassCompositionView: NSView {
+final class GlanceGlassCompositionView: NSView {
     private let chromeView = GlanceGlassChromeView()
     private let hostedContentView: NSView
 
@@ -101,7 +101,6 @@ final class GlanceWindowController: NSObject {
     private var preferencesObserver: NSObjectProtocol?
     private var centerSectionObserver: NSObjectProtocol?
     private var shownAt: Date?
-    private var isPinnedForPanelSettings = false
     private weak var glassCompositionView: GlanceGlassCompositionView?
 
     init(
@@ -189,24 +188,12 @@ final class GlanceWindowController: NSObject {
             object: false
         )
         shownAt = nil
-        isPinnedForPanelSettings = false
         panel.orderOut(nil)
     }
 
     private func handleMonitorCenterSection(_ section: MonitorCenterSection) {
-        if section == .panelSettings {
-            isPinnedForPanelSettings = true
-            if panel.isVisible {
-                reposition()
-                panel.orderFrontRegardless()
-                makePanelKeyForGlassPresentation()
-            } else {
-                show()
-            }
-            return
-        }
-        guard isPinnedForPanelSettings else { return }
-        hide()
+        // Settings now have an inline preview; do not pin a second floating panel.
+        if panel.isVisible { hide() }
     }
 
     private func createPanel() {
@@ -235,11 +222,7 @@ final class GlanceWindowController: NSObject {
             store: store,
             onQuit: { NSApp.terminate(nil) },
             onOpenCenter: { [weak self] section in
-                if section == .panelSettings {
-                    self?.isPinnedForPanelSettings = true
-                } else {
-                    self?.hide()
-                }
+                self?.hide()
                 self?.onOpenCenter(section)
             },
             onPreferredHeightChange: { [weak self] height in
@@ -287,46 +270,9 @@ final class GlanceWindowController: NSObject {
     }
 
     private func makeGlassSurface(size: NSSize, contentView: NSView) -> NSView {
-        let frame = NSRect(origin: .zero, size: size)
-
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView(frame: frame)
-            let composition = GlanceGlassCompositionView(
-                contentView: contentView,
-                surfaceOpacity: currentSurfaceOpacity
-            )
-            glassCompositionView = composition
-            glass.style = .clear
-            glass.tintColor = .clear
-            glass.cornerRadius = GlanceLayout.cornerRadius
-            glass.contentView = composition
-            glass.wantsLayer = true
-            glass.layer?.cornerRadius = GlanceLayout.cornerRadius
-            glass.layer?.cornerCurve = .continuous
-            glass.layer?.masksToBounds = true
-            composition.frame = glass.bounds
-            composition.autoresizingMask = [.width, .height]
-            return glass
-        }
-
-        let fallback = NSVisualEffectView(frame: frame)
-        fallback.material = .underWindowBackground
-        fallback.blendingMode = .behindWindow
-        fallback.state = .active
-        fallback.alphaValue = 0.62
-        fallback.wantsLayer = true
-        fallback.layer?.cornerRadius = GlanceLayout.cornerRadius
-        fallback.layer?.cornerCurve = .continuous
-        fallback.layer?.masksToBounds = true
-        let composition = GlanceGlassCompositionView(
-            contentView: contentView,
-            surfaceOpacity: currentSurfaceOpacity
-        )
-        glassCompositionView = composition
-        composition.frame = fallback.bounds
-        composition.autoresizingMask = [.width, .height]
-        fallback.addSubview(composition)
-        return fallback
+        let result = GlanceGlassSurface.make(size: size, contentView: contentView, surfaceOpacity: currentSurfaceOpacity)
+        glassCompositionView = result.composition
+        return result.view
     }
 
     private var currentSurfaceOpacity: CGFloat {
@@ -399,7 +345,6 @@ final class GlanceWindowController: NSObject {
     }
 
     private var canDismissFromOutsideClick: Bool {
-        guard !isPinnedForPanelSettings else { return false }
         guard let shownAt else { return false }
         return Date().timeIntervalSince(shownAt) >= 0.25
     }
@@ -407,5 +352,52 @@ final class GlanceWindowController: NSObject {
     private func isAnchorClick(_ location: NSPoint) -> Bool {
         guard let anchor = anchorRect() else { return false }
         return anchor.insetBy(dx: -4, dy: -4).contains(location)
+    }
+}
+
+/// Shared by the real menu-bar panel and its read-only embedded settings view.
+@MainActor
+enum GlanceGlassSurface {
+    static func make(size: NSSize, contentView: NSView, surfaceOpacity: CGFloat,
+                     blendingMode: NSVisualEffectView.BlendingMode = .behindWindow)
+        -> (view: NSView, composition: GlanceGlassCompositionView) {
+        let frame = NSRect(origin: .zero, size: size)
+
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView(frame: frame)
+            let composition = GlanceGlassCompositionView(
+                contentView: contentView,
+                surfaceOpacity: surfaceOpacity
+            )
+            glass.style = .clear
+            glass.tintColor = .clear
+            glass.cornerRadius = GlanceLayout.cornerRadius
+            glass.contentView = composition
+            glass.wantsLayer = true
+            glass.layer?.cornerRadius = GlanceLayout.cornerRadius
+            glass.layer?.cornerCurve = .continuous
+            glass.layer?.masksToBounds = true
+            composition.frame = glass.bounds
+            composition.autoresizingMask = [.width, .height]
+            return (glass, composition)
+        }
+
+        let fallback = NSVisualEffectView(frame: frame)
+        fallback.material = .underWindowBackground
+        fallback.blendingMode = blendingMode
+        fallback.state = .active
+        fallback.alphaValue = 0.62
+        fallback.wantsLayer = true
+        fallback.layer?.cornerRadius = GlanceLayout.cornerRadius
+        fallback.layer?.cornerCurve = .continuous
+        fallback.layer?.masksToBounds = true
+        let composition = GlanceGlassCompositionView(
+            contentView: contentView,
+            surfaceOpacity: surfaceOpacity
+        )
+        composition.frame = fallback.bounds
+        composition.autoresizingMask = [.width, .height]
+        fallback.addSubview(composition)
+        return (fallback, composition)
     }
 }

@@ -6,6 +6,13 @@ import SQLite3
 enum ModelSmokeTests {
     private static var checks = 0
     static func main() {
+        check(CreditBalanceFormatter.string("62500.000000000") == "62,500", "credits drop trailing zeroes and group digits")
+        check(CreditBalanceFormatter.string("1234.012300") == "1,234.0123", "credits preserve meaningful fractional digits")
+        check(CreditBalanceFormatter.string("12345678901234567890.123456789") == "12,345,678,901,234,567,890.123456789", "credits never pass through binary floating point")
+        check(CreditBalanceFormatter.string("-0.000") == "0", "credits normalize signed zero")
+        check(CreditBalanceFormatter.string("-01234.50") == "-1,234.5", "credits normalize leading zeroes and preserve sign")
+        check(CreditBalanceFormatter.string(nil) == "—" && CreditBalanceFormatter.string("NaN") == "—"
+            && CreditBalanceFormatter.string("12junk") == "—", "missing and invalid credits stay unknown")
         let usageNow = ISO8601DateFormatter().date(from: "2026-10-16T12:00:00Z")!
         let officialUsage = AccountUsageSnapshot.parse([
             "summary": ["lifetimeTokens": 900],
@@ -315,9 +322,6 @@ enum ModelSmokeTests {
             ).contains("同时运行 2 个项目"),
             "menu bar tooltip preserves full task detail"
         )
-        check(HookEventMapper.phase(for: "PermissionRequest") == .waitingApproval, "approval mapping")
-        check(HookEventMapper.phase(for: "Stop") == .completed, "completion mapping")
-        check(HookEventMapper.phase(for: "PreToolUse") == .usingTool, "tool mapping")
         let commandInput = #"const r = await tools.exec_command({ cmd: "swift build && echo done", workdir: "/tmp" });"#
         let commandSummary = SessionActivityService.toolSummary(name: "exec", input: commandInput)
         check(
@@ -496,7 +500,7 @@ enum ModelSmokeTests {
                 id: "command-a", kind: .command, title: "运行测试", isRunning: true, updatedAt: baseDate
             )]
         )
-        let projectB = LocalSessionSnapshot(
+        var projectB = LocalSessionSnapshot(
             sessionID: "session-b",
             turnID: "turn-b",
             cwd: "/tmp/ProjectB",
@@ -505,13 +509,9 @@ enum ModelSmokeTests {
             updatedAt: baseDate.addingTimeInterval(10),
             activities: []
         )
-        let approval = MonitoredTask(
-            id: "session-b", turnID: "turn-b", projectName: "ProjectB",
-            projectPath: "/tmp/ProjectB", model: "gpt-test", toolName: nil,
-            phase: .waitingApproval, updatedAt: baseDate.addingTimeInterval(10)
-        )
+        projectB.nativePhase = .waitingApproval
         let projects = ProjectActivityAggregator.projects(
-            snapshots: [projectA, projectB], hookTasks: [approval],
+            snapshots: [projectA, projectB],
             now: baseDate.addingTimeInterval(20)
         )
         check(projects.count == 2, "aggregate concurrent projects")
@@ -608,39 +608,15 @@ enum ModelSmokeTests {
             "activity island summary includes one parallel structured action"
         )
 
-        let renamedHook = MonitoredTask(
-            id: "session-a", turnID: "turn-a", projectName: "ProjectA-Renamed",
-            projectPath: "/tmp/ProjectA-Renamed", model: "gpt-test", toolName: nil,
-            phase: .working, updatedAt: baseDate.addingTimeInterval(12)
-        )
-        let renamedProjects = ProjectActivityAggregator.projects(
-            snapshots: [projectA], hookTasks: [renamedHook],
-            now: baseDate.addingTimeInterval(20)
-        )
-        check(renamedProjects.first?.name == "ProjectA-Renamed", "live hook updates renamed project")
-        check(renamedProjects.first?.task.phase == .usingTool, "rename keeps higher-priority live tool phase")
         let reassignedProjects = ProjectActivityAggregator.projects(
-            snapshots: [projectA], hookTasks: [renamedHook],
+            snapshots: [projectA],
             now: baseDate.addingTimeInterval(20), catalog: catalogState,
             threadNames: customThreadNames
         )
         check(reassignedProjects.first?.name == "新项目", "thread assignment updates live card name")
-        check(reassignedProjects.first?.path == "/tmp/NewProject", "thread assignment beats historical and hook cwd")
+        check(reassignedProjects.first?.path == "/tmp/NewProject", "thread assignment beats historical log cwd")
         check(reassignedProjects.first?.displayName == "0906 | 设计 | 新标题",
               "renamed task title takes display priority without changing project grouping")
-
-        let staleCompletionHook = MonitoredTask(
-            id: "session-b", turnID: "turn-b", projectName: "ProjectB",
-            projectPath: "/tmp/ProjectB", model: "gpt-test", toolName: nil,
-            phase: .completed, updatedAt: baseDate.addingTimeInterval(11)
-        )
-        check(
-            ProjectActivityAggregator.projects(
-                snapshots: [projectA, projectB], hookTasks: [staleCompletionHook],
-                now: baseDate.addingTimeInterval(20)
-            ).count == 2,
-            "active transcript is not suppressed by stale completion hook"
-        )
 
         let secondSessionSameProject = LocalSessionSnapshot(
             sessionID: "session-c", turnID: "turn-c", cwd: "/tmp/ProjectA",
@@ -648,7 +624,7 @@ enum ModelSmokeTests {
             updatedAt: baseDate.addingTimeInterval(5), activities: []
         )
         let groupedProjects = ProjectActivityAggregator.projects(
-            snapshots: [projectA, secondSessionSameProject], hookTasks: [],
+            snapshots: [projectA, secondSessionSameProject],
             now: baseDate.addingTimeInterval(20)
         )
         check(groupedProjects.count == 1, "group sessions by project path")

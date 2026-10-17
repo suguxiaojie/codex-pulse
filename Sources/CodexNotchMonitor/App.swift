@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = item.button {
             let image = NSImage(
                 systemSymbolName: "circle.dotted",
-                accessibilityDescription: "Codex Monitor"
+                accessibilityDescription: "Codex Pulse"
             )
             image?.isTemplate = true
             button.image = image
@@ -248,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         budget = statusCapacity.constrain(budget, context: capacityContext)
         let remaining = bucket?.limitingWindow?.remainingPercent
         let quotaText = remaining.map { "\($0)%" } ?? "--"
-        var tooltip = MenuBarStatusFormatter.details(for: bucket, relativeTo: now)
+        var tooltip = ChineseDisplayText.spacing(MenuBarStatusFormatter.details(for: bucket, relativeTo: now))
         var titles = [quotaText]
         var compactCandidates: [String]?
         var rotationPages: [String] = []
@@ -344,7 +344,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         animateStatusRotation = false
         button.imageScaling = .scaleProportionallyDown
         button.font = font
-        button.image = image ?? NSImage(systemSymbolName: "circle.dotted", accessibilityDescription: "Codex Monitor")
+        button.image = image ?? NSImage(systemSymbolName: "circle.dotted", accessibilityDescription: "Codex Pulse")
         // Let AppKit measure the actual ring, title and spacing; the selection
         // budget is a ceiling, not a visible empty reservation.
         button.imagePosition = layout.title.isEmpty ? .imageOnly : .imageLeading
@@ -363,7 +363,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.layer?.removeAnimation(forKey: "statusRotation")
         }
         button.toolTip = tooltip
-        button.setAccessibilityLabel("Codex Monitor\n" + tooltip)
+        button.setAccessibilityLabel("Codex Pulse\n" + tooltip)
         statusGeometryGeneration += 1
         let generation = statusGeometryGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in

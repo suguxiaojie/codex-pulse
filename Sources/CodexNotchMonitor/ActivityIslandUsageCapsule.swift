@@ -30,8 +30,8 @@ struct IslandUsageCapsuleContent: View {
     let windows: [RateLimitWindow]
     let current: Bool
     let now: Date
-    var tone: ActivityIslandUsageCapsuleTone = .dark
-    private var ink: Color { .white }
+    @Environment(\.colorScheme) private var scheme
+    private var ink: Color { FloatingSurfaceTheme.primary(scheme) }
     var body: some View {
         let periods = IslandFloatingQuotaPeriods.windows(windows)
         HStack(spacing: 12) {
@@ -40,12 +40,9 @@ struct IslandUsageCapsuleContent: View {
                 period(periods[index], short: periods.count == 2 && index == 0)
             }
         }
-        .font(.system(size: 12, weight: .medium)).foregroundStyle(ink)
+        .font(FloatingSurfaceTypography.control).foregroundStyle(ink)
         .padding(.horizontal, 12).frame(height: 32).fixedSize()
-        .islandGlass(Capsule(), tint: tone == .dark ? .black.opacity(0.55) : .clear,
-                     solidTint: Color(white: 0.12), clearSurface: true)
-        .environment(\.colorScheme, .dark)
-        .environment(\.islandLiquidGlassEnabled, true)
+        .modifier(IslandNativeBackdropMaterial(shape: Capsule()))
     }
     private func period(_ window: RateLimitWindow?, short: Bool) -> some View {
         let percent = current ? window?.remainingPercent : nil
@@ -53,17 +50,17 @@ struct IslandUsageCapsuleContent: View {
         let title = short ? "5 小时" : "周额度"
         let value = percent.map { "\($0)%" } ?? "—"
         let reset = window?.resetsAt != nil && current ? (countdown == "待刷新" ? countdown : "\(countdown)重置") : "重置时间 —"
-        let color: Color = percent.map { $0 >= 50 ? Color(red: 0, green: 1, blue: 17.0 / 255) : $0 >= 20 ? Color(red: 1, green: 0.80, blue: 0) : Color(red: 1, green: 69.0 / 255, blue: 58.0 / 255) } ?? .gray
+        let color = FloatingSurfaceTheme.quotaHealth(percent)
         return HStack(spacing: 6) {
             ZStack {
-                Circle().stroke(Color(white: 0.18), lineWidth: 2)
+                Circle().stroke(FloatingSurfaceTheme.track(scheme), lineWidth: 2)
                 Circle().trim(from: 0, to: CGFloat(percent ?? 0) / 100)
                     .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }.padding(1).frame(width: 12, height: 12).accessibilityHidden(true)
             Text(title)
             Text(value).monospacedDigit()
-            Text(reset).foregroundStyle(ink.opacity(0.78)).monospacedDigit()
+            Text(reset).foregroundStyle(FloatingSurfaceTheme.detail(scheme)).monospacedDigit()
         }.accessibilityElement(children: .ignore)
             .accessibilityLabel("\(title)，剩余 \(value)，\(reset)")
     }
@@ -78,8 +75,10 @@ struct IslandFloatingUsageCapsule: View {
             if model.showsFloatingUsage && model.presentation != .hidden {
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     IslandUsageCapsuleContent(windows: IslandFloatingQuotaPeriods.windows(model.quotaState),
-                        current: IslandFloatingQuotaPeriods.current(model.quotaState), now: context.date,
-                        tone: model.usageCapsuleTone)
+                        current: IslandFloatingQuotaPeriods.current(model.quotaState), now: context.date)
+                        .modifier(IslandGlassChrome())
+                        .modifier(IslandGlassAppearanceContext(appearance: model.glassAppearance, material: model.material))
+                        .environment(\.islandLiquidGlassEnabled, model.material == .liquidGlass)
                 }
                 .position(x: geometry.value.rect.midX, y: geometry.value.rect.maxY + 24)
             }
@@ -93,7 +92,7 @@ struct ActivityIslandCompactQuotaContent: View {
     @ObservedObject var model: ActivityIslandViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var percent: some View {
-        Text(model.compactQuotaPercent).monospacedDigit().fixedSize().foregroundStyle(.white)
+        Text(model.compactQuotaPercent).monospacedDigit().fixedSize().foregroundStyle(FloatingSurfaceTheme.accent())
     }
     private var summary: some View {
         IslandScrollingText(text: model.idleSummary, font: .systemFont(ofSize: 12, weight: .semibold),
@@ -107,7 +106,7 @@ struct ActivityIslandCompactQuotaContent: View {
             Text("\(model.sessions.count) 会话").hidden()
             Text("\(completed) 完成").hidden()
             Text(model.showsCompletedStatistic && completed > 0 ? "\(completed) 完成" : "\(model.sessions.count) 会话")
-        }.foregroundStyle(Color(white: 0.52)).monospacedDigit().fixedSize()
+        }.foregroundStyle(FloatingSurfaceTheme.secondary()).monospacedDigit().fixedSize()
     }
     var body: some View {
         let width = model.metrics.compactRect.width
@@ -127,8 +126,9 @@ struct ActivityIslandCompactQuotaContent: View {
                 }
             }.padding(.horizontal, 20).frame(width: width, height: model.metrics.compactRect.height)
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).font(.system(size: 12, weight: .semibold))
+        }.buttonStyle(.plain).font(FloatingSurfaceTypography.action)
             .accessibilityLabel("\(model.idleSummary)，剩余额度 \(model.compactQuotaPercent)，\(model.sessions.count) 会话")
-            .accessibilityHint("悬停或点击展开会话详情")
+            .help("悬停展开灵动岛，点击查看额度与用量")
+            .accessibilityHint("悬停展开灵动岛，点击查看额度与用量")
     }
 }

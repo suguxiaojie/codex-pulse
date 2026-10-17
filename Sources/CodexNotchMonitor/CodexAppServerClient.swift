@@ -86,7 +86,7 @@ final class CodexAppServerClient {
                         "params": [
                             "clientInfo": [
                                 "name": "codex-notch-monitor",
-                                "title": "Codex Notch Monitor",
+                                "title": "Codex Pulse",
                                 "version": "1.3.1",
                             ],
                             "capabilities": ["experimentalApi": false],

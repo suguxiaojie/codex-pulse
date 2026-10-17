@@ -34,6 +34,9 @@ final class ActivityIslandWindowController: NSObject {
             self.handle(.collapseRequested); self.rescheduleTransitions()
         }
         presenter.onNeedsRefresh = { [weak self] in self?.refresh(animated: false) }
+        // @Published emits before assignment; defer until the visible flag is committed.
+        model.$playbackVisible.removeDuplicates().filter { $0 }.receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.synchronizeCompactSignals() }.store(in: &cancellables)
         model.onExpand = { [weak self] in
             self?.handle(.expandRequested)
             self?.rescheduleTransitions()
@@ -132,7 +135,7 @@ final class ActivityIslandWindowController: NSObject {
         model.progressEffect = preferences.progressEffect
         model.privacyMode = preferences.privacyMode
         model.floatingUsageEnabled = preferences.floatingUsageEnabled
-        model.usageCapsuleTone = preferences.usageCapsuleTone
+        model.glassAppearance = preferences.glassAppearance
     }
     private func reloadPreferences() {
         let previous = preferences
@@ -157,11 +160,15 @@ final class ActivityIslandWindowController: NSObject {
         } }).max(by: { $0.updatedAt < $1.updatedAt })
         if let completed = newlyCompleted {
             model.completionBurstSerial += 1
-            compactReceiptClose?.cancel(); compactReceiptClose = nil
+            clearCompactReceipt()
             compactStatisticTick?.cancel(); compactStatisticTick = nil
             model.compactReceipt = completed; model.showsCompletedStatistic = true
         }
         let live = sessions.filter { $0.phase.isActive }
+        let newTurn = live.contains { row in !previous.contains { $0.id == row.id && $0.turnID == row.turnID && $0.phase.isActive } }
+        if newTurn || live.contains(where: { $0.phase == .waitingApproval }) {
+            clearCompactReceipt()
+        }
         let previousAttention = lifecycle.requiresAttention
         let newAttention = live.first { row in row.phase == .waitingApproval && !previous.contains { $0.id == row.id && $0.turnID == row.turnID && $0.phase == .waitingApproval } }
         if let focus = newAttention ?? live.first(where: { $0.id == model.focusedSessionID }) ?? live.first(where: { $0.phase == .waitingApproval }) ?? live.first {
@@ -169,7 +176,6 @@ final class ActivityIslandWindowController: NSObject {
             model.focusedSessionID = focus.id
             model.snapshot = snapshot(for: focus, rows: sessions)
             terminalIdentity = nil
-            let newTurn = live.contains { row in !previous.contains { $0.id == row.id && $0.turnID == row.turnID && $0.phase.isActive } }
             let newApproval = live.contains { row in row.phase == .waitingApproval
                 && !previous.contains { $0.id == row.id && $0.turnID == row.turnID && $0.phase == .waitingApproval } }
             let attention = live.contains { $0.phase == .waitingApproval }
@@ -182,6 +188,7 @@ final class ActivityIslandWindowController: NSObject {
                 if previousAttention && !attention { rescheduleTransitions() }
             }
         } else if let ended = sessions.filter({ $0.endReason != nil }).max(by: { $0.updatedAt < $1.updatedAt }) {
+            if ended.phase != .completed { clearCompactReceipt() }
             model.sessions = sessions
             model.focusedSessionID = ended.id
             model.snapshot = snapshot(for: ended, rows: sessions)
@@ -196,7 +203,7 @@ final class ActivityIslandWindowController: NSObject {
             refresh(animated: true)
         } else {
             model.sessions = []; model.snapshot = nil
-            model.focusedSessionID = nil; model.compactReceipt = nil
+            model.focusedSessionID = nil; clearCompactReceipt()
             model.showsCompletedStatistic = false; terminalIdentity = nil
             handle(.becameIdle); rescheduleTransitions()
         }
@@ -224,26 +231,32 @@ final class ActivityIslandWindowController: NSObject {
         presenter.present(screen: screen, preferences: preferences, animated: animated)
         synchronizeCompactSignals()
     }
-    // QuotaView compact signals use a three-second visible receipt and reserve
-    // statistic width while alternating session/completion counts.
+    private func clearCompactReceipt() {
+        compactReceiptClose?.cancel(); compactReceiptClose = nil
+        model.compactReceipt = nil
+    }
+    // A receipt starts its one-shot deadline on first compact visibility.
+    // Refreshes and later expansion/occlusion never extend that deadline.
     private func synchronizeCompactSignals() {
         let rows = model.sessions
         let completed = rows.filter { $0.phase == .completed }.count
         if let receipt = model.compactReceipt,
            rows.contains(where: { $0.phase == .waitingApproval }) ||
-           !rows.contains(where: { $0.id == receipt.id && $0.turnID == receipt.turnID && $0.phase == .completed }) ||
-           !rows.contains(where: { $0.phase.isActive }) {
-            model.compactReceipt = nil
-            compactReceiptClose?.cancel(); compactReceiptClose = nil
+           !rows.contains(where: { $0.id == receipt.id && $0.turnID == receipt.turnID && $0.phase == .completed }) {
+            clearCompactReceipt()
         }
         guard model.presentation == .compact, model.playbackVisible else {
-            compactReceiptClose?.cancel(); compactReceiptClose = nil
             compactStatisticTick?.cancel(); compactStatisticTick = nil
             return
         }
-        if model.compactReceipt != nil && compactReceiptClose == nil {
+        if let receipt = model.compactReceipt, compactReceiptClose == nil {
             let work = DispatchWorkItem { [weak self] in
-                self?.compactReceiptClose = nil; self?.model.compactReceipt = nil
+                guard let self, let current = self.model.compactReceipt,
+                      current.id == receipt.id, current.turnID == receipt.turnID else { return }
+                self.clearCompactReceipt()
+                if self.model.presentation == .compact && self.model.playbackVisible {
+                    self.refresh(animated: true)
+                }
             }
             compactReceiptClose = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)

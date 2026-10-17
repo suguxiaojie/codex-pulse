@@ -19,7 +19,7 @@ struct ActivityIslandUsageDashboard: View {
     private var bucket: RateLimitBucket? { model.quotaState.buckets.first { $0.id == "codex" } }
     private var ready: Bool { model.usageCost.updatedAt != .distantPast }
     private var width: CGFloat { model.metrics.expandedRect.width }
-    private var secondary: Color { .white.opacity(0.68) }
+    private var secondary: Color { FloatingSurfaceTheme.secondary() }
     private func tokens(_ value: Int?) -> String {
         guard let value else { return "—" }
         for (scale, suffix) in [(1_000_000_000.0, "B"), (1_000_000.0, "M"), (1_000.0, "K")] where Double(value) >= scale {
@@ -35,22 +35,20 @@ struct ActivityIslandUsageDashboard: View {
         content().padding(14).frame(maxWidth: .infinity, alignment: .leading)
             .islandGlass(RoundedRectangle(cornerRadius: 14, style: .continuous),
                          tint: Color(white: 0.025).opacity(0.90), solidTint: Color(white: 0.025))
-            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5).allowsHitTesting(false) }
     }
     private func utility(_ icon: String, title: String, action: (() -> Void)?) -> some View {
         Button { action?() } label: {
-            Image(systemName: icon).font(.system(size: 11, weight: .semibold)).frame(width: 24, height: 24)
-                .islandGlass(Circle(), tint: .white.opacity(0.04), clearSurface: true)
-        }.buttonStyle(.plain).accessibilityLabel(title)
+            IslandChromeIcon(name: icon)
+        }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true)).accessibilityLabel(title)
     }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Button { if showsReset { navigateReset(false) } else { model.onBackToTasks?() } } label: {
-                    Label(showsReset ? "返回用量" : "返回任务", systemImage: "chevron.left").font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 9).frame(height: 24).islandGlass(Capsule(), tint: .white.opacity(0.04))
-                }.buttonStyle(.plain)
-                Text(showsReset ? "额度重置" : "用量统计").font(.system(size: 12, weight: .medium)).foregroundStyle(secondary)
+                    Label(showsReset ? "返回用量" : "返回任务", systemImage: "chevron.left").font(FloatingSurfaceTypography.control)
+                        .padding(.horizontal, 9).frame(height: 24).islandGlass(Capsule(), tint: FloatingSurfaceTheme.chipFill())
+                }.buttonStyle(FloatingSurfaceButtonStyle())
+                Text(showsReset ? "额度重置" : "用量统计").font(FloatingSurfaceTypography.control).foregroundStyle(secondary)
                 Spacer()
                 utility(model.isPinned ? "pin.fill" : "pin", title: model.isPinned ? "取消置顶" : "固定展开", action: model.onPin)
                 utility("chevron.up", title: "收起用量面板", action: model.onCollapse)
@@ -58,8 +56,8 @@ struct ActivityIslandUsageDashboard: View {
             pageFlow
 
         }
-        .foregroundStyle(.white).frame(width: width, height: model.metrics.expandedRect.height, alignment: .top)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: mode)
+        .foregroundStyle(FloatingSurfaceTheme.primary()).frame(width: width, height: model.metrics.expandedRect.height, alignment: .top)
+        .animation(reduceMotion ? nil : FloatingSurfaceTheme.selectionMotion, value: mode)
         .accessibilityElement(children: .contain).accessibilityLabel(showsReset ? "额度重置面板" : "用量统计面板")
         .onChange(of: model.privacyMode) { _ in flightActive = false }
         .onDisappear { flightActive = false; model.resetDetailVisible = false }
@@ -73,7 +71,7 @@ struct ActivityIslandUsageDashboard: View {
                     } else {
                         if !IslandFloatingQuotaPeriods.current(model.quotaState) {
                             Text(bucket == nil ? "额度暂不可用，等待刷新" : "额度显示上次数据，等待刷新")
-                                .font(.system(size: 10)).foregroundStyle(secondary).frame(maxWidth: .infinity, alignment: .leading)
+                                .font(FloatingSurfaceTypography.metadata).foregroundStyle(secondary).frame(maxWidth: .infinity, alignment: .leading)
                         }
                         HStack(alignment: .top, spacing: 10) {
                             VStack(spacing: 10) {
@@ -97,7 +95,7 @@ struct ActivityIslandUsageDashboard: View {
             } footer: {
             HStack {
                 Text(model.privacyMode ? "隐私模式" : ready ? "更新于 " + model.usageCost.updatedAt.formatted(date: .omitted, time: .shortened) : "等待数据")
-                    .font(.system(size: 11))
+                    .font(FloatingSurfaceTypography.caption)
                 Spacer()
                 utility("arrow.clockwise", title: "刷新额度与用量", action: model.onRefresh)
                 utility("gearshape", title: "灵动岛设置", action: model.onOpenSettings)
@@ -150,7 +148,7 @@ struct ActivityIslandUsageDashboard: View {
         surface {
             VStack(alignment: .leading, spacing: 10) {
                 heading(title).lineLimit(1).minimumScaleFactor(0.75)
-                Text(value) .font(AstaSans.semiBold(21)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                Text(value).foregroundStyle(FloatingSurfaceTheme.usageData()).font(FloatingSurfaceTypography.primaryMetric).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
             }
         }
     }
@@ -162,14 +160,14 @@ struct ActivityIslandUsageDashboard: View {
                     VStack(alignment: .leading, spacing: 4) { heading(window?.windowLabel ?? "额度剩余"); heading(reset(window)) }
                 }
                 HStack(alignment: .lastTextBaseline) {
-                    Text(window.map { "\($0.remainingPercent)%" } ?? "—") .font(AstaSans.semiBold(21)).monospacedDigit()
+                    Text(window.map { "\($0.remainingPercent)%" } ?? "—") .font(FloatingSurfaceTypography.primaryMetric).monospacedDigit()
                     if window != nil { heading("剩余") }
                     Spacer(minLength: 2)
                     heading(window.map { "已使用 \($0.usedPercent)%" } ?? "—").lineLimit(1).minimumScaleFactor(0.75)
                 }
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color(white: 0.32))
+                        Capsule().fill(FloatingSurfaceTheme.track())
                         Capsule().fill(quotaColor(window?.remainingPercent)).frame(width: proxy.size.width * CGFloat(window?.remainingPercent ?? 0) / 100)
                     }
                 }.frame(height: 8).accessibilityHidden(true)
@@ -179,11 +177,10 @@ struct ActivityIslandUsageDashboard: View {
     private func reset(_ window: RateLimitWindow?) -> String {
         guard let date = window?.resetsAt else { return "重置时间 —" }
         let hours = max(0, Int(ceil(date.timeIntervalSinceNow / 3600)))
-        return hours >= 24 ? "\(hours / 24)天\(hours % 24)小时后重置" : "\(hours)小时后重置"
+        return ChineseDisplayText.spacing(hours >= 24 ? "\(hours / 24)天\(hours % 24)小时后重置" : "\(hours)小时后重置")
     }
     private func quotaColor(_ percent: Int?) -> Color {
-        guard let percent else { return .gray }
-        return percent >= 50 ? Color(red: 0, green: 0.92, blue: 0.1) : percent >= 20 ? .yellow : .red
+        FloatingSurfaceTheme.quotaHealth(percent)
     }
     private var creditBalance: String {
         guard let raw = bucket?.creditBalance else { return "—" }
@@ -200,8 +197,8 @@ struct ActivityIslandUsageDashboard: View {
                 heading("账户")
                 Text(OpenAIPlanDisplayName.resolve(bucket?.planType) ?? "—").font(.system(size: 16, weight: .semibold))
                 Spacer(minLength: 12)
-                HStack { heading("积分余额"); Spacer(); Text(creditBalance).font(.system(size: 10)).lineLimit(1).minimumScaleFactor(0.7) }
-                Divider().overlay(.white.opacity(0.12))
+                HStack { heading("积分余额"); Spacer(); Text(creditBalance).font(FloatingSurfaceTypography.metadata).lineLimit(1).minimumScaleFactor(0.7) }
+                Divider().overlay(FloatingSurfaceTheme.separator())
                 Button { navigateReset(true) } label: {
                     HStack {
                         DashboardResetTicket(playbackEnabled: model.playbackVisible && !flightActive)
@@ -211,10 +208,10 @@ struct ActivityIslandUsageDashboard: View {
                         Spacer()
                         VStack(alignment: .trailing, spacing: 5) {
                             heading("额度重置")
-                            Text(model.resetCredits.map { "\($0.availableCount) 次" } ?? "—").font(.system(size: 12))
+                            Text(model.resetCredits.map { "\($0.availableCount) 次" } ?? "—").font(FloatingSurfaceTypography.body)
                         }
                     }.contentShape(Rectangle())
-                }.buttonStyle(.plain).help("在灵动岛内查看重置次数与有效期，点击票卡不会消耗次数")
+                }.buttonStyle(FloatingSurfaceButtonStyle()).help("在灵动岛内查看重置次数与有效期，点击票卡不会消耗次数")
             }.frame(maxHeight: .infinity, alignment: .topLeading)
         }
     }
@@ -234,7 +231,7 @@ struct ActivityIslandUsageDashboard: View {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 10) {
                     heading(chart.official ? "官方用量折算" : "本地模型计价")
-                    Text(money(chart.total)).font(AstaSans.semiBold(21)).tracking(-0.21).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(money(chart.total)).foregroundStyle(FloatingSurfaceTheme.costData()).font(FloatingSurfaceTypography.primaryMetric).tracking(-0.21).lineLimit(1).minimumScaleFactor(0.8)
                     heading("最近 30 天")
                 }.frame(width: summaryWidth, alignment: .leading)
                 DashboardRecentChartScroll(plotWidth: costPlotWidth, viewportWidth: costViewport, plotHeight: 58, resetID: generation) {
@@ -242,10 +239,10 @@ struct ActivityIslandUsageDashboard: View {
                         ForEach(chart.days) { day in
                             Button { selectedCost = selectedCost == day.date ? nil : day.date } label: {
                                 RoundedRectangle(cornerRadius: 2)
-                                    .fill(selectedCost == day.date || hoveredCost == day.date ? .white : Color(white: day.cost == nil ? 0.18 : 0.35 + 0.4 * (day.cost ?? 0) / chart.maximum))
+                                    .fill(day.cost == nil ? FloatingSurfaceTheme.track() : FloatingSurfaceTheme.costData().opacity(selectedCost == day.date || hoveredCost == day.date ? 1 : 0.35 + 0.4 * (day.cost ?? 0) / chart.maximum))
                                     .frame(width: costCellSize, height: max(3, 58 * (day.cost ?? 0) / chart.maximum))
                                     .frame(height: 58, alignment: .bottom).contentShape(Rectangle())
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(FloatingSurfaceButtonStyle())
                                 .onHover { inside in if inside { hoveredCost = day.date } else if hoveredCost == day.date { hoveredCost = nil } }
                                 .accessibilityLabel(day.date.formatted(date: .abbreviated, time: .omitted) + " " + money(day.cost))
                                 .anchorPreference(key: DashboardHoverAnchor.self, value: .bounds) { hoveredCost == day.date ? $0 : nil }
@@ -263,7 +260,7 @@ struct ActivityIslandUsageDashboard: View {
                 }.padding(.top, 14).zIndex(10)
                 VStack(alignment: .trailing, spacing: 10) {
                     heading(selected?.date.formatted(.dateTime.month().day()) ?? "最近一天")
-                    Text(money(selected != nil ? selected?.cost : chart.latest?.cost)).font(AstaSans.semiBold(17)).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(money(selected != nil ? selected?.cost : chart.latest?.cost)).font(Font.system(size: 17, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
                     heading("估算值 · 非账单")
                 }.frame(width: summaryWidth, alignment: .trailing)
             }.fixedSize(horizontal: false, vertical: true)
@@ -286,8 +283,8 @@ struct ActivityIslandUsageDashboard: View {
                         Button { mode = option; selectedActivity = nil; hoveredActivity = nil } label: {
                             Text(option == .daily ? "每天" : option == .weekly ? "每周" : "累计")
                                 .font(.system(size: 10, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 4)
-                                .islandGlass(Capsule(), tint: mode == option ? .white.opacity(0.20) : .black.opacity(0.28))
-                        }.buttonStyle(.plain).accessibilityValue(mode == option ? "已选择" : "未选择")
+                                .islandGlass(Capsule(), tint: mode == option ? FloatingSurfaceTheme.accent().opacity(0.20) : .black.opacity(0.28))
+                        }.buttonStyle(FloatingSurfaceButtonStyle()).accessibilityValue(mode == option ? "已选择" : "未选择")
                     }
                 }
                 DashboardRecentChartScroll(plotWidth: activityPlotWidth, viewportWidth: contentWidth - 28,
@@ -303,10 +300,10 @@ struct ActivityIslandUsageDashboard: View {
                                         let label = cell.date.formatted(date: .abbreviated, time: .omitted) + " · " + tokens(cell.tokens)
                                         Button { selectedActivity = label } label: {
                                             RoundedRectangle(cornerRadius: 2)
-                                                .fill(filled ? heatColor(cell.tokens, maximum: grid.maximum) : Color(white: 0.18))
-                                                .overlay { if hoveredActivity == index { RoundedRectangle(cornerRadius: 2).strokeBorder(.white.opacity(0.8), lineWidth: 1) } }
+                                                .fill(filled ? heatColor(cell.tokens, maximum: grid.maximum) : FloatingSurfaceTheme.track())
+                                                .overlay { if hoveredActivity == index { RoundedRectangle(cornerRadius: 2).strokeBorder(FloatingSurfaceTheme.usageData(), lineWidth: 1) } }
                                                 .frame(width: cellSize, height: cellSize).opacity(cell.future ? 0.25 : 1)
-                                        }.buttonStyle(.plain).disabled(cell.future).accessibilityLabel(label)
+                                        }.buttonStyle(FloatingSurfaceButtonStyle()).disabled(cell.future).accessibilityLabel(label)
                                             .onHover { inside in if inside { hoveredActivity = index } else if hoveredActivity == index { hoveredActivity = nil } }
                                             .anchorPreference(key: DashboardHoverAnchor.self, value: .bounds) { hoveredActivity == index && (mode == .daily || row == 0) ? $0 : nil }
                                             .accessibilityRepresentation {
@@ -319,7 +316,7 @@ struct ActivityIslandUsageDashboard: View {
                         ZStack(alignment: .leading) {
                             ForEach(grid.months.indices, id: \.self) { index in
                                 Text(grid.months[index].date.formatted(.dateTime.month(.abbreviated)))
-                                    .font(.system(size: 9)).foregroundStyle(secondary)
+                                    .font(FloatingSurfaceTypography.fine).foregroundStyle(secondary)
                                     .offset(x: CGFloat(grid.months[index].column) * (cellSize + 3))
                             }
                         }.frame(width: activityPlotWidth, height: 12, alignment: .leading)
@@ -340,12 +337,12 @@ struct ActivityIslandUsageDashboard: View {
         .onDisappear { hoveredCost = nil; hoveredActivity = nil }
     }
     private func heatColor(_ value: Int?, maximum: Int) -> Color {
-        guard let value, value > 0 else { return Color(white: 0.18) }
+        guard let value, value > 0 else { return FloatingSurfaceTheme.track() }
         let level = Double(value) / Double(max(1, maximum))
-        if level < 0.25 { return Color(red: 0.02, green: 0.23, blue: 0.40) }
-        if level < 0.5 { return Color(red: 0.02, green: 0.35, blue: 0.61) }
-        if level < 0.75 { return Color(red: 0.02, green: 0.53, blue: 0.92) }
-        return Color(red: 0.39, green: 0.71, blue: 1)
+        if level < 0.25 { return FloatingSurfaceTheme.usageData().opacity(0.25) }
+        if level < 0.5 { return FloatingSurfaceTheme.usageData().opacity(0.45) }
+        if level < 0.75 { return FloatingSurfaceTheme.usageData().opacity(0.65) }
+        return FloatingSurfaceTheme.usageData().opacity(0.90)
     }
     // Resolve the upstream anchor outside the scroll clip so edge cells retain a readable tooltip.
     private func tooltip<Content: View>(anchor: Anchor<CGRect>?, height: CGFloat, @ViewBuilder content: @escaping () -> Content) -> some View {
@@ -355,10 +352,10 @@ struct ActivityIslandUsageDashboard: View {
                 let width = min(214, proxy.size.width)
                 if rect.maxX > 0 && rect.minX < proxy.size.width {
                     VStack(alignment: .leading, spacing: 3, content: content)
-                        .font(.system(size: 11)).foregroundStyle(.white).padding(.horizontal, 11).padding(.vertical, 8)
+                        .font(FloatingSurfaceTypography.caption).foregroundStyle(FloatingSurfaceTheme.primary()).padding(.horizontal, 11).padding(.vertical, 8)
                         .frame(width: width, alignment: .leading)
-                        .background(Color(white: 0.17), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color(white: 0.23), lineWidth: 1) }
+                        .background(FloatingSurfaceTheme.popover(), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(FloatingSurfaceTheme.outline(), lineWidth: 0.5) }
                         .shadow(color: .black.opacity(0.25), radius: 5, y: 2)
                         .offset(x: min(max(0, rect.midX - width / 2), max(0, proxy.size.width - width)), y: rect.minY - height)
                 }

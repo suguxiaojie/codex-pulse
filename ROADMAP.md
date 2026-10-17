@@ -1,4 +1,4 @@
-# Codex Notch Monitor Roadmap
+# Codex Pulse Roadmap
 
 ## 项目目标
 
@@ -6,11 +6,73 @@
 
 ## 当前阶段
 
-v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16044678db5c9ef4。GitHub Release 提供独立 arm64 与 x86_64 DMG 和 SHA-256 清单；公开附件下载后校验通过。本机已备份安装正式 arm64 包并确认启动；Intel 已构建与镜像校验，尚无真机运行验收。Hook 数据接入继续屏蔽，IPC＋本地日志保持启用；既有未完成的实机交互边界见下方待办。
+v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16044678db5c9ef4。GitHub Release 提供独立 arm64 与 x86_64 DMG 和 SHA-256 清单；公开附件下载后校验通过。本机已备份安装基于 v1.7.0 的未发布 arm64 开发包并确认启动；Intel 已构建与镜像校验，尚无真机运行验收。当前未发布工作区已完整移除 Hook 功能与本机插件配置，IPC＋本地日志保持启用；既有未完成的实机交互边界见下方待办。
+
+当前本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
 本地开发交接笔记不随公开发行包上传；历史版本变化以 Git 历史为准。
 
 ## 进行中与待办
+
+- 2026-10-17 12:18：v1.8.0（Build 26）Apple Silicon／Intel 两份 Release DMG 已完成构建与包校验，当前待提交、推送及 GitHub Release 发布。中英文 README 精简至各 128 行并加入 9 张用户截图，包含补充的真实运行态；所有本地引用有效。DMG 显式使用 HFS+／UDZO，修复本系统默认 APFS 镜像可读取但旧 hdiutil verify 失败的问题，最终两架构脚本退出 0、CRC／只读挂载逐文件一致性／签名通过。本机已完整备份并覆盖安装 arm64 新版，进程确认；测试及 UI 验收由用户自行执行，Intel 无真机验收。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-v1.8.0-20261017-121825.app 。记录：.tmp/release-v1.8.0/。
+
+- 2026-10-17 12:07：会话管理项目行会话摘要已实现并备份覆盖安装，待用户自行验收。折叠／展开项目行都汇总当前搜索和筛选后的 threads：最近会话更新时间、单账号／多账号／部分归属／未归属、待恢复与路径缺失异常。只按 observed＋已有账号标识分组，基线前与未知分别计数并在悬停明细保留，不推断当前登录账号；缺少可靠标识的 observed 记录归入未确认展示。会话数量移至项目名旁，部分匹配显示匹配数／总数；表头、项目和会话行共用列宽／间距，灰阶摘要与异常橙色沿用 CDS，保留原生 List、选择／展开／详情／菜单、完整项目操作范围和所有原筛选口径。新增只读 SessionProjectSummary 展示模型，中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或 UI 验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-session-project-summary-20261017-120721.app 。证据：.tmp/session-project-summary/。
+
+- 2026-10-17 12:00：用量／成本概览卡精简已实现并备份覆盖安装，待用户自行验收。移除内层青绿／陶土圆角底块及额外横向缩进，保留外层暖中性卡片；主指标统一主文字色，右侧会话／项目与 Token 吞吐量使用中性次要色，分项／时间轴字号统一，Token 单位缩小且保留辅助功能组合。成本“API 等价估值，非账单”说明移至分项下方，让两页标题与核心指标对齐。保留图表数据色、趋势／柱形／热图／悬停、统计／格式化／周期／账号口径、等宽数字与原数字过渡／减少动态分支；功能、配置、数据与玻璃效果不改。中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或 UI 验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-overview-card-simplify-20261017-120037.app 。证据：.tmp/overview-card-simplify/。
+
+- 2026-10-17 11:55：应用展示名称统一为 Codex Pulse，已备份覆盖安装，待用户自行验收。同步系统 CFBundleDisplayName／CFBundleName、概览／监控中心／岛体窗口标题、通知／退出／辅助功能文案、App Server 展示标题与新导出包来源名称／说明。菜单栏避让按当前 PID 排除自身，不再依赖旧品牌字符串。保留 Bundle ID、target／可执行文件、安装路径、偏好键、数据目录、导入导出格式与更新资源命名；不改写账号／会话数据，沿用已采纳 Logo 和回滚后的面板布局。中英文 README、AGENTS 与品牌说明同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-pulse-name-20261017-115517.app 。记录：.tmp/pulse-name/。
+
+- 2026-10-17 11:52：用户采纳“脉点”后已接入应用品牌 Logo，并备份覆盖安装，待用户自行验收。共用 CodexMark 的三个入口读取 Resources/Pulse-Logo.svg，保留同形原生 P／脉点回退并更新辅助功能标签；新增多尺寸原生 Pulse-AppIcon.icns 与 CFBundleIconFile，打包脚本复制两份正式素材。原 CoverAI 文件保留，菜单栏额度环及客户端来源图标不改；该轮仅替换 Logo；展示名称已在后续 Codex Pulse 命名迭代统一，Bundle ID、数据目录、功能及回滚后面板布局不变。中英文 README 与品牌说明同步。按持续要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-pulse-logo-replace-20261017-115143.app 。本轮新增资源清单和原源码快照在 .tmp/pulse-logo-replace/，证据：install.json、change.diff。
+
+
+
+- 2026-10-17 11:32：菜单栏面板阅读衬底、成本空状态、Token 排序与动态高度已调整并备份覆盖安装，待用户自行验收。主滚动阅读区采用连续暖中性衬底，增强对比／减少透明度时加强遮蔽，外围原生玻璃与不透明度偏好不变。今日／30 日 Token 移至成本前并排展示，独立开关保留。成本仅在明细就绪且估值大于零时显示图表、峰值与最近一天；零估值／无 Token 用量使用紧凑行，未就绪／缺失显示明确状态和“—”，账号日志 unknownModels 提示明确不限定所选周期。概览按实际内容自然高度测量并去除根视图固定高度，配合既有屏幕限高与滚动；原估高仅为首次后备，重置详情原高度保留。账号归属、数据／计价口径、周期、七项开关和所有操作未改，中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-glance-reading-cost-cds-20261017-113224.app 。记录：.tmp/glance-reading-cost-cds/。
+
+- 2026-10-17 11:25：恢复可见的回执计时、摘要语义色、结果短文案与横幅提示已统一并备份覆盖安装，待用户自行验收。控制器监听已有 playbackVisible 的恢复信号，在主 RunLoop 标记提交后同步紧凑回执；不刷新／唤起窗口，不重置已开始的 3 秒计时或重播失效回执。摘要待批准为橙、失败为红，其余分类／分隔符中性，保留宽度降级与完整辅助说明。紧凑结果缩短为完成／取消／失败／结束＋标题，悬停与辅助功能保留完整状态、标题与详情并沿用隐私隐藏；额度／空闲横幅提示明确悬停展开、点击查看额度与用量。保留状态证据、待批准／新运行优先、玻璃、特效选项和原有功能，中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-island-visibility-copy-cds-20261017-112451.app 。记录：.tmp/island-visibility-copy-cds/。
+
+- 2026-10-17 11:19：最后会话完成后的紧凑反馈已统一并备份覆盖安装，待用户自行验收。明确运行转完成后，最终完成回执暂时优先于额度分支，首次在可见紧凑态显示时启动一次 3 秒计时，到期清除并回到常驻额度／空闲横幅；普通刷新不延长，计时开始后展开／遮挡不重启，仅可见紧凑态在到期时刷新窗口。待批准、新运行轮次及较新的非成功结果清除旧完成回执，旧回调按 session／turn 核对，失效记录与历史完成不重播。保留完成证据、聚焦排序、自动弹出开关、玻璃、特效选项与礼花触发，中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。修改前回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-final-compact-receipt-cds-20261017-111718.app 。最终覆盖前中间包备份：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-final-compact-receipt-cds-20261017-111906.app 。记录：.tmp/final-compact-receipt-cds/。
+
+- 2026-10-17 11:13：按审查前三项完成灵动岛选中反馈、多会话摘要与隐私占位，并按用户补充要求精简额度入口；已备份覆盖安装，待用户自行验收。选中卡片在固定图标位使用陶土浅底，独立于特效／结果类型，按钮标记辅助功能“已选择”。紧凑态与底栏按待批准、失败、运行、完成、取消、结束分组，运行不重复包含待批准；随宽度在完整、两组与一组摘要之间降级，完整阶段数量保留悬停与辅助功能，空列表明确无运行任务。隐私卡片保持标题／状态／行高，详情合并为单条隐藏提示，同步精简提示与播报。顶部入口改为百分比＋细右箭头，保留原生玻璃、点击用量页与“查看额度与用量”说明。保留状态证据、监控／完成判断、排序／聚焦／收起计时、额度／空闲分支计数轮换、特效选项和礼花；未改最后完成回执的呈现时序。中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-island-summary-selection-cds-20261017-111317.app 。记录：.tmp/island-summary-selection-cds/。
+
+- 2026-10-17 11:07：灵动岛状态表达与运行／结果卡片布局已重构并备份覆盖安装，待用户自行验收。仅在 ActivityIslandView 展示层映射状态图标、文字与颜色；完成绿色勾选、取消／普通结束中性、失败红色、待批准橙色并提示在 Codex 处理。固定 62 pt 行高与图标槽位，运行卡按标题／阶段、动作、模型／时长／累计用量分层，仅聚焦动作滚动；结果卡显示冻结耗时、本轮与累计用量，本轮值只读取匹配 session／turn 的已有用量，缺失或无效为“—”，隐私继续隐藏详情。紧凑态、卡片、底栏与辅助功能统一文案，取消／普通结束不作失败警示或播放运行特效。保留状态来源／结束证据、完成判定、聚焦排序／计数轮换、展开／收起计时、玻璃合成、三种特效选项与既有完成礼花触发。中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-island-session-layout-cds-20261017-110652.app 。记录：.tmp/island-session-layout-cds/。
+
+- 2026-10-17 10:59：导出内部层级、额度健康色与套餐标签描边已统一并备份覆盖安装，待用户自行验收。文件名、未选格式与关闭的导出选项使用既有下沉表面，聚焦／选中保留陶土。桌面额度行／动态中心、菜单栏面板、灵动岛和浮动胶囊复用同一健康颜色函数：不少于 50% 绿、20%～49% 橙、低于 20% 红，缺失灰；不改额度计算、通知／预警逻辑及原生菜单栏模板图标。套餐标签移除内层描边，保留文字、浅底和尺寸。现有功能、陶土主色、数字与 CDS 动效、玻璃材质及透明度保持；中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-export-quota-polish-cds-20261017-105932.app 。记录：.tmp/export-quota-polish-cds/。
+
+- 2026-10-17 10:54：额度重置记录卡圆角／描边与趋势悬停圆点底色已统一并备份覆盖安装，待用户自行验收。额度恢复监控卡复用既有普通卡片表面，底色和单层细描边统一 12 pt 圆角、轻阴影与增强对比处理；用量／成本趋势圆点内部改用所在重点卡片的 prominentCardFill，外圈保留青绿／陶土数据色。保留记录、通知状态、手动确认、来源链接、图表数据与悬停定位、尺寸／动效、陶土主色及原生玻璃。中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-record-trend-details-cds-20261017-105439.app 。记录：.tmp/record-trend-details-cds/。
+
+- 2026-10-17 10:51：按审查前三项统一剩余独立卡片、社区动态／时间轴与记录类型选择浮层，已备份覆盖安装，待用户自行验收。导入／项目迁移预览、三种备份提示、额度／社区预测、来源／事件及分析页额度等 12 处独立卡片或条目复用既有普通卡片表面、轻阴影、单层细描边与增强对比处理；社区动态与时间轴移出下沉表面，事件卡移除重复外框但保留类型图标与文字状态色。选择浮层使用 elevated，保留原生 Popover、焦点／方向键／Esc 与选择行为。保留原圆角、尺寸、功能、陶土主色及玻璃合成；记录卡圆角和趋势悬停圆点未改。中英文 README 同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-remaining-card-depth-cds-20261017-105140.app 。记录：.tmp/remaining-card-depth-cds/。
+
+- 2026-10-17 10:47：背景与卡片层级已调整并备份覆盖安装，待用户自行验收。桌面采用暖灰画布、较沉侧栏、普通／重点卡片与较低明度的嵌套区域，深色画布由近黑调整为暖炭灰。分析主卡片、普通卡片、设置分组与导出面板复用轻阴影和单层细描边，增强对比时提高边界辨识；说明浮层与项目详情使用较高表面。保留现有圆角／尺寸／布局与交互、陶土主色、青绿用量数据色和 CDS 动效；原生菜单栏／灵动岛玻璃合成、透明度及危险操作语义未改。中英文 README 已同步。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-surface-depth-cds-20261017-104729.app 。记录：.tmp/surface-depth-cds/。
+
+- 2026-10-17 10:44：数据图表配色与重点摘要已调整并备份覆盖安装，待用户自行验收。桌面用量折线／面积、柱状图、热力图及项目摘要采用低饱和青绿；成本保留陶土，缓存分项使用暖沙色。两张概览的核心指标增加局部轻微衬底，日志来源的 Token／成本数值按相同数据色区分；菜单栏与灵动岛 Token 数值／热图同步，成本数值继续陶土。保留陶土主操作与选中态、统计／计价／来源与缺失数据口径、图表几何和悬停／周期／辅助功能／减少动态效果分支、玻璃材质与透明度、配额健康与危险操作语义。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-data-color-cds-20261017-104406.app 。记录：.tmp/data-color-cds/。
+
+- 2026-10-17 03:45：三处滑杆已统一轻量样式并备份覆盖安装，待用户自行验收。背景不透明度、黑色遮罩比例与展开宽度共用现有自绘滑杆及数值行，使用 4 pt 中性／陶土轨道、16 pt 实色滑块、轻阴影、32 pt 操作高度和焦点提示；移除渐变、白色描边与中心点。保留 10%～90%／1%、20%～80%／1% 和屏幕动态宽度范围／1 pt 步进、连续指针跟随、最高 20 Hz 预览更新、结束时精确写入、拖动滚动互斥、方向键与辅助功能调整；减少动态效果时不缩放。玻璃材质与真实预览保持。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-light-sliders-cds-20261017-034523.app 。记录：.tmp/light-sliders-cds/。
+
+- 2026-10-17 03:35：本轮三项细节已实现并备份覆盖安装，待用户自行验收。“查看待恢复”复用既有次级按钮反馈，保留定位操作；固定／收起／刷新／设置等圆形玻璃图标显式使用圆形焦点框，文字／卡片按钮保持圆角矩形，不改玻璃、尺寸和点击区域；ChineseDisplayText 在应用生成的文案中统一英文字母／数字与中文间距，恢复记录空状态应用该格式，不修改用户标题、路径或原始数据。滑杆按要求未改动，危险操作语义保留。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-final-ui-details-cds-20261017-033501.app 。记录：.tmp/final-ui-details-cds/。
+
+
+- 2026-10-17 03:30：侧栏动效、桌面次要文字／分隔线令牌与中文数字间距已统一并备份覆盖安装，待用户自行验收。侧栏底板复用 CDS selectionMotion，与内容切换一致，减少动态效果分支保留；桌面次要文字、分隔线、图表网格／辅助线和增强对比边界收敛为语义令牌。ChineseDisplayText 仅在渲染端整理应用生成的计数和倒计时，概览次数标签与辅助功能共用格式，覆盖可见额度倒计时及菜单栏额度提示；不改底层时间计算、统计、来源证据、原始记录、用户标题和路径。按用户要求只构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-sidebar-text-spacing-cds-20261017-032951.app 。记录：.tmp/sidebar-text-spacing-cds/。
+
+
+- 2026-10-17 03:25：导入／项目迁移预览、次级操作／搜索框和禁用态样式已统一并备份覆盖安装，待用户自行验收。两种预览共用紧凑身份策略选项与桌面文字／填充令牌；会话搜索增加聚焦边界和 24 pt 清除入口，近 30 日／查看全部／项目折叠／翻译接入既有次级反馈。按钮、分段、筛选、菜单入口、概览圆形控件与相关滑杆补齐启用条件，禁用时停止悬停／按压／焦点强调。保留导入／迁移校验、归属和冲突证据、目标选择、原有策略／操作／禁用条件，搜索输入法与 Esc、项目选择／展开、翻译及危险操作语义；未改业务服务。按用户要求只构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-import-secondary-cds-20261017-032456.app 。记录：.tmp/import-secondary-cds/。
+
+
+- 2026-10-17 03:13：浮动界面 CDS 风格及剩余标签／描边／文字令牌已统一并备份覆盖安装，待用户自行验收。概览面板、岛体任务／用量／胶囊／重置页沿用暖中性文字、陶土强调，账户／接口／重置次数标签移除冗余边框，分隔线／缺失数据边界／提示框和紧凑字号令牌集中；CoreText 滚动文字复用不透明 RGB 色阶。危险操作保留红色填充、必要红色边界、白色按钮文字与红色焦点；原生玻璃／透明度／浅深自动、刘海黑色壳体、黑色重置卡、阴影、任务特效与布局、统计／隐私／重置确认流程保留。按用户要求只构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-floating-details-cds-20261017-031252.app 。记录：.tmp/floating-details-cds/。
+
+
+- 2026-10-17 03:08：菜单入口与说明浮层已统一 CDS 呈现并备份覆盖安装，待用户自行验收。账号／活动范围、会话／动态筛选、导入目标、项目／会话更多操作和记录类型入口复用文字、尺寸、悬停与焦点规则；停留时间继续使用原生 Picker。数据范围说明、连接诊断和会话详情共用浮层表面与文字层级，关闭入口统一；原生 Menu／Picker、右键菜单内容、动作、选择与键盘处理及会话归属证据未改，现有自定义选择浮层只更新选中呈现。按用户要求仅构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-menus-popovers-cds-20261017-030752.app 。记录：.tmp/menus-popovers-cds/。
+
+
+- 2026-10-17 02:59：旧按钮反馈、项目详情弹窗及导出面板已统一 CDS 样式并备份覆盖安装，待用户自行验收。MonitorCenterPressStyle 接入悬停、显式焦点环与 CDS 弹簧，禁用时停止悬停强调；项目详情统一字体／指标／路径和操作按钮；导出面板采用 16 pt 外壳、精简内层边框、文件名焦点强调、格式与范围选择状态、统一底部操作，清除重复禁用透明度。保留统计、项目会话跳转、文件名更新、原生目录选择、导出选项／进度／完成与原确认流程。按用户要求只构建 arm64 Release，未运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-dialogs-controls-cds-20261017-025905.app 。记录：.tmp/dialogs-controls-cds/。
+
+
+
+
+- 2026-10-17 02:48：四个监控页与三张设置页已统一 CDS 桌面样式并备份覆盖安装，待用户自行验收。用量分析／成本估算／动态中心／会话管理共用暖中性表面、陶土强调、胶囊周期选择、图表／进度配色、轻量按钮与焦点反馈，弹层和侧栏一并统一。设置样板令牌收敛到 MonitorDesktopTheme，复用实际 CDS 弹簧参数；保留成功／警告／错误与事件类别语义颜色。未修改统计、计价、来源证据、归属、筛选及导入导出／恢复／删除的操作与确认逻辑；实际岛体和菜单栏面板材质保留。按用户要求只构建 arm64 Release，不运行测试或界面验收；未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-monitor-center-cds-20261017-024839.app 。记录：.tmp/monitor-center-cds/。
+
+
+- 2026-10-16 21:41：统一玻璃外观与选择控件已安装，预览浅／深／经典回退及鼠标选择通过；真实岛体独立画面、实际系统浅深切换、动画中间帧未完成验收。选择面板 Down＋Return 未观察到值变化，键盘路径待核对，不宣称通过。偏好解析测试覆盖系统浅深及减少透明度，未修改系统外观。证据：build/glass-appearance-verified/。
+
 
 
 - 2026-10-16 20:17：轻量刷新按钮已安装，默认外观和真实点击已实机检查；服务在 AX 采样前返回，加载文案／禁用状态／旋转未捕获，悬停／按压中间帧未录制，不宣称动态验收通过。证据：build/quiet-refresh-verified/。
@@ -25,17 +87,26 @@ v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16
 
 
 
-- 当前无 Hook 试用：MonitorStore.hookDataEnabled=false，收件箱轮询与消费入口均关闭；保留 IPC＋本地日志，非纯 IPC。Hook 配置与事件文件未改动；长期运行／完成／等待／断线表现由实际试用继续验证。恢复接入前检查积压事件时效，避免回放旧状态。
 
 
 
 - 复现菜单栏窄候选丢百分比、多项目 Token 页缺数量、纯图标后容量无法恢复三个边界，详见 Handoff。
 - 已实机确认单会话的当前工具摘要、工作／思考状态切换、整卡效果、隐私遮挡及设置导航；真实等待批准、完成／取消的全过程仍待验收，自动回归不能替代该部分。
-- 无 Hook 只读任务监控已接入并完成本机连接、工具／思考及已有完成状态验收；真实待批准／取消、睡眠重连和当前真实任务从活动到结束的完整过程仍待验收。桌面 IPC 为版本相关协议，不提供批准／回答；现有 Hook 保留，断线回退本地日志。证据：build/native-activity-20261016-031116/。
+- 无 Hook 只读任务监控已接入并完成本机连接、工具／思考及已有完成状态验收；真实待批准／取消、睡眠重连和当前真实任务从活动到结束的完整过程仍待验收。桌面 IPC 为版本相关协议，不提供批准／回答；Hook 已移除，断线回退本地日志。证据：build/native-activity-20261016-031116/。
 - 多屏切换、ControlCenter 系统拦截和真实多项目悬停验收未闭环；历史 design-qa.md 混有已撤回 Prompt 导航实验记录，不把旧 blocked 当作当前全部界面的状态。
 - 设置页整理已实现并安装，完整测试与 arm64 Release／签名通过；实机确认阅读区遮蔽、中文导航、周月联动与默认菜单设置。独立活动范围与成本单日已在后续柱状图验收完成；项目详情跳转与 Hook 折叠交互仍待验收。旧 detailed 偏好仅映射为自动显示，原始值未改写。证据：build/settings-review-verified/。
 
 ## 最近完成
+
+- 2026-10-17 11:42：用户反馈本轮面板精简效果不佳，已撤回页头合并／原生周期菜单／底部入口及菜单跟踪保护，恢复上一版阅读衬底、Token 前置／并列、成本空状态和动态高度。三份源码按本轮精确反向补丁回滚，与改动前快照逐文件一致；中英文 README 撤回对应描述，保留其他未提交改动。当前 App 与 build App 从既有上一版完整备份恢复并启动，未重新构建、测试或界面验收。恢复来源：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-glance-chrome-controls-cds-20261017-113949.app 。被撤回版本完整备份：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-rollback-glance-chrome-20261017-114200.app 。证据：.tmp/rollback-glance-chrome/install.json、source-change.patch。
+
+- 2026-10-16 23:08：设置工作台按最新要求改造：菜单栏嵌入真实 GlanceView／MonitorStore 与原生玻璃，只读预览随开关联动；灵动岛完整场景在顶部独占一行，下方自适应双列控制，保留放大预览。移除其他模型额度展示／开关及高度分支，内容共 7 项；Credits 按原始十进制字符串分组去尾零并保留有效小数。中英文 README 同步，完整测试与 arm64 Release 通过，备份覆盖安装并实机检查，未提交／发布。
+
+- 2026-10-16 22:12：精简安装与权限页，移除独立“环境与连接”卡片与“重新运行引导”入口及无引用重置调用；首次引导继续保留。CLI 路径／连接回退与验证说明收进原生任务监控行的连接诊断信息弹层，“刷新状态”移入同一行。中英文 README 同步，未改客户端配置或账号／会话数据；未提交或发布。
+
+- 2026-10-16 21:58：用户确认原生监控试用正常，完整移除生命周期 Hook：事件模型／映射／收件箱／定时器／任务合并与结束回退、安装审核服务／界面、Helper target、安装卸载脚本和打包入口；引导收敛为欢迎／环境／通知三步。备份后移除本机 9 个插件处理器、独立 Helper、events、审核启动器／偏好和旧 setup-backups；其他 17 个处理器保留，本插件命令为 0。两级 App／配置备份保留，README 中英文、AGENTS 与本地说明同步；未提交／发布。
+
+- 2026-10-16 21:41：复用 QuotaView 0.8.3 scoped 浅／深／自动外观、公开 AppKit KVO、前景对比和共用 clear 玻璃；底栏／胶囊／预览统一，顶部与内容卡片仍深色，重置主卡纯黑保留。旧胶囊配色值保留但不读取，经典／减少透明度回退深色实体。记录类型／停留时间换为统一细描边选择入口及焦点可见的弹出选项；权限页三个轻量文字按钮，通知／更新状态提亮并增加状态图标。完整测试与 arm64 Release 后备份覆盖；Hook 保持屏蔽，未提交或发布。
 
 - 2026-10-16 20:40：v1.7.0（Build 25）正式发布：中英文 README、必要源码／测试／依赖许可已提交并推送 main，标签指向 0f84eff；两个独立架构 DMG 与 SHA-256 清单已上传正式 Release。轻量按钮圆角同步为用户选择的 14 pt。本地交接笔记、验收日志、缓存和发布物料未上传。发布：https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.7.0 。
 
@@ -67,53 +138,49 @@ v1.7.0（Build 25）已正式发布，源码提交为 0f84effc74999b87d255c4bd16
 - 2026-10-16 14:09：修复会话管理／恢复核验的 App Server 列表漏分页：服务端将 limit=1000 截为每页 100 条，19 条较早会话均在第二页，之前误标“待恢复”且恢复核验为 0/19。活动与归档列表统一追踪 nextCursor、合并去重；分页失败或重复游标返回错误而非不完整成功。无需修复会话数据；Hook 仍屏蔽。已备份安装 arm64 开发包。
 
 - 2026-10-16 13:58：支持 .jsonl.zst 压缩会话，内置官方 Zstandard decoder-only 1.5.7，统一只读流式读取、有界头尾预览、会话／事件去重与缓存；本地详细成本合并压缩历史及普通续写。可读导出支持压缩来源，完整备份仅在导出暂存目录生成兼容 JSONL，导入冲突检查同步识别压缩会话。新发现压缩历史不作为当前账号新建证据，已有归属保留；Hook 仍屏蔽。已备份覆盖安装 arm64 开发包。说明：docs/compressed-rollouts.md。
-- 2026-10-16 13:26：灵动岛重置入口改为面板内详情，不再打开动态中心；复用 QuotaView 票卡锚点、完整可逆 3D flight、扫光与 IslandApprovalActionStyle 原生按钮。按用户反馈改为纯黑不透明外壳、紧凑横向次数／有效期摘要、可见内容内居中的二次确认，统一字体、按钮与缓动／轻微背景失焦。接入既有真实接口，确认捕获账号与次数快照；账号变化、过期／未知额度、隐私、重复提交受阻。Hook 保持屏蔽。
-- 2026-10-16 12:46：按 QuotaView 实机截图进一步对齐用量页：复用 macOS 27 深色玻璃分层、动态内容测量、常驻图表滚动条／最近定位／锚点提示、重置卡 SVG／倾斜／扫光；恢复 Asta Sans 数字、Pro 20x、小时倒计时与顶部“用量统计”。用量页成本改为上游官方 UTC 日 Token × $0.50／百万，真实计算得到 $2,187.92／$72.98，与参考截图一致；独立 Cost 页保留模型计价。修复缩页残影裁切与成本／热图单元宽度混用。Hook 继续屏蔽，已备份安装。
-- 2026-10-16 12:24：适配 QuotaView f779531 用量页：灵动岛顶部额度按钮／悬浮胶囊进入，返回任务／固定／收起，原生玻璃额度与账户卡、Token 三卡、成本柱图、日／周／累计热图及同画布外壳／内容过渡。复用上游热图和展示结构；接入 account/usage/read 当前账号官方汇总，独立标注本机全部账号成本，官方不可用时退本地统计；后台全历史扫描补齐本地累计。修复余额小数换行、首次 baseline 覆盖手动展开。保留 Hook 暂停，重置入口跳转现有动态中心，无批准／重置写操作。实现说明：docs/quotaview-usage-panel.md。
-- 2026-10-16 12:04：按用户要求暂时屏蔽 Hook 数据，停止 0.6 秒轮询并在 consumeHookEvents 读取前拦截，启动和手动刷新均不能接入 Hook；保留原安装配置及收件箱。安装与权限页标明暂停，IPC／本地日志保留。已备份覆盖安装 arm64 开发包。
-- 2026-10-16 11:54：修复灵动岛滑杆拖动中间态：显示位置从取整后的 AppStorage 分离为本地连续进度，偏好／预览更新上限 20 Hz，重复值不写入，松手或离开时立即提交精确值；阻尼响应改为 0.24 秒。已备份安装并完成真实拖动、边界、回稳、配色切换验证，恢复原设置。证据：build/continuous-slider-verified/。
 
 ## 最近验证
 
-- 2026-10-16 20:40：正式 Release 三个附件可读取，GitHub 摘要与本地一致；公开下载后两份 DMG 的 SHA-256 均通过。只读挂载确认版本 1.7.0／Build 25、主程序与 Helper 架构、签名、Applications 入口及许可文件。完整测试通过，双架构构建／DMG 校验退出码 0；arm64 正式安装版已启动。
+- 2026-10-17 12:18：v1.8.0 双架构发行包检查完成：arm64 与 x86_64 均为 1.8.0 Build 26／Codex Pulse，单架构准确、ad-hoc 签名有效，DMG CRC 有效；只读挂载后的 App 与对应构建快照逐文件 SHA-256 一致，Applications 链接正确。已生成 SHA256SUMS.txt。本机覆盖前 App 备份与目标一致，新安装与 arm64 源包一致，启动进程确认。README 各 9 张图片及本地链接核对通过，git diff --check 通过；未运行自动化测试或 UI 验收。证据：.tmp/release-v1.8.0/package-review.json、install.json、readme-review.json、arm64-build-final.log、x86_64-build.log；产物：build/releases/v1.8.0/。
 
-- 2026-10-16 20:39：正式 v1.7.0（Build 25）完整测试通过；arm64 与 x86_64 Release／DMG 构建退出码均为 0，镜像校验通过；arm64 正式包已备份覆盖本机并确认启动。Intel 无真机测试，既有部分动态验收边界保留。
+- 2026-10-17 12:07：项目行会话摘要 arm64 Release App 构建退出 0；源包、覆盖前 App、完整备份和安装包均为 Codex Pulse／1.7.0 Build 25／arm64，签名有效；备份全包哈希与覆盖前目标一致、安装全包哈希与源包一致，启动进程已确认。现有源码差异限于会话列表表头、项目／会话行及列宽，新增只读展示模型；归属／连续性服务、Store、数据路径与打包配置源码哈希未变，项目操作函数未改。按用户要求未运行测试或截图／交互验收；单／多账号、部分／全部未知、混合异常、搜索与筛选、长名称及键盘由用户自行验收。证据：.tmp/session-project-summary/release-build.log、install.json、scope-review.json、change.diff。
 
-- 2026-10-16 20:17：完整测试与 arm64 Release 退出码 0，签名／安装哈希通过；安装版确认重新检查默认无底色，实际点击检查并触发用量刷新，真实项目 Token 更新且活动整理启动。两次返回快于 AX 采样，加载／旋转与按压中间帧未捕获。返回会话页全部 139 条，未改账号／会话／Hook 数据。证据：build/quiet-refresh-verified/。
+- 2026-10-17 12:00：概览卡精简 arm64 Release App 构建退出 0；源包、覆盖前 App、完整备份与安装包均为 Codex Pulse／1.7.0 Build 25／arm64，签名有效；备份全包哈希与覆盖前目标一致，安装全包哈希与源包一致，启动进程已确认。本轮源码差异仅限 costOverviewCard、usageOverviewCard 与 UsageCountMetric，图表和服务实现不变；受保护源码哈希一致。按用户要求未运行测试、截图或交互验收。证据：.tmp/overview-card-simplify/release-build.log、install.json、scope-review.json、change.diff。
 
-- 2026-10-16 20:00：完整测试与 arm64 Release 退出码 0（偏好测试 29、Continuity 37/37），安装前后签名与哈希通过。实机确认内容页已无菜单栏旧功能，内容／外观切换、新滑杆真实拖动 50%→69%→50% 与松手位置、会话工具栏和筛选菜单；用户切换中断筛选项选择，未进行导入／导出／恢复写操作。未记录动画中间帧。证据：build/settings-controls-verified/。
+- 2026-10-17 11:55：Codex Pulse 命名迭代 arm64 Release App 构建退出 0；源包／安装包 CFBundleDisplayName 与 CFBundleName 均为 Codex Pulse，Bundle ID／可执行文件与覆盖前一致。源包、旧包与完整备份均为 1.7.0 Build 25／arm64，签名有效；备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。数据路径／偏好／Store／打包脚本等受保护源码哈希不变。未运行测试或 UI 验收，配置沿用与界面显示由用户自行确认；构建保留既有 Swift 并发警告。证据：.tmp/pulse-name/release-build.log、install.json、change.diff、protected-sha256.json。
 
-- 2026-10-16 19:03：日志卡／动态导航安装版实机通过：日／月数字与来源对齐、说明展开显示实际模型映射；实时筛选重置信号、切时间轴自动复位、切本机恢复均有效，未操作分类。恢复成本月／全部账号／说明折叠。完整测试与 Release 退出码 0，签名和安装哈希一致；逐帧动效依用户此前选择延后。证据：build/source-toolbar-verified/。
+- 2026-10-17 11:52：品牌 Logo 替换 arm64 Release App 构建退出 0；已核对构建包中的 SVG、ICNS 与 Resources 正式素材逐字节一致、CFBundleIconFile 指向正确且显示名称仍为 Codex Monitor。源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。未运行应用测试或界面验收；各尺寸显示及系统图标缓存呈现由用户自行查看。证据：.tmp/pulse-logo-replace/release-build.log、install.json。
 
-- 2026-10-16 18:51：完整 scripts/test.sh 退出 0，新展示回归覆盖插值中间坐标、Bezier 路径、真实锚点、逐段 101 点无过冲、峰顶／平段、重复 x／非数值和细柱宽度；既有 Quota reset 18、Continuity 37、Hooks 9 等通过。arm64 Release／严格签名／安装哈希一致。Cua 初始读取用量周数据；截图时用户切换成本月，实际图显示平滑曲线与密集竖柱，未将该图记为用量周验收。停止后续界面点击，7 日和周期悬停仍待验证。备份：build/backups/CodexNotchMonitor-before-chart-refinement-20261016-184802.app；证据：build/chart-refinement-verified/。
+- 2026-10-17 11:48：品牌静态素材导出检查：6 份 SVG 经 XML 解析；使用 macOS sips 导出 5 份 1024×1024 图形与 1600×1080 方案板，已目视检查最终方案板和主标预览。修正 Quick Look 方形缩略图裁切后改用按原画幅导出，并使用明确中性色描边避免 SVG 透明描边渲染差异。未构建应用、运行应用测试或覆盖安装。证据：docs/brand/codex-pulse-concept/、.tmp/pulse-brand/render-report.json。
 
-- 2026-10-16 18:36：完整 scripts/test.sh 退出 0，新增 9 项插值检查覆盖真实中间路径、线／面积同步、零／空序列及精确终点；既有 Quota reset 18、Continuity 37、Hooks 9 等通过。最终 arm64 Release／严格签名／安装哈希一致。CUA 检查用量页排版、7→30→90 日切换与范围弹出说明；两段录制分别因窗口选择错误和主窗口仅有静帧而排除，没有宣称动画通过。随后用户明确延后动画验收，成本和项目交互亦未继续操作。备份：build/backups/CodexNotchMonitor-before-analysis-polish-20261016-182958.app；证据：build/analysis-polish-verified/。
+- 2026-10-17 11:42：本轮面板版本回滚完成：恢复来源、安装 App 与 build App 全包文件哈希一致，arm64／1.7.0 Build 25 签名有效，恢复后二进制 SHA-256 为 808e5cb6eaac040e81410101905c80b21796f79b8f007c1c9d94805d2aa09c17；撤回前 App 完整备份校验一致，三份源码与上轮改动前快照一致，启动进程已确认。未重新构建、运行测试或界面验收。证据：.tmp/rollback-glance-chrome/install.json。
 
-- 2026-10-16 18:04：完整 scripts/test.sh 退出 0（Quota reset 18/18、Continuity 37/37、Hooks 9/9），arm64 Release／严格签名／安装哈希一致。真实副本回放验证 5 条自动标记、2 条未明、持久化重载、幂等备份和零历史通知；原始字段及人工覆盖不变。安装版状态文件已保存 5 条关联，CUA 显示自动关联行及展开依据，不再要求确认；最后 Tibo 筛选点击遇用户操作信号，未记作实机通过，分类结果由回放覆盖。证据：build/reset-auto-tag-verified/；回滚 App：build/backups/CodexNotchMonitor-before-reset-auto-tag-20261016-180135.app；标记前数据：build/reset-auto-tag-verified/quota-reset-state-before.json。
+- 2026-10-17 11:40：面板页头／周期／底栏改造 arm64 Release App 最终构建退出 0；首轮构建通过后补充原生菜单跟踪保护，再次构建通过。源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；账号长文案、更多菜单／退出、独立周期菜单与键盘、菜单防误收起、底栏跳转／刷新及高度由用户自行验收。证据：.tmp/glance-chrome-controls-cds/release-build.log、release-build-attempt1.log、change.diff、install.json。
 
-- 2026-10-16 17:46：完整 scripts/test.sh 退出 0（Quota reset 18/18、Continuity 37/37、Hooks 9/9 等），最终 arm64 Release／严格签名／安装哈希一致。18 条真实记录副本回放：7 条未确认中 5 条有社区线索、2 条仍未明，回放通知事件 0。安装版 CUA 核对日期、展开时间差异、左对齐／范围文案、来源链接目标、上下历史及分类菜单，取消而未提交分类；原始 18 条历史字段前后相同。真实账号切换未操作，仅有回归覆盖。证据：build/reset-association-verified/；回滚 App：build/backups/CodexNotchMonitor-before-reset-association-20261016-173402.app；数据原件备份：build/reset-association-verified/quota-reset-state-before.json。
+- 2026-10-17 11:32：Glance 阅读层／成本状态／Token／高度改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；玻璃可读性／透明度、加载／缺失／零值／未计价、周期与开关组合、测量高度／小屏滚动及真实设置预览由用户自行验收。证据：.tmp/glance-reading-cost-cds/release-build.log、change.diff、install.json。
 
-- 2026-10-16 17:13：最终完整 scripts/test.sh 退出 0（含官方价格 Standard／Batch 隔离、字段／数值／长上下文边界、优先级、动态倍率、ETag／304／失败保留等），arm64 Release／严格签名／安装哈希通过。生产解析器真实官方 HTTPS 请求成功；独立断网注入确认有效价格、缓存与成功时间不变。安装版 CUA 观察从内置等待态变成官方同步 2026-10-16 05:12（纽约），补充目录保留 10-15 的实际同步时间，截图已存。证据：build/pricing-auto-verified/；回滚备份：build/backups/CodexNotchMonitor-before-pricing-auto-20261016-171121.app。
+- 2026-10-17 11:25：灵动岛可见性／语义色／文案改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；不可见时完成后恢复可见、已开始回执不重启、语义色／宽度降级、长标题／隐私与横幅操作由用户自行验收。证据：.tmp/island-visibility-copy-cds/release-build.log、change.diff、install.json。
 
-- 2026-10-16 17:00：完整 scripts/test.sh 退出 0（Continuity 37、Hooks 9 等），arm64 Release／严格签名／安装哈希一致。安装版真实数据验证 Token 柱／热力格和成本小时柱／热力格四种悬停、精确明细、细描边及移出峰值复位；完成 Token 周↔三月、成本跟随↔独立 90 日切换，恢复全部账号／Token 周／成本日。原生截图采样确认柱填充与最高档热格颜色相同；未做动画逐帧计时或系统减少动态开关实机切换。证据：build/chart-visuals-verified/；回滚备份：build/backups/CodexNotchMonitor-before-chart-visuals-20261016-165124.app。
+- 2026-10-17 11:19：紧凑完成回执 arm64 Release App 构建退出 0；首次安装后补充到期回调可见性保护，再次构建与覆盖通过。源 App、安装 App、两次备份均为 1.7.0 Build 25／arm64，签名有效，每次备份全包文件哈希与对应覆盖前目标一致，最终安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；自动弹出开／关、最终与混合完成、待批准／新轮次抢占、遮挡／展开／重复刷新由用户自行验收。证据：.tmp/final-compact-receipt-cds/release-build.log、release-build-attempt1.log、change.diff、install.json、install-attempt1.json。
 
-- 2026-10-16 16:44：完整 scripts/test.sh 退出 0、arm64 Release／严格签名／安装哈希一致。CUA 使用真实安装版验证成本日小时柱、周／月日柱、独立 90 日热图及返回跟随；Token 周／月柱、三月／半年热图与独立 30 日柱。前台鼠标验证 Token 精确 287,436,632 和成本 $53.08／62,217,879 Token 明细，保存实际截图。成本半年最后菜单选择遇用户操作中断，未记通过；不包含逐帧动画验收。证据：build/activity-charts-verified/；回滚备份：build/backups/CodexNotchMonitor-before-activity-charts-20261016-163329.app。
+- 2026-10-17 11:13：灵动岛选中／摘要／隐私／入口精简 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；结果卡片选中、混合状态计数／窄宽度摘要、隐私与辅助功能、额度入口及原功能由用户自行验收。证据：.tmp/island-summary-selection-cds/release-build.log、change.diff、install.json。
 
-- 2026-10-16 16:23：设置页整理完整 scripts/test.sh 退出 0（偏好 29、Continuity 37、Hooks 9 等），最终 arm64 Release 与严格签名通过，安装哈希一致。CUA 实机确认不透明主阅读区、七页导航、周 7 日→月 30 日的指标／热图联动和默认关闭任务时的菜单选项；独立范围选择连续提示用户操作，停止进一步点击，未将项目详情／成本单日／Hook 折叠记作通过。原 detailed 保存值保留，Hook 接入仍关闭。备份：build/backups/CodexNotchMonitor-before-settings-review-20261016-162007.app。
+- 2026-10-17 11:07：灵动岛状态／卡片布局 arm64 Release App 最终构建退出 0；首轮发现可选 Token 值未解包，补齐缺失值处理后重新构建通过。源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；真实运行／批准／完成／取消／失败、多会话、隐私与窄宽度卡片由用户自行验收。证据：.tmp/island-session-layout-cds/release-build.log、release-build-attempt1.log、change.diff、install.json。
 
-- 2026-10-16 15:55：完整 scripts/test.sh 与 arm64 Release、严格签名／安装哈希通过。安装版真实菜单栏日志 visible=true／occluded=false，按钮 66→50 pt、系统窗口 82→66 pt，实机截图核对仅圆环＋36%，未修改偏好或额度数据。已有状态布局／轮播／容量回归通过；其他极窄候选与多屏问题仍按原待办保留。证据：build/menu-bar-tight-verified/。
+- 2026-10-17 10:59：导出控件／额度健康色／套餐标签改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；导出控件与焦点、20%／50% 边界及缺失额度颜色、标签与原功能由用户自行验收。证据：.tmp/export-quota-polish-cds/release-build.log、install.json。
 
-- 2026-10-16 15:45：最终完整 scripts/test.sh、arm64 Release／严格签名／安装哈希通过。13 张真实内嵌图片逐张用浏览器原生滚轮、鼠标拖动与双击验收，全部通过；12 次从放大态切图均还原。首图鼠标锚点误差约 1.7e-8，缩放上限 8 倍，原生连续拖动到水平／垂直边缘，边界误差小于 0.1 px；390 px 重设窗口与双击还原、键盘 0、最小缩放通过。包含 108×66 小图回归；源日志校验不变。首次系统启动返回 -600，核对安装包一致与无运行进程后，以新实例正常启动并核对进程。浏览器任务已结束，保留可交互大图。证据：build/image-viewer-zoom-verified/。
+- 2026-10-17 10:54：记录卡／趋势悬停细节 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；卡片边界、圆点呈现与原功能由用户自行验收。证据：.tmp/record-trend-details-cds/release-build.log、install.json。
 
-- 2026-10-16 15:22：最新完整 scripts/test.sh 与 arm64 Release／签名／安装哈希通过。新增内嵌优先、纯图片提问、跨轮重复、缺 URL、缺失／损坏／远程源、正文脱敏、带空格素材路径、素材复用／冲突拒绝和原日志不变回归。真实压缩会话 13 张图片全部恢复，HTML 13 缩略图／0 缺失；Markdown 13 引用／13 素材，源 SHA-256 不变。浏览器实点大图、切换、键盘、Esc、焦点返回、390 px 无溢出；单独复制 HTML 到无素材目录仍 13/13 解码、远程请求 0；Markdown 13/13 相对素材加载。原 41 问恢复为 47 问，原因是保留不同轮的重复提问。证据：build/export-images-verified/。
+- 2026-10-17 10:51：剩余卡片与选择浮层改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；卡片层级／边界、增强对比、记录类型选择及原功能由用户自行验收。证据：.tmp/remaining-card-depth-cds/release-build.log、install.json。
 
-- 2026-10-16 15:02：完整 scripts/test.sh、arm64 Release、签名／安装哈希通过。浏览器打开用户共享页并实测 16/26 px 与 736 px，真实普通／压缩会话重新导出 4 文件，源 SHA-256 不变；HTML 实点多行代码复制后 textarea 粘贴完全一致（5 行），搜索 36 问／182 高亮，过程展开、320 px 目录正文定位通过。Markdown 实点过程展开与第 41 问锚点通过；两种页面在 320/375/414/768 px 无整页横向溢出。设计扫描 P0=0，其余命中为标准引用及原会话正文，人工复核保留。原生 Codex 窗口被工具禁止访问，未绕过；本轮按共享网页实际展示验收。证据：build/export-polish-verified/。
+- 2026-10-17 10:47：背景与卡片层级改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；表面层级、阴影、浅深色／增强对比及原有界面交互由用户自行验收。证据：.tmp/surface-depth-cds/release-build.log、install.json。
 
-- 2026-10-16 14:37：完整 scripts/test.sh／arm64 Release／严格签名／安装哈希通过。真实普通 10 轮与压缩历史 41 轮分别导出 MD／HTML，源文件 SHA-256 不变；Markdown marked 解析通过。浏览器实点代码复制并粘贴比对一致；搜索 8 问题／21 高亮、结果前后切换、无结果与清除恢复通过。首末问边界、41 轮跨组定位与过程展开、390 px 窄屏正文定位、1440 px 桌面无横向溢出及减少动态通过；非实体手机测试。窄屏目录拉回已复现修复并补回归。证据：build/export-reader-verified/。
+- 2026-10-17 10:44：数据配色与摘要改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；浅深色可读性、窄窗口布局、图表悬停／切换与玻璃呈现由用户自行验收。证据：.tmp/data-color-cds/release-build.log、install.json。
 
-- 2026-10-16 14:09：完整 scripts/test.sh（含新增分页、归档、失败与游标循环回归）及 arm64 Release 构建通过；严格签名、安装哈希一致。真实数据库只读备份至隔离目录后由本机官方 App Server 查询：活动 100+28、归档 28，第一页目标 0/19，完整分页目标 19/19。未重跑真实恢复，未改写原始会话数据。安装版界面导航被用户切换中断，最终 UI 数量尚未验收，不计通过。证据：build/thread-pagination-verified/。
+- 2026-10-17 03:45：轻量滑杆 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，完整备份与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；滑杆拖动、键盘／辅助功能、范围边界及预览由用户自行验收。证据：.tmp/light-sliders-cds/release-build.log、install.json。
 
-- 2026-10-16 13:58：完整测试通过（流式读取 13、Continuity 37/37、会话／原生／面板／Hooks 等其余套件）；arm64 Release／严格签名／安装哈希通过，otool 确认无 Homebrew／外置 zstd 动态依赖。真实 234 个日志全部解析，去重 233 线程＝139 用户＋69 子代理＋25 系统，解析失败 0；安装版会话管理显示 27 项目／139 会话／28 归档，展开当前项目为 8 条。归属记录前后均 139、已知 ID 均 188，无新增／移除归属。19 条待恢复仅展示，未执行恢复。压缩损坏／截断／未知大小／多 frame／输出上限／长行及只读导出有回归。证据：build/compressed-rollouts-verified/。
+- 2026-10-17 03:35：三项 UI 细节改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，完整备份与覆盖前目标一致、安装全包文件哈希与源包一致，已发起启动。按用户要求未运行测试、截图或界面交互检查；恢复定位、圆形焦点呈现与混排文案由用户自行验收。证据：.tmp/final-ui-details-cds/release-build.log、install.json。
+
 
 ## 验证与产物入口
 

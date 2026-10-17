@@ -33,7 +33,8 @@ ln -s /Applications "$staging_dir/Applications"
 
 rm -f "$dmg_path"
 hdiutil create \
-  -volname "Codex Notch Monitor" \
+  -volname "Codex Pulse" \
+  -fs HFS+ \
   -srcfolder "$staging_dir" \
   -format UDZO \
   -imagekey zlib-level=9 \

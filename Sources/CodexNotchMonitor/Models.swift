@@ -4,9 +4,8 @@ import SwiftUI
 enum MonitorRefreshCadence {
     static let quota: TimeInterval = 60
     static let cost: TimeInterval = 300
-    /// Hook events remain the sub-second source for live task state. The JSONL
-    /// reader is a fallback/detail source and must not continuously reparse a
-    /// growing transcript on battery power.
+    /// Desktop IPC supplies live phase updates. The incremental JSONL reader
+    /// supplies local evidence without continuously reparsing long transcripts.
     static let sessionActivity: TimeInterval = 5
 }
 
@@ -62,6 +61,19 @@ enum RateLimitWindowKind: Equatable {
         case .unknown:
             return "额度窗口"
         }
+    }
+}
+
+/// Apply only to app-generated display copy, never identifiers, paths or user text.
+enum ChineseDisplayText {
+    static func spacing(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"([A-Za-z0-9])(\p{Han})"#, with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: #"(\p{Han})([A-Za-z0-9])"#, with: "$1 $2", options: .regularExpression)
+    }
+
+    static func count(_ value: Int, unit: String) -> String {
+        "\(value) \(unit)"
     }
 }
 
@@ -431,26 +443,6 @@ enum TaskPhase: String, Codable {
     }
 }
 
-struct HookEvent: Codable {
-    let sessionID: String
-    let turnID: String?
-    let cwd: String
-    let hookEventName: String
-    let model: String?
-    let toolName: String?
-    let receivedAt: Date
-
-    enum CodingKeys: String, CodingKey {
-        case sessionID = "session_id"
-        case turnID = "turn_id"
-        case cwd
-        case hookEventName = "hook_event_name"
-        case model
-        case toolName = "tool_name"
-        case receivedAt = "received_at"
-    }
-}
-
 struct MonitoredTask: Identifiable, Equatable {
     let id: String
     var turnID: String?
@@ -461,11 +453,8 @@ struct MonitoredTask: Identifiable, Equatable {
     var toolName: String?
     var phase: TaskPhase
     var updatedAt: Date
-    /// A phase label alone is not completion evidence (e.g. SubagentStop).
-    var confirmsTurnEnd = false
     var reasoningEffort: String? = nil
     var startedAt: Date? = nil
-    var hookEventName: String? = nil
 }
 
 enum SessionActivityKind: String, Equatable {
@@ -620,38 +609,6 @@ enum CompactGeometryPolicy {
     }
 }
 
-enum HookEventMapper {
-    static func phase(for eventName: String) -> TaskPhase {
-        switch eventName {
-        case "SessionStart", "UserPromptSubmit": return .starting
-        case "PreToolUse": return .usingTool
-        case "PostToolUse": return .working
-        case "PermissionRequest": return .waitingApproval
-        case "Stop", "SubagentStop": return .completed
-        case "SessionEnd": return .ended
-        default: return .working
-        }
-    }
-
-    static func task(from event: HookEvent) -> MonitoredTask {
-        let url = URL(fileURLWithPath: event.cwd)
-        let name = url.lastPathComponent.isEmpty ? event.cwd : url.lastPathComponent
-        return MonitoredTask(
-            id: event.sessionID,
-            turnID: event.turnID,
-            projectName: name,
-            projectPath: event.cwd,
-            model: event.model,
-            toolName: event.toolName,
-            phase: phase(for: event.hookEventName),
-            updatedAt: event.receivedAt,
-            confirmsTurnEnd: event.turnID?.isEmpty == false
-                && ["Stop", "SessionEnd"].contains(event.hookEventName),
-            hookEventName: event.hookEventName
-        )
-    }
-}
-
 extension Date {
     var compactRelativeText: String {
         let seconds = max(0, Int(Date().timeIntervalSince(self)))
@@ -659,5 +616,28 @@ extension Date {
         if seconds < 3_600 { return "\(seconds / 60) 分钟前" }
         if seconds < 86_400 { return "\(seconds / 3_600) 小时前" }
         return "\(seconds / 86_400) 天前"
+    }
+}
+
+/// Credits are decimal strings, never currency or binary floating-point values.
+enum CreditBalanceFormatter {
+    static func string(_ raw: String?) -> String {
+        guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              text.range(of: #"^[+-]?[0-9]+(?:\.[0-9]+)?$"#, options: .regularExpression) != nil,
+              let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")),
+              !value.isNaN else { return "—" }
+        // Format the original digits to avoid losing precision on large balances.
+        let negative = text.hasPrefix("-")
+        let unsigned = text.hasPrefix("-") || text.hasPrefix("+") ? String(text.dropFirst()) : text
+        let parts = unsigned.split(separator: ".", omittingEmptySubsequences: false)
+        let integral = parts[0].drop(while: { $0 == "0" })
+        let digits = integral.isEmpty ? "0" : String(integral)
+        var fraction = parts.count > 1 ? String(parts[1]) : ""
+        while fraction.last == "0" { fraction.removeLast() }
+        let grouped = digits.enumerated().map { index, digit in
+            index > 0 && (digits.count - index) % 3 == 0 ? ",\(digit)" : String(digit)
+        }.joined()
+        let sign = negative && (digits != "0" || !fraction.isEmpty) ? "-" : ""
+        return sign + grouped + (fraction.isEmpty ? "" : "." + fraction)
     }
 }

@@ -107,7 +107,7 @@ final class SessionActivityService {
     /// Recent activity and completion markers live at the transcript tail.
     /// Keeping this bounded prevents one growing Codex thread from producing a
     /// large JSON parse spike on every refresh. Desktop IPC and file changes
-    /// provide native updates; lifecycle Hooks remain an optional fallback.
+    /// provide native updates; local logs supply incremental detail.
     private let maximumTailBytes: UInt64 = 8 * 1_024 * 1_024
     private let maximumCandidateFiles = 24
     private let activeRecencyInterval: TimeInterval = 24 * 60 * 60
@@ -811,30 +811,17 @@ enum CodexThreadNameCatalog {
 enum ProjectActivityAggregator {
     static func projects(
         snapshots: [LocalSessionSnapshot],
-        hookTasks: [MonitoredTask],
         now: Date = Date(),
         catalog: CodexProjectCatalog.State? = nil,
         threadNames: [String: String] = [:]
     ) -> [ActiveProjectState] {
         let catalog = catalog ?? CodexProjectCatalog.loadState()
         let projectNames = catalog.namesByPath
-        let latestHooks = Dictionary(grouping: hookTasks.filter { $0.hookEventName != "SessionStart" }, by: \.id).compactMapValues {
-            $0.max(by: { $0.updatedAt < $1.updatedAt })
-        }
         var sessions: [String: ActiveSessionState] = [:]
 
         for snapshot in snapshots where snapshot.isActive && [.user, .unknown].contains(snapshot.sessionKind) {
-            let hook = snapshot.nativePhase == nil ? latestHooks[snapshot.sessionID].flatMap {
-                snapshot.turnID?.isEmpty == false && $0.turnID == snapshot.turnID ? $0 : nil
-            } : nil
-            if let hook, hook.confirmsTurnEnd,
-               !hook.phase.isActive { continue }
             let runningTool = snapshot.activities.contains { $0.kind != .progress && $0.isRunning }
-            var phase: TaskPhase = snapshot.nativePhase ?? (runningTool ? .usingTool : .working)
-            if let hook, hook.phase.isActive,
-               hook.phase.attentionPriority < phase.attentionPriority {
-                phase = hook.phase
-            }
+            let phase: TaskPhase = snapshot.nativePhase ?? (runningTool ? .usingTool : .working)
             let assigned = catalog.assignmentsByThread[snapshot.sessionID]
             let path = normalizedPath(assigned?.path ?? snapshot.cwd, sessionID: snapshot.sessionID)
             let name = assigned?.projectName ?? projectName(path: path, projectNames: projectNames)
@@ -845,36 +832,12 @@ enum ProjectActivityAggregator {
                 projectName: name,
                 projectPath: path,
                 model: snapshot.model,
-                toolName: hook?.toolName,
+                toolName: nil,
                 phase: phase,
                 updatedAt: snapshot.updatedAt,
                 reasoningEffort: snapshot.reasoningEffort, startedAt: snapshot.startedAt
             )
             sessions[snapshot.sessionID] = ActiveSessionState(task: task, activities: snapshot.activities)
-        }
-
-        // QuotaView's source/turn admission boundary: Hook evidence can enrich
-        // a verified user execution, never establish an unassociated card.
-        // Apply this to every phase, not only SessionStart/UserPromptSubmit.
-        for hook in latestHooks.values where hook.phase.isActive && now.timeIntervalSince(hook.updatedAt) < 120 {
-            guard let turn = hook.turnID, !turn.isEmpty,
-                  let snapshot = snapshots.first(where: { $0.sessionID == hook.id && $0.turnID == turn }),
-                  snapshot.isActive, snapshot.nativePhase == nil,
-                  [.user, .unknown].contains(snapshot.sessionKind),
-                  let existing = sessions[hook.id], existing.task.turnID == turn else { continue }
-            var task = existing.task
-            let assigned = catalog.assignmentsByThread[hook.id]
-            let hookPath = normalizedPath(assigned?.path ?? hook.projectPath, sessionID: hook.id)
-            if hookPath != task.projectPath {
-                task.projectPath = hookPath
-                task.projectName = assigned?.projectName ?? projectName(path: hookPath, projectNames: projectNames)
-            }
-            if hook.phase.attentionPriority <= existing.task.phase.attentionPriority {
-                task.phase = hook.phase
-                task.toolName = hook.toolName ?? task.toolName
-                task.updatedAt = max(task.updatedAt, hook.updatedAt)
-            }
-            sessions[hook.id] = ActiveSessionState(task: task, activities: existing.activities)
         }
 
         let grouped = Dictionary(grouping: sessions.values) { session in

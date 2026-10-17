@@ -27,7 +27,7 @@ struct DashboardPageLayout<Content: View, Footer: View>: View {
                     .scrollIndicators(.automatic)
                     .frame(height: min(contentHeight, max(0, maximumHeight - 36 - 10)))
             } else { measuredContent }
-            footer
+            footer.modifier(IslandGlassChrome())
         }.fixedSize(horizontal: false, vertical: true)
             .background { GeometryReader { proxy in
                 Color.clear.preference(key: DashboardPageHeightKey.self, value: proxy.size.height)

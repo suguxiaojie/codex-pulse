@@ -111,26 +111,37 @@ private struct AnalysisActivityRangeMenu: View {
                 }
             }
         } label: {
-            Text(independent ? "独立 · \(selection.rawValue)" : "跟随 · \(followingDays) 日")
-                .font(MonitorDesktopTypography.metadataMedium)
-                .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                .padding(.horizontal, 8).frame(height: 30)
-                .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 8))
+            MonitorMenuLabel(title: independent ? "独立 · \(selection.rawValue)" : "跟随 · \(followingDays) 日", compact: true)
         }
-        .menuStyle(.borderlessButton).fixedSize()
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .accessibilityLabel("活动范围")
         .accessibilityValue(independent ? "独立范围 \(selection.rawValue)" : "跟随统计周期 \(followingDays) 日")
     }
 }
 
+private enum SessionLibraryColumns {
+    static let spacing: CGFloat = 10
+    static let updated: CGFloat = 76
+    static let ownership: CGFloat = 90
+    static let status: CGFloat = 96
+    static let actions: CGFloat = 24
+}
+
 private struct MonitorCenterPressStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isFocused) private var focused
+    @State private var hovered = false
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.opacity(isEnabled ? (configuration.isPressed ? 0.65 : 1) : 0.45)
-            .scaleEffect(!reduceMotion && configuration.isPressed ? 0.985 : 1)
-            .animation(reduceMotion || configuration.isPressed ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+        configuration.label
+            .background(MonitorDesktopTheme.primaryText.opacity(isEnabled && hovered ? 0.035 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isEnabled && focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.90 : 1) : 0.45)
+            .scaleEffect(isEnabled && !reduceMotion && configuration.isPressed ? 0.97 : 1)
+            .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion, value: hovered)
+            .animation(reduceMotion ? nil : MonitorDesktopTheme.pressMotion, value: configuration.isPressed)
     }
 }
 
@@ -209,6 +220,8 @@ struct NotchView: View {
     @State private var showsAnalysisScopeInfo = false
     @State private var showsAllUsageProjects = false
     @State private var selectedUsageProject: ProjectUsage?
+    @FocusState private var exportFilenameFocused: Bool
+    @FocusState private var continuitySearchFocused: Bool
     @State private var usageAccountScopeID = UsageAccountScope.all
     @State private var compactHideWorkItem: DispatchWorkItem?
     @State private var compactHovered = false
@@ -584,9 +597,7 @@ struct NotchView: View {
     }
 
     private func quotaColor(for remainingPercent: Int) -> Color {
-        if remainingPercent < 20 { return .red }
-        if remainingPercent < 50 { return .orange }
-        return quotaAccent
+        FloatingSurfaceTheme.quotaHealth(remainingPercent)
     }
 
     private var glancePopover: some View {
@@ -783,7 +794,7 @@ struct NotchView: View {
                 HStack(spacing: 10) {
                     CodexMark(size: 27)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Codex Monitor")
+                        Text("Codex Pulse")
                             .font(.system(size: 17, weight: .semibold))
                             .tracking(-0.15)
                         Text("本地用量与会话")
@@ -838,7 +849,7 @@ struct NotchView: View {
                     } else if expandedPage == .panelSettings {
                         Label("更改即时生效", systemImage: "checkmark.circle")
                             .font(MonitorDesktopTypography.metadata)
-                            .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                            .foregroundStyle(PanelSettingsTheme.clay)
                     }
                 }
                 .padding(.horizontal, 26)
@@ -858,11 +869,13 @@ struct NotchView: View {
         .font(MonitorDesktopTypography.body)
         .foregroundStyle(MonitorDesktopTheme.primaryText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(reduceTransparency || colorSchemeContrast == .increased ? MonitorDesktopTheme.windowBackground : Color.clear)
+        .background(MonitorDesktopTheme.windowBackground)
+        .tint(MonitorDesktopTheme.accent)
+        .accentColor(MonitorDesktopTheme.accent)
         .overlay {
             if colorSchemeContrast == .increased {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.45), lineWidth: 1)
+                    .strokeBorder(MonitorDesktopTheme.contrastOutline, lineWidth: 1)
                     .allowsHitTesting(false)
             }
         }
@@ -895,7 +908,9 @@ struct NotchView: View {
                                 .background(Color.orange.opacity(0.18), in: Capsule())
                         }
                     }
-                    .foregroundStyle(expandedPage == section ? .white : MonitorDesktopTheme.secondaryText)
+                    .foregroundStyle(expandedPage == section
+                        ? MonitorDesktopTheme.accent
+                        : MonitorDesktopTheme.secondaryText)
                     .padding(.horizontal, 12)
                     .frame(maxWidth: .infinity, minHeight: 40)
                     .background {
@@ -919,7 +934,7 @@ struct NotchView: View {
                 .help(section.subtitle)
             }
         }
-        .animation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.34, dampingFraction: 1), value: expandedPage)
+        .animation(reduceMotion ? .easeOut(duration: 0.12) : MonitorDesktopTheme.selectionMotion, value: expandedPage)
     }
 
     private func sessionExportConfigurationOverlay(_ draft: SessionExportDraft) -> some View {
@@ -933,12 +948,12 @@ struct NotchView: View {
                         ? "shippingbox.fill"
                         : "square.and.arrow.up")
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(MonitorDesktopTheme.accent)
                         .frame(width: 38, height: 38)
-                        .background(Color.cyan.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .background(MonitorDesktopTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(draft.title)
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(MonitorDesktopTypography.cardTitle)
                         Text(sessionExportOverlaySubtitle)
                             .font(MonitorDesktopTypography.body)
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
@@ -952,7 +967,7 @@ struct NotchView: View {
                     }
                     .buttonStyle(MonitorCenterPressStyle())
                     .disabled(store.isSessionExporting)
-                    .opacity(store.isSessionExporting ? 0.35 : 1)
+                    .accessibilityLabel("关闭导出面板")
                     .help(store.isSessionExporting ? "导出进行中" : "关闭导出面板")
                 }
                 .padding(.horizontal, 20)
@@ -982,7 +997,7 @@ struct NotchView: View {
 
                 if store.isSessionExporting {
                     HStack(spacing: 9) {
-                        ProgressView().controlSize(.small).tint(.cyan)
+                        ProgressView().controlSize(.small).tint(MonitorDesktopTheme.accent)
                         Text("如果 macOS 请求项目目录权限，请先完成系统提示。")
                             .font(MonitorDesktopTypography.metadata)
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
@@ -997,14 +1012,9 @@ struct NotchView: View {
                             .foregroundStyle(.green)
                         Spacer(minLength: 10)
                         Button("在 Finder 中显示") { store.revealLastSessionExport() }
-                            .buttonStyle(MonitorCenterPressStyle())
-                            .font(MonitorDesktopTypography.rowTitle)
-                            .foregroundStyle(.cyan)
+                            .buttonStyle(PanelSettingsActionStyle())
                         Button("完成") { store.cancelSessionExportDraft() }
-                            .font(MonitorDesktopTypography.rowTitle)
-                            .frame(width: 72, height: 32)
-                            .background(MonitorDesktopTheme.selection, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .buttonStyle(MonitorCenterPressStyle())
+                            .buttonStyle(PanelSettingsActionStyle(prominent: true))
                     }
                     .padding(.horizontal, 18)
                     .padding(.vertical, 14)
@@ -1021,38 +1031,24 @@ struct NotchView: View {
                         .lineLimit(2)
                         Spacer(minLength: 10)
                         Button("取消") { store.cancelSessionExportDraft() }
-                            .buttonStyle(MonitorCenterPressStyle())
-                            .font(MonitorDesktopTypography.rowTitle)
-                            .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                            .frame(width: 72, height: 32)
-                            .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .buttonStyle(PanelSettingsActionStyle())
                         Button {
                             store.confirmSessionExport()
                         } label: {
                             Label("开始导出", systemImage: "arrow.up.doc.fill")
-                                .font(MonitorDesktopTypography.rowTitle)
-                                .frame(width: 108, height: 32)
-                                .background(MonitorDesktopTheme.selection, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
-                        .buttonStyle(MonitorCenterPressStyle())
+                        .buttonStyle(PanelSettingsActionStyle(prominent: true))
                         .disabled(draft.filenameStem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .opacity(draft.filenameStem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
                     }
                     .padding(.horizontal, 18)
                     .padding(.vertical, 14)
                 }
             }
             .frame(maxWidth: 680, maxHeight: draft.selectedFormat == .projectBundle ? 640 : 520)
-            .background(
-                Color(red: 0.075, green: 0.075, blue: 0.082).opacity(0.92),
-                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8)
-            }
-            .shadow(color: .black.opacity(0.5), radius: 28, y: 14)
+            .modifier(MonitorDesktopCardSurface(prominent: true, cornerRadius: 16))
             .padding(28)
+            .foregroundStyle(MonitorDesktopTheme.primaryText)
+            .tint(MonitorDesktopTheme.accent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1081,7 +1077,7 @@ struct NotchView: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: draft.selectedFormat == .projectBundle ? "folder.badge.gearshape" : "doc.badge.gearshape")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(MonitorDesktopTheme.accent)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(sessionExportOverlaySubtitle)
                             .font(MonitorDesktopTypography.cardTitle)
@@ -1113,7 +1109,9 @@ struct NotchView: View {
                     )
                 )
                 .textFieldStyle(.plain)
-                .font(MonitorDesktopTypography.cardTitle)
+                .font(MonitorDesktopTypography.body)
+                .focused($exportFilenameFocused)
+                .accessibilityLabel("导出文件名")
                 .padding(.leading, 12)
                 Text(".\(draft.selectedFormat.fileExtension)")
                     .font(MonitorDesktopTypography.rowTitle)
@@ -1121,15 +1119,15 @@ struct NotchView: View {
                     .padding(.trailing, 12)
             }
             .frame(height: 36)
-            .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(MonitorDesktopTheme.subtleCardFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.7)
+                    .strokeBorder(exportFilenameFocused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5)
             }
 
             HStack(spacing: 9) {
                 Image(systemName: "folder.fill")
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(MonitorDesktopTheme.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(draft.destinationDirectory.lastPathComponent)
                         .font(MonitorDesktopTypography.rowTitle)
@@ -1141,12 +1139,7 @@ struct NotchView: View {
                 }
                 Spacer()
                 Button("更改") { store.chooseSessionExportDirectory() }
-                    .buttonStyle(MonitorCenterPressStyle())
-                    .font(MonitorDesktopTypography.rowTitle)
-                    .foregroundStyle(.cyan)
-                    .padding(.horizontal, 10)
-                    .frame(height: 32)
-                    .background(Color.cyan.opacity(0.08), in: Capsule())
+                    .buttonStyle(PanelSettingsActionStyle())
             }
             .padding(.horizontal, 12)
             .frame(height: 45)
@@ -1167,7 +1160,7 @@ struct NotchView: View {
                         HStack(spacing: 9) {
                             Image(systemName: sessionExportFormatIcon(format))
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(draft.selectedFormat == format ? .cyan : MonitorDesktopTheme.secondaryText)
+                                .foregroundStyle(draft.selectedFormat == format ? MonitorDesktopTheme.accent : MonitorDesktopTheme.secondaryText)
                                 .frame(width: 22)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(format.title)
@@ -1181,27 +1174,20 @@ struct NotchView: View {
                             Spacer(minLength: 3)
                             Image(systemName: draft.selectedFormat == format ? "checkmark.circle.fill" : "circle")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(draft.selectedFormat == format ? .cyan : MonitorDesktopTheme.faintText)
+                                .foregroundStyle(draft.selectedFormat == format ? MonitorDesktopTheme.accent : MonitorDesktopTheme.faintText)
                         }
                         .padding(.horizontal, 11)
-                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .frame(maxWidth: .infinity, minHeight: 52)
                         .background(
                             draft.selectedFormat == format
-                                ? Color.cyan.opacity(0.09)
+                                ? MonitorDesktopTheme.selection
                                 : MonitorDesktopTheme.subtleCardFill,
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                         )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(
-                                    draft.selectedFormat == format
-                                        ? Color.cyan.opacity(0.42)
-                                        : Color.white.opacity(0.06),
-                                    lineWidth: 0.8
-                                )
-                        }
                     }
                     .buttonStyle(MonitorCenterPressStyle())
+                    .accessibilityValue(draft.selectedFormat == format ? "已选择" : "未选择")
+                    .accessibilityAddTraits(draft.selectedFormat == format ? .isSelected : [])
                 }
             }
         }
@@ -1216,7 +1202,7 @@ struct NotchView: View {
                 if let estimate = draft.projectEstimate {
                     Text("默认 \(estimate.includedFileCount) 个文件 · \(ByteCountFormatter.string(fromByteCount: estimate.includedBytes, countStyle: .file))")
                         .font(MonitorDesktopTypography.metadataMedium)
-                        .foregroundStyle(.cyan.opacity(0.82))
+                        .foregroundStyle(MonitorDesktopTheme.accent.opacity(0.82))
                         .monospacedDigit()
                 }
             }
@@ -1280,7 +1266,7 @@ struct NotchView: View {
             HStack(spacing: 9) {
                 Image(systemName: isEnabled ? "checkmark.square.fill" : "square")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isEnabled ? .cyan : MonitorDesktopTheme.faintText)
+                    .foregroundStyle(isEnabled ? MonitorDesktopTheme.accent : MonitorDesktopTheme.faintText)
                     .frame(width: 17)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -1295,11 +1281,13 @@ struct NotchView: View {
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 43)
             .background(
-                isEnabled ? Color.cyan.opacity(0.055) : MonitorDesktopTheme.subtleCardFill,
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                isEnabled ? MonitorDesktopTheme.selection : MonitorDesktopTheme.subtleCardFill,
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
             )
         }
         .buttonStyle(MonitorCenterPressStyle())
+        .accessibilityLabel(title)
+        .accessibilityValue(isEnabled ? "已选择" : "未选择")
     }
 
     private func sessionExportFormatIcon(_ format: SessionExportFormat) -> String {
@@ -1349,7 +1337,7 @@ struct NotchView: View {
         case .continuity:
             continuityPage
         case .panelSettings:
-            GlanceContentSettingsView()
+            GlanceContentSettingsView(store: store)
         case .setup:
             SetupPermissionsView(store: store)
         case .settings:
@@ -1375,7 +1363,7 @@ struct NotchView: View {
         expandedPage = page
         DispatchQueue.main.async {
             guard monitorCenterTransitionGeneration == generation else { return }
-            withAnimation(reduceMotion ? .easeOut(duration: 0.16) : .spring(response: 0.34, dampingFraction: 1)) {
+            withAnimation(reduceMotion ? .easeOut(duration: 0.16) : MonitorDesktopTheme.selectionMotion) {
                 monitorCenterContentOpacity = 1
                 monitorCenterContentOffset = 0
             }
@@ -1444,7 +1432,7 @@ struct NotchView: View {
                         .onChange(of: continuityRecoveryFocusGeneration) { _ in
                             guard let projectID = firstRecoverableProjectID else { return }
                             DispatchQueue.main.async {
-                                withAnimation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1)) {
+                                withAnimation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion) {
                                     scrollProxy.scrollTo(continuityProjectScrollID(projectID), anchor: .top)
                                 }
                             }
@@ -1575,12 +1563,13 @@ struct NotchView: View {
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 TextField("搜索会话、项目或路径", text: $continuitySearchText)
                     .textFieldStyle(.plain)
+                    .focused($continuitySearchFocused)
                     .onExitCommand { continuitySearchText = "" }
                 if !continuitySearchText.isEmpty {
                     Button { continuitySearchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(systemName: "xmark.circle.fill").frame(width: 24, height: 24)
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(MonitorCenterPressStyle())
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     .accessibilityLabel("清除会话搜索")
                 }
@@ -1588,8 +1577,8 @@ struct NotchView: View {
             .font(MonitorDesktopTypography.control)
             .padding(.horizontal, 9)
             .frame(minWidth: 150, maxWidth: .infinity, minHeight: 34)
-            .background(.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.075), lineWidth: 0.5))
+            .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(continuitySearchFocused ? MonitorDesktopTheme.accent : MonitorDesktopTheme.hairline, lineWidth: continuitySearchFocused ? 1.5 : 0.5))
             Menu {
                 ForEach(SessionLibraryFilter.allCases) { filter in
                     Button { continuityFilter = filter } label: {
@@ -1599,12 +1588,12 @@ struct NotchView: View {
                     }
                 }
             } label: {
-                Label(continuityFilter.rawValue, systemImage: "line.3.horizontal.decrease")
+                MonitorMenuLabel(title: continuityFilter.rawValue, symbol: "line.3.horizontal.decrease")
             }
-            .menuStyle(.borderlessButton).menuIndicator(.visible)
-            .fixedSize()
+            .menuStyle(.borderlessButton).menuIndicator(.hidden)
+            .buttonStyle(.plain).fixedSize()
             .accessibilityLabel("会话状态")
-            Rectangle().fill(.white.opacity(0.08)).frame(width: 0.5, height: 20).padding(.horizontal, 4)
+            Rectangle().fill(MonitorDesktopTheme.separator).frame(width: 0.5, height: 20).padding(.horizontal, 4)
             Button {
                 store.chooseSessionImportBundle()
             } label: {
@@ -1702,13 +1691,13 @@ struct NotchView: View {
             Label("\(store.continuitySnapshot.recoverableThreads.count) 条会话待恢复", systemImage: "exclamationmark.circle")
                 .foregroundStyle(.orange)
             Button("查看待恢复") { focusFirstRecoverableProject() }
-                .buttonStyle(.borderless)
+                .buttonStyle(MonitorCenterPressStyle())
             Spacer(minLength: 0)
             if store.isContinuityRecovering { ProgressView().controlSize(.mini) }
             Button(store.isContinuityRecovering ? "正在恢复" : "备份并恢复") {
                 confirmsContinuityRecovery = true
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(AnalysisToolbarButtonStyle())
             .disabled(continuityActionsAreBusy)
             .help("先完全退出 Codex／ChatGPT Desktop；插件会先备份索引，原始会话不变。")
         }
@@ -1757,11 +1746,11 @@ struct NotchView: View {
                 if progress.stage == .completed {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(MonitorDesktopTheme.accent)
                 } else {
                     ProgressView()
                         .controlSize(.mini)
-                        .tint(.cyan)
+                        .tint(MonitorDesktopTheme.accent)
                 }
                 Text(progress.stage.rawValue)
                     .font(MonitorDesktopTypography.cardTitle)
@@ -1772,13 +1761,13 @@ struct NotchView: View {
                         : "\(Int((progress.fraction * 100).rounded()))% · 已扫描 \(progress.completed) 项"
                 )
                     .font(MonitorDesktopTypography.rowTitle)
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(MonitorDesktopTheme.accent)
                     .monospacedDigit()
             }
 
             ProgressView(value: progress.fraction)
                 .progressViewStyle(.linear)
-                .tint(.cyan)
+                .tint(MonitorDesktopTheme.accent)
 
             HStack(spacing: 8) {
                 Text(progress.currentItem)
@@ -1795,12 +1784,12 @@ struct NotchView: View {
         }
         .padding(12)
         .background(
-            Color.cyan.opacity(0.07),
+            MonitorDesktopTheme.accent.opacity(0.07),
             in: RoundedRectangle(cornerRadius: 13, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .strokeBorder(Color.cyan.opacity(0.22), lineWidth: 0.7)
+                .strokeBorder(MonitorDesktopTheme.accent.opacity(0.22), lineWidth: 0.7)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(progress.stage.rawValue)
@@ -1827,7 +1816,7 @@ struct NotchView: View {
             Button("在 Finder 中显示") { store.revealLastSessionExport() }
                 .font(.system(size: 11, weight: .semibold))
                 .buttonStyle(MonitorCenterPressStyle())
-                .foregroundStyle(.cyan)
+                .foregroundStyle(MonitorDesktopTheme.accent)
         }
         .padding(11)
         .background(Color.green.opacity(0.055), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
@@ -1990,7 +1979,7 @@ struct NotchView: View {
                 }
             }
         }
-        .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 1), value: showsContinuityOperations)
+        .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: showsContinuityOperations)
     }
 
     private var continuityOperationCards: some View {
@@ -2036,14 +2025,14 @@ struct NotchView: View {
                         .foregroundStyle(.orange)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("导入前必须完全退出 Codex／ChatGPT Desktop")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(MonitorDesktopTypography.metadataMedium)
                         Text("使用 Cmd + Q 退出后，点击重新检查。")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(MonitorDesktopTypography.metadata)
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     }
                     Spacer()
                     Button("重新检查") { store.recheckSelectedSessionImportBundle() }
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(MonitorDesktopTypography.metadataMedium)
                         .buttonStyle(MonitorCenterPressStyle())
                         .foregroundStyle(.orange)
                 }
@@ -2064,16 +2053,16 @@ struct NotchView: View {
                 importDetailRow("来源项目", value: preview.manifest.project.displayName)
                 if importHasAccountMismatch(preview) {
                     Label("备份归属与当前账号不同，导入不会改写原始归属记录。", systemImage: "person.crop.circle.badge.exclamationmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(MonitorDesktopTypography.metadataMedium)
                         .foregroundStyle(.orange)
                 }
             }
             .padding(9)
-            .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("导入到")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(MonitorDesktopTypography.metadataMedium)
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 Menu {
                     ForEach(store.sessionImportProjectOptions) { option in
@@ -2095,9 +2084,9 @@ struct NotchView: View {
                         Image(systemName: store.selectedSessionImportProjectOption == nil ? "folder.badge.questionmark" : "folder.fill")
                         VStack(alignment: .leading, spacing: 2) {
                             Text(store.selectedSessionImportProjectOption?.name ?? "请选择目标 Codex 项目")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(MonitorDesktopTypography.metadataMedium)
                             Text(store.selectedSessionImportProjectOption?.path ?? preview.manifest.project.originalPath)
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .font(MonitorDesktopTypography.metadata.monospaced())
                                 .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                                 .lineLimit(1)
                         }
@@ -2110,11 +2099,8 @@ struct NotchView: View {
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.system(size: 11, weight: .bold))
                     }
-                    .foregroundStyle(store.selectedSessionImportProjectOption == nil ? .orange : .cyan)
-                    .padding(.horizontal, 10)
-                    .frame(height: 43)
-                    .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .contentShape(Rectangle())
+                    .foregroundStyle(store.selectedSessionImportProjectOption == nil ? .orange : MonitorDesktopTheme.accent)
+                    .modifier(MonitorMenuTrigger(minimumHeight: 43))
                 }
                 .menuStyle(.borderlessButton)
                 .accessibilityLabel("选择会话导入目标项目")
@@ -2122,46 +2108,26 @@ struct NotchView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("会话身份策略")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(MonitorDesktopTypography.metadataMedium)
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 ForEach(SessionImportDuplicateStrategy.allCases, id: \.rawValue) { strategy in
-                    Button {
-                        store.sessionImportDuplicateStrategy = strategy
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: store.sessionImportDuplicateStrategy == strategy ? "checkmark.circle.fill" : "circle")
-                            Text(strategy.title)
-                            Spacer()
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 9)
-                        .frame(maxWidth: .infinity, minHeight: 31)
-                        .background(
-                            store.sessionImportDuplicateStrategy == strategy
-                                ? Color.cyan.opacity(0.14)
-                                : Color.white.opacity(0.035),
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        )
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(MonitorCenterPressStyle())
-                    .foregroundStyle(store.sessionImportDuplicateStrategy == strategy ? .cyan : .white.opacity(0.55))
+                    sessionImportStrategyOption(strategy)
                 }
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("会话明细")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(MonitorDesktopTypography.metadataMedium)
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 ForEach(Array(preview.manifest.sessions.prefix(5).enumerated()), id: \.element.threadID) { _, session in
                     let conflict = preview.conflicts.first { $0.threadID == session.threadID }
                     HStack(alignment: .top, spacing: 7) {
                         Image(systemName: session.archived ? "archivebox.fill" : "bubble.left.and.bubble.right.fill")
-                            .foregroundStyle(.cyan.opacity(0.8))
+                            .foregroundStyle(MonitorDesktopTheme.accent.opacity(0.8))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(session.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                            Text(session.title).font(MonitorDesktopTypography.metadataMedium).lineLimit(1)
                             Text(String(session.threadID.prefix(12)) + "… · " + (session.ownershipAlias ?? "归属未知"))
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .font(MonitorDesktopTypography.metadata.monospaced())
                                 .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                         }
                         Spacer()
@@ -2174,12 +2140,12 @@ struct NotchView: View {
                 }
                 if preview.sessionCount > 5 {
                     Text("其余 \(preview.sessionCount - 5) 条会话将使用同一策略")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(MonitorDesktopTypography.metadata)
                         .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 }
             }
             .padding(9)
-            .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             DisclosureGroup("备份详情") {
                 VStack(alignment: .leading, spacing: 4) {
@@ -2191,41 +2157,41 @@ struct NotchView: View {
                 }
                 .padding(.top, 5)
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(MonitorDesktopTypography.metadataMedium)
             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
 
             HStack(spacing: 7) {
                 Button("取消") { store.cancelSessionImport() }
                     .frame(maxWidth: .infinity, minHeight: 37)
-                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .buttonStyle(MonitorCenterPressStyle())
                 Button("备份并导入") { store.importSelectedSessionBundle() }
                     .frame(maxWidth: .infinity, minHeight: 37)
-                    .background(Color.cyan.opacity(0.13), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .background(MonitorDesktopTheme.selection, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .buttonStyle(MonitorCenterPressStyle())
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(MonitorDesktopTheme.accent)
                     .disabled(
                         preview.codexIsRunning
                             || !mappedImportDirectoryIsWritable
                     )
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(MonitorDesktopTypography.metadataMedium)
         }
         .padding(12)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 12))
     }
 
     private func projectTransferPreviewCard(_ preview: ProjectTransferPreview) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: "shippingbox.and.arrow.backward.fill")
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(MonitorDesktopTheme.accent)
                 Text("完整项目迁移包校验通过")
                     .font(.system(size: 11, weight: .bold))
                 Spacer()
                 Text("P1")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(MonitorDesktopTheme.accent)
             }
 
             if preview.codexIsRunning {
@@ -2234,14 +2200,14 @@ struct NotchView: View {
                         .foregroundStyle(.orange)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("导入前必须使用 Cmd + Q 完全退出 Codex／ChatGPT Desktop")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(MonitorDesktopTypography.metadataMedium)
                         Text("退出后点击重新检查，项目文件和会话将作为同一事务导入。")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(MonitorDesktopTypography.metadata)
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     }
                     Spacer()
                     Button("重新检查") { store.recheckSelectedSessionImportBundle() }
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(MonitorDesktopTypography.metadataMedium)
                         .buttonStyle(MonitorCenterPressStyle())
                         .foregroundStyle(.orange)
                 }
@@ -2296,7 +2262,7 @@ struct NotchView: View {
                 )
             }
             .padding(9)
-            .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             Button {
                 store.chooseSessionImportProjectDirectory()
@@ -2309,9 +2275,9 @@ struct NotchView: View {
                         Text(store.projectImportTargetURL == nil
                             ? "选择新目录或空目录"
                             : store.projectImportTargetURL?.lastPathComponent ?? "目标项目")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(MonitorDesktopTypography.metadataMedium)
                         Text(store.projectImportTargetURL?.path ?? "P0 不会覆盖或合并现有文件")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(MonitorDesktopTypography.metadata.monospaced())
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                             .lineLimit(2)
                     }
@@ -2323,10 +2289,10 @@ struct NotchView: View {
                     }
                     Image(systemName: "chevron.right")
                 }
-                .foregroundStyle(projectImportTargetIsValid ? .cyan : .orange)
+                .foregroundStyle(projectImportTargetIsValid ? MonitorDesktopTheme.accent : .orange)
                 .padding(.horizontal, 10)
                 .frame(minHeight: 43)
-                .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .contentShape(Rectangle())
             }
             .buttonStyle(MonitorCenterPressStyle())
@@ -2334,33 +2300,10 @@ struct NotchView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("会话身份策略")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(MonitorDesktopTypography.metadataMedium)
                     .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 ForEach(SessionImportDuplicateStrategy.allCases, id: \.rawValue) { strategy in
-                    Button {
-                        store.sessionImportDuplicateStrategy = strategy
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: store.sessionImportDuplicateStrategy == strategy
-                                ? "checkmark.circle.fill"
-                                : "circle")
-                            Text(strategy.title)
-                            Spacer()
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 9)
-                        .frame(maxWidth: .infinity, minHeight: 31)
-                        .background(
-                            store.sessionImportDuplicateStrategy == strategy
-                                ? Color.cyan.opacity(0.14)
-                                : Color.white.opacity(0.035),
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        )
-                    }
-                    .buttonStyle(MonitorCenterPressStyle())
-                    .foregroundStyle(store.sessionImportDuplicateStrategy == strategy
-                        ? .cyan
-                        : .white.opacity(0.55))
+                    sessionImportStrategyOption(strategy)
                 }
             }
 
@@ -2377,32 +2320,32 @@ struct NotchView: View {
                     )
                     ForEach(Array(preview.manifest.excluded.prefix(8).enumerated()), id: \.offset) { _, item in
                         Text("• \(item.relativePath) — \(item.reason)")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(MonitorDesktopTypography.metadata.monospaced())
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                             .lineLimit(1)
                     }
                     if preview.excludedCount > 8 {
                         Text("其余 \(preview.excludedCount - 8) 项已记录在 Manifest 中")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(MonitorDesktopTypography.metadata)
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     }
                     if preview.manifest.git?.workingTreePatchPath != nil {
                         Label("dirty working tree 已生成 binary-safe patch", systemImage: "arrow.triangle.branch")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.cyan.opacity(0.78))
+                            .font(MonitorDesktopTypography.metadataMedium)
+                            .foregroundStyle(MonitorDesktopTheme.accent.opacity(0.78))
                     }
                     ForEach(Array((preview.manifest.attachments ?? [])
                         .filter { $0.status == .missing }
                         .prefix(5).enumerated()), id: \.offset) { _, attachment in
                         Text("缺失附件：\(attachment.originalPath)")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(MonitorDesktopTypography.metadata.monospaced())
                             .foregroundStyle(.orange.opacity(0.78))
                             .lineLimit(1)
                     }
                 }
                 .padding(.top, 5)
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(MonitorDesktopTypography.metadataMedium)
             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
 
             if let issue = store.projectImportReadinessIssue {
@@ -2410,7 +2353,7 @@ struct NotchView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                     Text(issue)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(MonitorDesktopTypography.metadataMedium)
                         .foregroundStyle(.orange.opacity(0.92))
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
@@ -2423,21 +2366,21 @@ struct NotchView: View {
             HStack(spacing: 7) {
                 Button("取消") { store.cancelSessionImport() }
                     .frame(maxWidth: .infinity, minHeight: 37)
-                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .background(MonitorDesktopTheme.controlFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .buttonStyle(MonitorCenterPressStyle())
                 Button("备份并导入完整项目") {
                     store.importSelectedProjectBundle()
                 }
                 .frame(maxWidth: .infinity, minHeight: 37)
-                .background(Color.cyan.opacity(0.13), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .background(MonitorDesktopTheme.selection, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .buttonStyle(MonitorCenterPressStyle())
-                .foregroundStyle(.cyan)
+                .foregroundStyle(MonitorDesktopTheme.accent)
                 .disabled(store.isSessionImporting)
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(MonitorDesktopTypography.metadataMedium)
         }
         .padding(12)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 12))
     }
 
     private var projectImportTargetIsValid: Bool {
@@ -2450,17 +2393,38 @@ struct NotchView: View {
         return contents.allSatisfy { $0.lastPathComponent == ".DS_Store" }
     }
 
+    private func sessionImportStrategyOption(_ strategy: SessionImportDuplicateStrategy) -> some View {
+        let selected = store.sessionImportDuplicateStrategy == strategy
+        return Button { store.sessionImportDuplicateStrategy = strategy } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                Text(strategy.title)
+                Spacer(minLength: 0)
+            }
+            .font(MonitorDesktopTypography.control)
+            .foregroundStyle(selected ? MonitorDesktopTheme.accent : MonitorDesktopTheme.secondaryText)
+            .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 32)
+            .background(selected ? MonitorDesktopTheme.selection : MonitorDesktopTheme.controlFill,
+                        in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(MonitorCenterPressStyle())
+        .accessibilityLabel(strategy.title)
+        .accessibilityValue(selected ? "已选择" : "未选择")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
     private func importDetailRow(_ label: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label)
                 .foregroundStyle(MonitorDesktopTheme.tertiaryText)
             Spacer()
             Text(value)
-                .foregroundStyle(.white.opacity(0.72))
+                .foregroundStyle(MonitorDesktopTheme.secondaryText)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(MonitorDesktopTypography.metadata)
     }
 
     private func importSourceAccounts(_ preview: SessionImportPreview) -> String {
@@ -2482,14 +2446,14 @@ struct NotchView: View {
     private func sessionImportProgressCard(_ progress: SessionImportProgress) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
-                ProgressView().controlSize(.small).tint(.cyan)
+                ProgressView().controlSize(.small).tint(MonitorDesktopTheme.accent)
                 Text(progress.stage.title).font(.system(size: 11, weight: .bold))
                 Spacer()
                 Text("\(progress.completed) / \(progress.total)")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(MonitorDesktopTheme.accent)
             }
-            ProgressView(value: progress.fraction).tint(.cyan)
+            ProgressView(value: progress.fraction).tint(MonitorDesktopTheme.accent)
             if let item = progress.currentItem {
                 Text(item).font(.system(size: 11, weight: .medium)).foregroundStyle(MonitorDesktopTheme.tertiaryText).lineLimit(1)
             }
@@ -2502,7 +2466,7 @@ struct NotchView: View {
             .disabled(progress.stage == .cancelling || progress.stage == .rebuilding || progress.stage == .checkingVisibility)
         }
         .padding(12)
-        .background(Color.cyan.opacity(0.065), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(MonitorDesktopTheme.accent.opacity(0.065), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
 
@@ -2528,7 +2492,7 @@ struct NotchView: View {
                 HStack(spacing: 9) {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.cyan)
+                        .tint(MonitorDesktopTheme.accent)
                     VStack(alignment: .leading, spacing: 2) {
                         Text((store.sessionImportInspectionTitle ?? "正在校验备份")
                             + String(repeating: "·", count: dotCount))
@@ -2541,7 +2505,7 @@ struct NotchView: View {
                     Button("取消") { store.cancelSessionImport() }
                         .font(MonitorDesktopTypography.metadataMedium)
                         .buttonStyle(MonitorCenterPressStyle())
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(MonitorDesktopTheme.accent)
                 }
 
                 GeometryReader { geometry in
@@ -2549,7 +2513,7 @@ struct NotchView: View {
                     Capsule()
                         .fill(
                             LinearGradient(
-                                colors: [.cyan.opacity(0.12), .cyan, .cyan.opacity(0.12)],
+                                colors: [MonitorDesktopTheme.accent.opacity(0.12), MonitorDesktopTheme.accent, MonitorDesktopTheme.accent.opacity(0.12)],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
@@ -2559,13 +2523,13 @@ struct NotchView: View {
                         .animation(.linear(duration: 1), value: elapsed)
                 }
                 .frame(height: 3)
-                .background(Color.white.opacity(0.055), in: Capsule())
+                .background(MonitorDesktopTheme.controlFill, in: Capsule())
             }
             .padding(12)
-            .background(Color.cyan.opacity(0.075), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .background(MonitorDesktopTheme.accent.opacity(0.075), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .strokeBorder(Color.cyan.opacity(0.24), lineWidth: 0.8)
+                    .strokeBorder(MonitorDesktopTheme.accent.opacity(0.24), lineWidth: 0.8)
             }
         }
     }
@@ -2576,7 +2540,7 @@ struct NotchView: View {
                 .foregroundStyle(color)
             Text(message)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.67))
+                .foregroundStyle(MonitorDesktopTheme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -2589,20 +2553,22 @@ struct NotchView: View {
     }
 
     private func continuityStatusMessageColor(_ message: String) -> Color {
-        message.hasPrefix("恢复成功") ? .green : .cyan
+        message.hasPrefix("恢复成功") ? .green : MonitorDesktopTheme.accent
     }
 
     private var continuityThreadCard: some View {
         let projects = filteredContinuityProjects
         let completeProjects = Dictionary(uniqueKeysWithValues: store.continuitySnapshot.projectGroups.map { ($0.id, $0) })
         return VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: SessionLibraryColumns.spacing) {
                 Text("项目／会话")
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text("最近更新").frame(width: 68, alignment: .trailing)
-                Text("账号归属").frame(width: 86, alignment: .leading)
-                Text("状态").frame(width: 74, alignment: .leading)
-                Color.clear.frame(width: 24, height: 1)
+                Text("最近更新").frame(width: SessionLibraryColumns.updated, alignment: .trailing)
+                    .help("项目行显示当前筛选范围内最近一次会话更新；会话行显示各自更新时间。")
+                Text("账号归属").frame(width: SessionLibraryColumns.ownership, alignment: .leading)
+                    .help("项目行汇总当前筛选范围内的会话归属；悬停查看账号分布及未归属明细。")
+                Text("状态").frame(width: SessionLibraryColumns.status, alignment: .leading)
+                Color.clear.frame(width: SessionLibraryColumns.actions, height: 1)
             }
             .font(MonitorDesktopTypography.metadata)
             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
@@ -2623,7 +2589,7 @@ struct NotchView: View {
                             continuitySearchText = ""
                             continuityFilter = .all
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(AnalysisToolbarButtonStyle())
                     }
                     Spacer(minLength: 0)
                 }
@@ -2658,10 +2624,13 @@ struct NotchView: View {
     ) -> some View {
         let total = completeProject?.threads.count ?? project.threads.count
         let isExpanded = expandedContinuityProjectIDs.contains(project.id)
-        HStack(spacing: 4) {
+        let summary = SessionProjectSummary(threads: project.threads)
+        let countText = total == project.threads.count
+            ? "\(total) 条会话" : "\(project.threads.count)／\(total) 条会话"
+        HStack(spacing: SessionLibraryColumns.spacing) {
             Button {
                 let expanded = !isExpanded
-                animate(.spring(response: 0.30, dampingFraction: 1)) {
+                animate(MonitorDesktopTheme.selectionMotion) {
                     if expanded { expandedContinuityProjectIDs.insert(project.id) }
                     else {
                         expandedContinuityProjectIDs.remove(project.id)
@@ -2672,43 +2641,70 @@ struct NotchView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 9) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .frame(width: 14, height: 26)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(project.name)
-                            .font(MonitorDesktopTypography.rowTitle)
-                            .lineLimit(1)
-                        Text(project.id.isEmpty ? "项目路径未记录" : (project.id as NSString).abbreviatingWithTildeInPath)
-                            .font(MonitorDesktopTypography.metadata)
+                HStack(spacing: SessionLibraryColumns.spacing) {
+                    HStack(spacing: 9) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .frame(width: 14, height: 26)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                Text(project.name)
+                                    .font(MonitorDesktopTypography.rowTitle)
+                                    .lineLimit(1)
+                                Text(countText)
+                                    .font(MonitorDesktopTypography.metadata)
+                                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                                    .monospacedDigit()
+                                    .fixedSize()
+                            }
+                            Text(project.id.isEmpty ? "项目路径未记录" : (project.id as NSString).abbreviatingWithTildeInPath)
+                                .font(MonitorDesktopTypography.metadata)
+                                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .help("\(project.name)\n\(project.id)\n当前筛选 \(project.threads.count)／\(total) 条会话\n\(projectConversationCountText(completeProject ?? project))")
+                        Spacer(minLength: 0)
                     }
-                    .help("\(project.id)\n\(projectConversationCountText(completeProject ?? project))")
-                    Spacer(minLength: 6)
-                    Text(total == project.threads.count ? "\(total) 条" : "\(project.threads.count)／\(total) 条")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(summary.updatedAt?.compactRelativeText ?? "—")
                         .font(MonitorDesktopTypography.metadata)
                         .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .frame(width: SessionLibraryColumns.updated, alignment: .trailing)
+                        .help(summary.updatedAt.map { "当前筛选范围内最近会话更新：\($0.formatted(date: .abbreviated, time: .shortened))" } ?? "无会话更新时间")
+                    Text(summary.ownershipTitle)
+                        .font(MonitorDesktopTypography.metadata)
+                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                        .lineLimit(1)
+                        .frame(width: SessionLibraryColumns.ownership, alignment: .leading)
+                        .help(summary.ownershipDetail)
+                    Text(summary.statusTitle)
+                        .font(MonitorDesktopTypography.metadata)
+                        .foregroundStyle(summary.hasExceptions ? .orange : MonitorDesktopTheme.tertiaryText)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .frame(width: SessionLibraryColumns.status, alignment: .leading)
+                        .help(summary.statusDetail)
                 }
                 .contentShape(Rectangle())
                 .padding(.vertical, 5)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(project.name)，\(total) 条会话")
-            .accessibilityValue(isExpanded ? "已展开" : "已折叠")
+            .buttonStyle(MonitorCenterPressStyle())
+            .accessibilityLabel("\(project.name)，当前范围 \(project.threads.count) 条，共 \(total) 条会话")
+            .accessibilityValue("\(isExpanded ? "已展开" : "已折叠")，最近会话更新 \(summary.updatedAt?.compactRelativeText ?? "未知")，\(summary.ownershipDetail)，\(summary.statusDetail)")
             .accessibilityHint(isExpanded ? "按下折叠项目" : "按下展开项目")
 
             Menu {
                 if let completeProject { continuityProjectActions(completeProject) }
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 24, height: 26)
+                    .frame(width: SessionLibraryColumns.actions, height: 26)
+                    .modifier(MonitorMenuTrigger(minimumHeight: 26, horizontalPadding: 0))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -2755,7 +2751,7 @@ struct NotchView: View {
     }
 
     private func continuityThreadRow(_ thread: LocalThreadRecord) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: SessionLibraryColumns.spacing) {
             Text(thread.title)
                 .font(MonitorDesktopTypography.body)
                 .lineLimit(2)
@@ -2765,19 +2761,19 @@ struct NotchView: View {
                 .font(MonitorDesktopTypography.metadata)
                 .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 .lineLimit(1)
-                .frame(width: 68, alignment: .trailing)
+                .frame(width: SessionLibraryColumns.updated, alignment: .trailing)
                 .help(thread.updatedAt.formatted(date: .abbreviated, time: .shortened))
             Text(ownershipTitle(thread.ownership))
                 .font(MonitorDesktopTypography.metadata)
                 .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                 .lineLimit(1)
-                .frame(width: 86, alignment: .leading)
+                .frame(width: SessionLibraryColumns.ownership, alignment: .leading)
                 .help(continuityOwnershipDetail(thread.ownership))
             Text(continuityThreadStatus(thread))
                 .font(MonitorDesktopTypography.metadata)
                 .foregroundStyle(thread.canRecover || thread.visibility == .projectPathMissing ? .orange : MonitorDesktopTheme.tertiaryText)
                 .lineLimit(1)
-                .frame(width: 74, alignment: .leading)
+                .frame(width: SessionLibraryColumns.status, alignment: .leading)
                 .help(thread.visibility.title + (thread.isArchived ? " · 已归档" : ""))
             Menu {
                 continuityThreadActions(thread)
@@ -2789,7 +2785,8 @@ struct NotchView: View {
                         Image(systemName: "ellipsis")
                     }
                 }
-                .frame(width: 24, height: 26)
+                .frame(width: SessionLibraryColumns.actions, height: 26)
+                    .modifier(MonitorMenuTrigger(minimumHeight: 26, horizontalPadding: 0))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -2852,7 +2849,7 @@ struct NotchView: View {
                     Button { showsContinuityDetails = false } label: {
                         Image(systemName: "xmark")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(PanelSettingsActionStyle())
                     .accessibilityLabel("关闭会话详情")
                 }
                 Divider()
@@ -2876,13 +2873,13 @@ struct NotchView: View {
                 } label: {
                     Label("导出这条会话", systemImage: "square.and.arrow.up")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(PanelSettingsActionStyle(prominent: true))
                 .disabled(continuityActionsAreBusy)
             }
-            .padding(20)
+            .padding(18)
         }
         .frame(width: 400, height: 490)
-        .background(MonitorDesktopTheme.windowBackground)
+        .modifier(MonitorPopoverSurface(padding: 0))
         .preferredColorScheme(.dark)
     }
 
@@ -2946,7 +2943,7 @@ struct NotchView: View {
                 .foregroundStyle(.orange)
         }
         .padding(11)
-        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 13))
     }
 
     private var sessionImportBackupCard: some View {
@@ -2968,7 +2965,7 @@ struct NotchView: View {
                 .disabled(store.isSessionImporting)
         }
         .padding(11)
-        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 13))
     }
 
     private var projectImportBackupCard: some View {
@@ -2990,7 +2987,7 @@ struct NotchView: View {
                 .disabled(store.isSessionImporting)
         }
         .padding(11)
-        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 13))
     }
 
     private func sessionImportOutcomeCard(_ outcome: SessionImportOutcome) -> some View {
@@ -3047,7 +3044,7 @@ struct NotchView: View {
             Text(label).foregroundStyle(MonitorDesktopTheme.tertiaryText)
             Spacer()
             Circle().fill(color).frame(width: 4, height: 4)
-            Text(value).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.trailing)
+            Text(value).foregroundStyle(MonitorDesktopTheme.secondaryText).multilineTextAlignment(.trailing)
         }
         .font(.system(size: 11, weight: .medium))
     }
@@ -3134,7 +3131,7 @@ struct NotchView: View {
                         .font(.system(size: 32, weight: .semibold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
-                        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1), value: window.remainingPercent)
+                        .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: window.remainingPercent)
                     Text("剩余")
                         .font(MonitorDesktopTypography.metadata)
                         .foregroundStyle(MonitorDesktopTheme.tertiaryText)
@@ -3144,11 +3141,11 @@ struct NotchView: View {
                         .foregroundStyle(MonitorDesktopTheme.secondaryText)
                 }
                 ProgressView(value: Double(window.remainingPercent), total: 100)
-                    .tint(window.remainingPercent < 20 ? .orange : MonitorDesktopTheme.cyanAccent)
-                    .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1), value: window.remainingPercent)
+                    .tint(FloatingSurfaceTheme.quotaHealth(window.remainingPercent))
+                    .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: window.remainingPercent)
                     .accessibilityLabel("\(window.windowLabel)剩余额度")
                     .accessibilityValue("\(window.remainingPercent)%")
-                Text(window.resetsAt.map { "重置：\(QuotaResetCountdown.text(until: $0, relativeTo: Date()))" } ?? "服务端暂未提供重置时间")
+                Text(window.resetsAt.map { "重置：\(ChineseDisplayText.spacing(QuotaResetCountdown.text(until: $0, relativeTo: Date())))" } ?? "服务端暂未提供重置时间")
                     .font(MonitorDesktopTypography.metadata)
                     .foregroundStyle(MonitorDesktopTheme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -3170,7 +3167,7 @@ struct NotchView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 184, maxHeight: .infinity, alignment: .topLeading)
-        .background(MonitorDesktopTheme.cardFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 14))
     }
 
     private var tiboQuotaUpdatedText: String {
@@ -3226,7 +3223,7 @@ struct NotchView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 184, maxHeight: .infinity, alignment: .topLeading)
-        .background(MonitorDesktopTheme.cardFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 14))
     }
 
     private var tiboForecastIsStale: Bool {
@@ -3244,13 +3241,10 @@ struct NotchView: View {
                 Text("本机观察到 \(tiboQuotaHistoryCount) 条额度变化")
                     .font(MonitorDesktopTypography.rowTitle)
                 Spacer()
-                Picker("记录类型", selection: $quotaHistoryFilter) {
-                    ForEach(QuotaHistoryFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
-                    }
-                }
-                .pickerStyle(.menu)
-                .fixedSize()
+                MonitorSelectionMenu(label: "记录类型", options: QuotaHistoryFilter.allCases,
+                    selection: $quotaHistoryFilter, title: { $0.rawValue })
+                    .fixedSize()
+
             }
             Text("这里记录本机额度变化。社区公告不代表当前账号已经恢复额度。")
                 .font(MonitorDesktopTypography.metadata)
@@ -3278,12 +3272,12 @@ struct NotchView: View {
                        quotaHistoryFilter != .all || store.confirmableQuotaRecoveries.isEmpty {
                         MonitorCenterEmptyState(
                             symbol: "clock.arrow.circlepath",
-                            title: "暂无\(quotaHistoryFilter == .all ? "本机恢复" : quotaHistoryFilter.rawValue)记录",
+                            title: ChineseDisplayText.spacing("暂无\(quotaHistoryFilter == .all ? "本机恢复" : quotaHistoryFilter.rawValue)记录"),
                             detail: "只有本机实际观察到额度变化后，记录才会出现在这里。"
                         )
                         if quotaHistoryFilter != .all {
                             Button("显示全部记录") { quotaHistoryFilter = .all }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(AnalysisToolbarButtonStyle())
                                 .frame(maxWidth: .infinity)
                         }
                     }
@@ -3467,6 +3461,7 @@ struct NotchView: View {
                         Image(systemName: "ellipsis.circle")
                             .font(.system(size: 11, weight: .semibold))
                             .frame(width: 28, height: 28)
+                            .modifier(MonitorMenuTrigger(minimumHeight: 28, horizontalPadding: 0))
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
@@ -3482,7 +3477,7 @@ struct NotchView: View {
                                 .frame(width: 28, height: 28)
                         }
                         .buttonStyle(MonitorCenterPressStyle())
-                        .foregroundStyle(MonitorDesktopTheme.cyanAccent)
+                        .foregroundStyle(MonitorDesktopTheme.accent)
                         .help("打开重置证据")
                     }
                 }
@@ -3502,7 +3497,7 @@ struct NotchView: View {
                 .font(.system(size: value == nil || isHistorical ? 20 : 30, weight: .semibold))
                 .monospacedDigit()
                 .contentTransition(.numericText())
-                .animation(reduceMotion || isHistorical ? nil : .spring(response: 0.34, dampingFraction: 1), value: value)
+                .animation(reduceMotion || isHistorical ? nil : MonitorDesktopTheme.selectionMotion, value: value)
                 .foregroundStyle(value == nil || isHistorical ? MonitorDesktopTheme.tertiaryText : MonitorDesktopTheme.primaryText)
             Text(label)
                 .font(MonitorDesktopTypography.metadata)
@@ -3584,7 +3579,7 @@ struct NotchView: View {
         return VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: "pin.fill")
                 .font(MonitorDesktopTypography.metadataMedium)
-                .foregroundStyle(MonitorDesktopTheme.cyanAccent)
+                .foregroundStyle(MonitorDesktopTheme.accent)
             tiboPostHeader(date: date)
             if let tweet = radar.tweets.first(where: { $0.id == signal.tweetId }), !fulfilled {
                 tiboReplyContext(tweet)
@@ -3600,7 +3595,7 @@ struct NotchView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MonitorDesktopTheme.cyanAccent.opacity(0.065), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(MonitorDesktopTheme.accent.opacity(0.065), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
     private func tiboPinnedSignalResolution(
@@ -3651,17 +3646,7 @@ struct NotchView: View {
                             }
                         }
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "line.3.horizontal.decrease")
-                                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                            Text(tiboFilterTitle(tiboRadarFilter))
-                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                        }
-                        .font(MonitorDesktopTypography.control)
-                        .padding(.horizontal, 12).frame(height: 34)
-                        .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
-                        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.075), lineWidth: 0.5))
+                        MonitorMenuLabel(title: tiboFilterTitle(tiboRadarFilter), symbol: "line.3.horizontal.decrease")
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
@@ -3700,7 +3685,7 @@ struct NotchView: View {
         updates()
         DispatchQueue.main.async {
             guard tiboTransitionGeneration == generation else { return }
-            withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.34, dampingFraction: 1)) {
+            withAnimation(reduceMotion ? .easeOut(duration: 0.15) : MonitorDesktopTheme.selectionMotion) {
                 tiboContentOpacity = 1
                 tiboContentOffset = 0
             }
@@ -3799,7 +3784,7 @@ struct NotchView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MonitorDesktopTheme.subtleCardFill, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 13))
     }
 
     private func tiboPostHeader(date: Date?) -> some View {
@@ -3842,14 +3827,14 @@ struct NotchView: View {
                 .textSelection(.enabled)
             if needsExpansion {
                 Button(isExpanded ? "收起" : "展开全文") {
-                    animate(.spring(response: 0.30, dampingFraction: 1)) {
+                    animate(MonitorDesktopTheme.selectionMotion) {
                         if isExpanded { expandedTiboTexts.remove(id) }
                         else { expandedTiboTexts.insert(id) }
                     }
                 }
                 .font(MonitorDesktopTypography.control)
                 .buttonStyle(MonitorCenterPressStyle())
-                .foregroundStyle(MonitorDesktopTheme.cyanAccent)
+                .foregroundStyle(MonitorDesktopTheme.accent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -3864,7 +3849,7 @@ struct NotchView: View {
                 .font(MonitorDesktopTypography.metadata)
         }
         .buttonStyle(MonitorCenterPressStyle())
-        .foregroundStyle(MonitorDesktopTheme.cyanAccent)
+        .foregroundStyle(MonitorDesktopTheme.accent)
     }
 
     private func tiboFilteredEmptyState(_ title: String) -> some View {
@@ -3876,7 +3861,7 @@ struct NotchView: View {
             )
             if tiboRadarFilter != .all {
                 Button("显示全部") { transitionTiboContent { tiboRadarFilter = .all } }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AnalysisToolbarButtonStyle())
             }
         }
         .padding(.vertical, 16)
@@ -3976,7 +3961,7 @@ struct NotchView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MonitorDesktopTheme.subtleCardFill, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 13))
     }
 
 
@@ -4007,7 +3992,7 @@ struct NotchView: View {
         switch tag {
         case .limit, .banked: return .orange
         case .fulfilled: return .green
-        case .reset, .preview: return .cyan
+        case .reset, .preview: return MonitorDesktopTheme.accent
         }
     }
 
@@ -4042,7 +4027,7 @@ struct NotchView: View {
         if event.type == "reset", !event.preview, event.source == "archive", event.confidence == "high" {
             return .green
         }
-        return MonitorDesktopTheme.cyanAccent
+        return MonitorDesktopTheme.accent
     }
 
     private func tiboTimelineConfidenceLabel(_ event: CodexResetTimelineEvent) -> String {
@@ -4084,7 +4069,7 @@ struct NotchView: View {
             HStack(spacing: 7) {
                 Image(systemName: "bell.badge.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(MonitorDesktopTheme.accent)
                 Text("额度恢复监控")
                     .font(.system(size: 11, weight: .semibold))
                 Spacer()
@@ -4152,11 +4137,7 @@ struct NotchView: View {
             }
         }
         .padding(12)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.cyan.opacity(0.09), lineWidth: 0.7)
-        }
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 12))
         .onAppear {
             store.refreshNotificationStatus()
         }
@@ -4185,7 +4166,7 @@ struct NotchView: View {
             }
             .buttonStyle(MonitorCenterPressStyle())
             .contentShape(Rectangle())
-            .help("前往系统设置，为 Codex Monitor 开启通知")
+            .help("前往系统设置，为 Codex Pulse 开启通知")
         } else {
             Text(quotaNotificationStatusText)
                 .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -4228,7 +4209,7 @@ struct NotchView: View {
     private func quotaResetColor(_ reason: QuotaResetReason) -> Color {
         switch reason {
         case .officialCompleted: return .green
-        case .officialScheduled: return .cyan
+        case .officialScheduled: return MonitorDesktopTheme.accent
         case .natural: return .blue
         case .mixed: return .mint
         case .manualCredit: return .orange
@@ -4240,10 +4221,10 @@ struct NotchView: View {
     private var tiboSourceCard: some View {
         HStack(spacing: 10) {
             ZStack {
-                Circle().fill(Color.cyan.opacity(0.12))
+                Circle().fill(MonitorDesktopTheme.accent.opacity(0.12))
                 Image(systemName: "dot.radiowaves.left.and.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.cyan.opacity(0.88))
+                    .foregroundStyle(MonitorDesktopTheme.accent.opacity(0.88))
             }
             .frame(width: 34, height: 34)
 
@@ -4257,13 +4238,13 @@ struct NotchView: View {
                 }
                 Text(tiboSourceSubtitle)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(tiboSourceIsStale ? .orange.opacity(0.82) : .white.opacity(0.4))
+                    .foregroundStyle(tiboSourceIsStale ? .orange.opacity(0.82) : MonitorDesktopTheme.faintText)
                     .lineLimit(1)
             }
 
             Spacer(minLength: 5)
             if store.isTiboFeedLoading {
-                ProgressView().controlSize(.mini).tint(.cyan)
+                ProgressView().controlSize(.mini).tint(MonitorDesktopTheme.accent)
             } else {
                 Button { store.refreshTiboFeed() } label: {
                     Image(systemName: "arrow.clockwise")
@@ -4276,7 +4257,7 @@ struct NotchView: View {
             }
         }
         .padding(11)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 12))
     }
 
     private func tiboEventCard(_ item: TiboDisplayEvent) -> some View {
@@ -4296,7 +4277,7 @@ struct NotchView: View {
 
             Text(event.text.trimmingCharacters(in: .whitespacesAndNewlines))
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
+                .foregroundStyle(MonitorDesktopTheme.secondaryText)
                 .multilineTextAlignment(.leading)
                 .lineSpacing(2)
                 .lineLimit(5)
@@ -4336,14 +4317,10 @@ struct NotchView: View {
                 .help("打开 @thsottiaux 的原始动态")
             }
             .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(.cyan.opacity(0.68))
+            .foregroundStyle(MonitorDesktopTheme.accent.opacity(0.68))
         }
         .padding(12)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(tiboEventColor(event.kind).opacity(0.10), lineWidth: 0.7)
-        }
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -4412,7 +4389,7 @@ struct NotchView: View {
     private func tiboEventColor(_ kind: TiboEventKind) -> Color {
         switch kind {
         case .resetCompleted: return .green
-        case .resetScheduled: return .cyan
+        case .resetScheduled: return MonitorDesktopTheme.accent
         case .bankedReset: return .orange
         case .limitIncrease: return .purple
         case .uncertain: return .gray
@@ -4442,9 +4419,6 @@ struct NotchView: View {
                 symbol: "chart.xyaxis.line",
                 title: "成本概览"
             ) { Text(analysisScopeCaption) }
-            Text("本地日志 · 模型计价 · API 等价估值，非账单")
-                .font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.tertiaryText)
-
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(costPeriodTitle)
@@ -4456,31 +4430,43 @@ struct NotchView: View {
                         .foregroundStyle(MonitorDesktopTheme.primaryText)
                         .monospacedDigit()
                         .contentTransition(.numericText())
-                        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1), value: totals.dollars)
+                        .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: totals.dollars)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Token 吞吐量")
                         .font(MonitorDesktopTypography.metadata)
                         .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                    Text(formatTokens(totals.tokens))
-                        .font(MonitorDesktopTypography.secondaryMetric)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1), value: totals.tokens)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(formatCompactTokens(totals.tokens))
+                            .font(MonitorDesktopTypography.secondaryMetric)
+                            .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                            .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: totals.tokens)
+                        Text("tokens")
+                            .font(MonitorDesktopTypography.body)
+                            .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
+            .padding(.vertical, 4)
 
             HStack(spacing: 8) {
                 Text("非缓存输入 \(formatCompactTokens(totals.inputTokens))")
                 Text("输出 \(formatCompactTokens(totals.outputTokens))")
                 Text("缓存 \(formatCompactTokens(totals.cacheTokens))")
                 Spacer(minLength: 0)
-                if store.isCostLoading { ProgressView().controlSize(.mini).tint(.cyan) }
+                if store.isCostLoading { ProgressView().controlSize(.mini).tint(MonitorDesktopTheme.accent) }
             }
-            .font(MonitorDesktopTypography.body)
+            .font(MonitorDesktopTypography.metadata)
             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
             .lineLimit(1)
+
+            Text("本地日志 · 模型计价 · API 等价估值，非账单")
+                .font(MonitorDesktopTypography.metadata)
+                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
 
             ZStack {
                 CostTrendChart(
@@ -4499,7 +4485,7 @@ struct NotchView: View {
                 Spacer()
                 Text(costTrendEndLabel)
             }
-            .font(MonitorDesktopTypography.body)
+            .font(MonitorDesktopTypography.metadata)
             .foregroundStyle(MonitorDesktopTheme.faintText)
         }
         .modifier(AnalysisCard(primary: true))
@@ -4558,13 +4544,13 @@ struct NotchView: View {
                             .font(MonitorDesktopTypography.body).foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     } else {
                         HStack(alignment: .top, spacing: 24) {
-                            sourceMetric("Token 用量", value: formatCompactTokens(totals.tokens), unit: "tokens")
-                            sourceMetric("API 等价成本", value: formatDollars(totals.dollars), unit: "USD")
+                            sourceMetric("Token 用量", value: formatCompactTokens(totals.tokens), unit: "tokens", color: MonitorDesktopTheme.usageData)
+                            sourceMetric("API 等价成本", value: formatDollars(totals.dollars), unit: "USD", color: MonitorDesktopTheme.costData)
                         }
                     }
                 }
             }
-            Rectangle().fill(.white.opacity(0.07)).frame(height: 0.5)
+            Rectangle().fill(MonitorDesktopTheme.separator).frame(height: 0.5)
             VStack(spacing: 10) {
                 pricingSourceRow("官方费率", source: sync.date == nil ? "内置官方快照" : "OpenAI · Standard",
                     status: sync.date.map { "同步于 " + OfficialPricingCatalog.dateLabel($0) }
@@ -4608,11 +4594,11 @@ struct NotchView: View {
         .modifier(AnalysisCard(primary: false))
     }
 
-    private func sourceMetric(_ title: String, value: String, unit: String) -> some View {
+    private func sourceMetric(_ title: String, value: String, unit: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.tertiaryText)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(value).font(.system(size: 25, weight: .semibold)).monospacedDigit()
+                Text(value).font(.system(size: 25, weight: .semibold)).monospacedDigit().foregroundStyle(color)
                     .contentTransition(.numericText())
                 Text(unit).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.faintText)
             }
@@ -4644,14 +4630,25 @@ struct NotchView: View {
             .help(accountScopeEvidenceText)
             .accessibilityLabel("数据范围说明")
             .popover(isPresented: $showsAnalysisScopeInfo) {
-                Text(accountScopeEvidenceText)
-                    .font(MonitorDesktopTypography.body)
-                    .padding(16).frame(width: 280, alignment: .leading)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        Text("数据范围说明").font(MonitorDesktopTypography.cardTitle)
+                        Spacer(minLength: 8)
+                        Button { showsAnalysisScopeInfo = false } label: { Image(systemName: "xmark") }
+                            .buttonStyle(PanelSettingsActionStyle()).accessibilityLabel("关闭数据范围说明")
+                    }
+                    Text(accountScopeEvidenceText)
+                        .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .modifier(MonitorPopoverSurface()).frame(width: 320, alignment: .leading)
             }
             Spacer(minLength: 12)
             if shouldOfferMonthlyHistoryShortcut {
-                Button("近 30 日") { usagePeriod = .month; costPeriod = .month }
-                    .buttonStyle(.plain).font(MonitorDesktopTypography.control)
+                Button { usagePeriod = .month; costPeriod = .month } label: {
+                    Text("近 30 日").font(MonitorDesktopTypography.control)
+                        .padding(.horizontal, 6).frame(minHeight: 28)
+                }.buttonStyle(MonitorCenterPressStyle())
             }
             analysisPeriodControl.frame(width: 216)
         }
@@ -4677,26 +4674,11 @@ struct NotchView: View {
             Divider()
             accountScopeButton(id: UsageAccountScope.unknown, title: "归属未知")
         } label: {
-            HStack(spacing: 6) {
-                Text(selectedAccountScopeTitle)
-                    .font(MonitorDesktopTypography.controlLarge)
-                    .foregroundStyle(MonitorDesktopTheme.primaryText)
-                    .lineLimit(1)
-                    .frame(maxWidth: 260, alignment: .trailing)
-                    .help(selectedAccountScopeTitle)
-            }
-            .padding(.horizontal, 9)
-            .frame(minWidth: 150, minHeight: 32, alignment: .trailing)
-            .background(
-                MonitorDesktopTheme.controlFill,
-                in: RoundedRectangle(
-                    cornerRadius: MonitorDesktopTheme.controlCornerRadius,
-                    style: .continuous
-                )
-            )
-            .contentShape(Rectangle())
+            MonitorMenuLabel(title: selectedAccountScopeTitle, symbol: "person.crop.circle")
+                .frame(minWidth: 150, maxWidth: 280, alignment: .leading)
+                .help(selectedAccountScopeTitle)
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
         .fixedSize(horizontal: true, vertical: false)
         .help("筛选用量分析与成本估算的本地历史统计范围")
         .accessibilityLabel("数据范围")
@@ -4881,7 +4863,7 @@ struct NotchView: View {
         HStack(spacing: 6) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(MonitorDesktopTheme.cyanAccent)
+                .foregroundStyle(MonitorDesktopTheme.accent)
                 .frame(width: 12)
             Text(title)
                 .font(MonitorDesktopTypography.cardTitle)
@@ -4890,13 +4872,11 @@ struct NotchView: View {
                 Text(badge)
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .tracking(0.35)
-                    .foregroundStyle(MonitorDesktopTheme.cyanAccent)
+                    .foregroundStyle(MonitorDesktopTheme.accent)
                     .padding(.horizontal, 6)
                     .frame(height: 15)
-                    .background(MonitorDesktopTheme.cyanAccent.opacity(0.09), in: Capsule())
-                    .overlay {
-                        Capsule().strokeBorder(MonitorDesktopTheme.cyanAccent.opacity(0.15), lineWidth: 0.5)
-                    }
+                    .background(MonitorDesktopTheme.accent.opacity(0.09), in: Capsule())
+
             }
             Spacer(minLength: 8)
             trailing()
@@ -4920,27 +4900,34 @@ struct NotchView: View {
                     Text(usagePeriodTitle + "（含缓存）")
                         .font(MonitorDesktopTypography.body)
                         .foregroundStyle(MonitorDesktopTheme.secondaryText)
-                    Text(formatTokens(usage.tokens))
-                        .font(MonitorDesktopTypography.primaryMetric)
-                        .tracking(-0.21)
-                        .foregroundStyle(MonitorDesktopTheme.primaryText)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1), value: usage.tokens)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(formatCompactTokens(usage.tokens))
+                            .font(MonitorDesktopTypography.primaryMetric)
+                            .tracking(-0.21)
+                            .foregroundStyle(MonitorDesktopTheme.primaryText)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                            .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: usage.tokens)
+                        Text("tokens")
+                            .font(MonitorDesktopTypography.body)
+                            .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
                 Spacer()
                 UsageCountMetric(value: usage.sessionCount, label: "会话")
                 UsageCountMetric(value: usage.projectCount, label: "项目")
             }
+            .padding(.vertical, 4)
 
             HStack(spacing: 8) {
                 Text("非缓存输入 \(formatCompactTokens(usage.inputTokens))")
                 Text("输出 \(formatCompactTokens(usage.outputTokens))")
                 Text("缓存 \(formatCompactTokens(usage.cacheTokens))")
                 Spacer(minLength: 0)
-                if store.isCostLoading { ProgressView().controlSize(.mini).tint(.cyan) }
+                if store.isCostLoading { ProgressView().controlSize(.mini).tint(MonitorDesktopTheme.accent) }
             }
-            .font(MonitorDesktopTypography.body)
+            .font(MonitorDesktopTypography.metadata)
             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
             .lineLimit(1)
 
@@ -5006,8 +4993,10 @@ struct NotchView: View {
                 title: "项目用量"
             ) {
                 if usage.projects.count > 4 {
-                    Button(showsAllUsageProjects ? "收起" : "查看全部（\(usage.projects.count)）") { withAnimation(reduceMotion ? nil : AnalysisMotion.control) { showsAllUsageProjects.toggle() } }
-                        .buttonStyle(.plain)
+                    Button { withAnimation(reduceMotion ? nil : AnalysisMotion.control) { showsAllUsageProjects.toggle() } } label: {
+                        Text(showsAllUsageProjects ? "收起" : "查看全部（\(usage.projects.count)）")
+                            .font(MonitorDesktopTypography.control).padding(.horizontal, 6).frame(minHeight: 28)
+                    }.buttonStyle(MonitorCenterPressStyle())
                 }
             }
             if topProjects.isEmpty {
@@ -5051,31 +5040,54 @@ struct NotchView: View {
     }
 
     private func usageProjectDetail(_ project: ProjectUsage) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text(project.name).font(.title2.weight(.semibold))
+                Text(project.name).font(MonitorDesktopTypography.cardTitle)
+                    .textSelection(.enabled)
                 Spacer()
-                Button("关闭") { selectedUsageProject = nil }.keyboardShortcut(.cancelAction)
+                Button("关闭") { selectedUsageProject = nil }
+                    .buttonStyle(PanelSettingsActionStyle()).keyboardShortcut(.cancelAction)
             }
             Text(analysisScopeCaption + " · " + usagePeriodTitle)
-                .font(.subheadline).foregroundStyle(.secondary)
-            Text(formatTokens(project.tokens)).font(.largeTitle.weight(.semibold)).monospacedDigit()
-            Text("所选周期内 \(project.sessionCount) 个会话 · 总量含缓存")
-            Text(project.path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-            Divider()
-            Text("会话管理将展示该项目的全部本机会话，不限于当前统计周期。")
-                .font(.caption).foregroundStyle(.secondary)
-            Button("查看该项目全部本机会话") {
-                selectedUsageProject = nil
-                continuitySearchText = project.path
-                continuityFilter = .all
-                showPage(.continuity)
-                store.refreshContinuity()
+                .font(MonitorDesktopTypography.control).foregroundStyle(MonitorDesktopTheme.secondaryText)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Token 用量").font(MonitorDesktopTypography.metadata)
+                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                Text(formatTokens(project.tokens)).font(MonitorDesktopTypography.primaryMetric).monospacedDigit()
+                    .foregroundStyle(MonitorDesktopTheme.usageData)
+                Text("所选周期内 \(project.sessionCount) 个会话 · 总量含缓存")
+                    .font(MonitorDesktopTypography.body).foregroundStyle(MonitorDesktopTheme.secondaryText)
             }
-            .buttonStyle(.borderedProminent)
+            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(MonitorDesktopTheme.usageData.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("项目路径").font(MonitorDesktopTypography.metadata)
+                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                Text(project.path).font(MonitorDesktopTypography.metadata.monospaced())
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            PanelSettingsTheme.divider
+            Text("会话管理将展示该项目的全部本机会话，不限于当前统计周期。")
+                .font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.secondaryText)
+            HStack {
+                Spacer(minLength: 0)
+                Button {
+                    selectedUsageProject = nil
+                    continuitySearchText = project.path
+                    continuityFilter = .all
+                    showPage(.continuity)
+                    store.refreshContinuity()
+                } label: {
+                    Label("查看该项目全部本机会话", systemImage: "bubble.left.and.bubble.right")
+                }
+                .buttonStyle(PanelSettingsActionStyle(prominent: true))
+            }
         }
         .padding(24).frame(width: 540, alignment: .leading)
-        .background(Color(white: 0.075)).preferredColorScheme(.dark)
+        .font(MonitorDesktopTypography.body)
+        .foregroundStyle(MonitorDesktopTheme.primaryText)
+        .tint(MonitorDesktopTheme.accent)
+        .background(MonitorDesktopTheme.elevated).preferredColorScheme(.dark)
     }
 
     private var usagePeriodTitle: String {
@@ -5149,7 +5161,7 @@ struct NotchView: View {
             }
         }
         .padding(13)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .modifier(MonitorDesktopCardSurface(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -5534,29 +5546,40 @@ struct CodexMark: View {
 
     var body: some View {
         Group {
-            if let image = Self.coverAILogo {
+            if let image = Self.pulseLogo {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
             } else {
                 ZStack {
-                    RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                        .fill(.white)
-                    Text("C")
-                        .font(.system(size: size * 0.58, weight: .black, design: .rounded))
-                        .foregroundStyle(.black)
+                    RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                        .fill(Color(red: 0.106, green: 0.106, blue: 0.098))
+                    Path { path in
+                        let scale = size / 256
+                        path.move(to: CGPoint(x: 72 * scale, y: 194 * scale))
+                        path.addLine(to: CGPoint(x: 72 * scale, y: 87 * scale))
+                        path.addCurve(to: CGPoint(x: 105 * scale, y: 56 * scale), control1: CGPoint(x: 72 * scale, y: 69 * scale), control2: CGPoint(x: 86 * scale, y: 56 * scale))
+                        path.addLine(to: CGPoint(x: 134 * scale, y: 56 * scale))
+                        path.addCurve(to: CGPoint(x: 188 * scale, y: 109 * scale), control1: CGPoint(x: 166 * scale, y: 56 * scale), control2: CGPoint(x: 188 * scale, y: 79 * scale))
+                        path.addCurve(to: CGPoint(x: 136 * scale, y: 162 * scale), control1: CGPoint(x: 188 * scale, y: 139 * scale), control2: CGPoint(x: 166 * scale, y: 162 * scale))
+                        path.addLine(to: CGPoint(x: 112 * scale, y: 162 * scale))
+                    }
+                    .stroke(Color(red: 0.851, green: 0.467, blue: 0.341), style: StrokeStyle(lineWidth: size * 28 / 256, lineCap: .round, lineJoin: .round))
+                    Circle().fill(Color(red: 0.851, green: 0.467, blue: 0.341))
+                        .frame(width: size * 28 / 256, height: size * 28 / 256)
+                        .position(x: size * 164 / 256, y: size * 194 / 256)
                 }
             }
         }
         .frame(width: size, height: size)
-        .accessibilityLabel("CoverAI")
+        .accessibilityLabel("Codex Pulse 标识")
     }
 
-    private static let coverAILogo: NSImage? = {
+    private static let pulseLogo: NSImage? = {
         guard let url = Bundle.main.url(
-            forResource: "CoverAI-Logo",
-            withExtension: "png"
+            forResource: "Pulse-Logo",
+            withExtension: "svg"
         ) else { return nil }
         return NSImage(contentsOf: url)
     }()
@@ -5631,7 +5654,7 @@ private struct QuotaRow: View {
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.09))
+                    Capsule().fill(desktop ? MonitorDesktopTheme.track : .white.opacity(0.09))
                     Capsule()
                         .fill(progressColor.gradient)
                         .frame(width: proxy.size.width * CGFloat(window.remainingPercent) / 100)
@@ -5646,14 +5669,12 @@ private struct QuotaRow: View {
     }
 
     private var progressColor: Color {
-        if window.remainingPercent < 20 { return .red }
-        if window.remainingPercent < 50 { return .orange }
-        return .cyan
+        FloatingSurfaceTheme.quotaHealth(window.remainingPercent)
     }
 
     private func resetText(relativeTo now: Date) -> String {
         guard let date = window.resetsAt else { return window.windowLabel }
-        let countdown = QuotaResetCountdown.text(until: date, relativeTo: now)
+        let countdown = ChineseDisplayText.spacing(QuotaResetCountdown.text(until: date, relativeTo: now))
         return bucket.windows.count > 1
             ? countdown
             : "\(window.windowLabel) · \(countdown)"
@@ -5685,11 +5706,11 @@ private struct TiboChineseTranslationView: View {
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
                     }
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.cyan.opacity(0.72))
+                    .foregroundStyle(MonitorDesktopTheme.accent.opacity(0.72))
 
                     Text(translatedText)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.78))
+                        .foregroundStyle(MonitorDesktopTheme.secondaryText)
                         .multilineTextAlignment(.leading)
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -5697,12 +5718,12 @@ private struct TiboChineseTranslationView: View {
                 }
                 .padding(9)
                 .background(
-                    Color.cyan.opacity(0.055),
+                    MonitorDesktopTheme.accent.opacity(0.055),
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(.cyan.opacity(0.10), lineWidth: 0.6)
+                        .strokeBorder(MonitorDesktopTheme.accent.opacity(0.10), lineWidth: 0.6)
                 }
             }
 
@@ -5718,7 +5739,7 @@ private struct TiboChineseTranslationView: View {
             Button(action: toggleTranslation) {
                 HStack(spacing: 5) {
                     if isTranslating {
-                        ProgressView().controlSize(.mini).tint(.cyan)
+                        ProgressView().controlSize(.mini).tint(MonitorDesktopTheme.accent)
                     } else {
                         Image(systemName: isShowingTranslation
                               ? "chevron.up"
@@ -5727,11 +5748,11 @@ private struct TiboChineseTranslationView: View {
                     Text(translationButtonTitle)
                 }
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.cyan.opacity(0.72))
-                .frame(minHeight: 22)
+                .foregroundStyle(MonitorDesktopTheme.accent.opacity(0.72))
+                .frame(minHeight: 28)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MonitorCenterPressStyle())
             .disabled(isTranslating || sourceText.isEmpty)
             .help("使用 macOS 系统翻译，不调用第三方翻译服务")
             .accessibilityLabel("翻译 Tibo 动态 \(postID)")
@@ -5807,27 +5828,27 @@ private struct AnalysisSmoothTrendPlot: View {
                 ZStack {
                     VStack(spacing: 0) {
                         ForEach(0..<3, id: \.self) { _ in
-                            Rectangle().fill(.white.opacity(0.045)).frame(height: 0.5)
+                            Rectangle().fill(MonitorDesktopTheme.chartGrid).frame(height: 0.5)
                             Spacer(minLength: 0)
                         }
                     }
                     if values.contains(where: { $0 > 0 }) {
                         UsageTrendArea(points: points)
-                            .fill(LinearGradient(colors: [AnalysisActivityStyle.accent.opacity(0.12), .clear], startPoint: .top, endPoint: .bottom))
+                            .fill(LinearGradient(colors: [AnalysisActivityStyle.accent(isCost: isCost).opacity(0.12), .clear], startPoint: .top, endPoint: .bottom))
                         UsageTrendLine(points: points)
                             .trim(from: 0, to: reveal)
-                            .stroke(AnalysisActivityStyle.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                            .stroke(AnalysisActivityStyle.accent(isCost: isCost), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                         if let last = points.last {
-                            Circle().fill(AnalysisActivityStyle.accent)
+                            Circle().fill(AnalysisActivityStyle.accent(isCost: isCost))
                                 .frame(width: 4.5, height: 4.5).position(last)
                         }
                         if let index = hoveredIndex, points.indices.contains(index) {
                             let point = points[index]
-                            Rectangle().fill(.white.opacity(0.12))
+                            Rectangle().fill(MonitorDesktopTheme.chartGuide)
                                 .frame(width: 0.7, height: proxy.size.height)
                                 .position(x: point.x, y: proxy.size.height / 2)
-                            Circle().fill(.black).frame(width: 7, height: 7)
-                                .overlay(Circle().stroke(AnalysisActivityStyle.accent, lineWidth: 1.5))
+                            Circle().fill(MonitorDesktopTheme.prominentCardFill).frame(width: 7, height: 7)
+                                .overlay(Circle().stroke(AnalysisActivityStyle.accent(isCost: isCost), lineWidth: 1.5))
                                 .position(point)
                         }
                     } else {
@@ -5901,9 +5922,10 @@ private struct UsageCountMetric: View {
         VStack(alignment: .trailing, spacing: 1) {
             Text("\(value)")
                 .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(MonitorDesktopTheme.secondaryText)
                 .monospacedDigit()
                 .contentTransition(.numericText())
-                .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 1), value: value)
+                .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: value)
             Text(label)
                 .font(MonitorDesktopTypography.metadata)
                 .foregroundStyle(MonitorDesktopTheme.tertiaryText)
@@ -5920,9 +5942,9 @@ private struct AnalysisActivityBarSample: Identifiable {
 }
 
 private enum AnalysisActivityStyle {
-    static let accent = Color(red: 0.20, green: 0.72, blue: 0.86)
+    static func accent(isCost: Bool) -> Color { isCost ? MonitorDesktopTheme.costData : MonitorDesktopTheme.usageData }
     static let cornerRadius: CGFloat = 3
-    static let hoverAnimation = Animation.easeOut(duration: 0.14)
+    static let hoverAnimation = MonitorDesktopTheme.hoverMotion
 
     static func dollars(_ value: Double) -> String {
         String(format: value > 0 && value < 1 ? "$%.4f" : "$%.2f", value)
@@ -5932,16 +5954,17 @@ private enum AnalysisActivityStyle {
 }
 
 private struct AnalysisActivityMark: View {
+    let isCost: Bool
     let active: Bool
     let opacity: Double
     let selected: Bool
 
     var body: some View {
         RoundedRectangle(cornerRadius: AnalysisActivityStyle.cornerRadius, style: .continuous)
-            .fill(active ? AnalysisActivityStyle.accent.opacity(min(0.88, opacity + (selected ? 0.06 : 0))) : Color.white.opacity(0.08))
+            .fill(active ? AnalysisActivityStyle.accent(isCost: isCost).opacity(min(0.88, opacity + (selected ? 0.06 : 0))) : MonitorDesktopTheme.controlFill)
             .overlay {
                 RoundedRectangle(cornerRadius: AnalysisActivityStyle.cornerRadius, style: .continuous)
-                    .strokeBorder(selected ? AnalysisActivityStyle.accent.opacity(0.65) : Color.white.opacity(0.05), lineWidth: 0.7)
+                    .strokeBorder(selected ? AnalysisActivityStyle.accent(isCost: isCost).opacity(0.65) : MonitorDesktopTheme.hairline, lineWidth: 0.7)
             }
     }
 }
@@ -5993,7 +6016,7 @@ private struct AnalysisActivityBarChart: View {
                 ZStack(alignment: .bottom) {
                     VStack {
                         ForEach(0..<3, id: \.self) { _ in
-                            Rectangle().fill(.white.opacity(0.05)).frame(height: 0.5)
+                            Rectangle().fill(MonitorDesktopTheme.chartGrid).frame(height: 0.5)
                             Spacer(minLength: 0)
                         }
                     }
@@ -6001,7 +6024,7 @@ private struct AnalysisActivityBarChart: View {
                         ForEach(0..<slotCount, id: \.self) { index in
                             let sample = samples.indices.contains(index) ? samples[index] : nil
                             let height = sample.map { max(0, $0.value) / maximum * proxy.size.height } ?? 0
-                            AnalysisActivityMark(active: (sample?.value ?? 0) > 0, opacity: ActivityHeatmapPalette.opacity(for: 4), selected: hoveredIndex == index)
+                            AnalysisActivityMark(isCost: isCost, active: (sample?.value ?? 0) > 0, opacity: ActivityHeatmapPalette.opacity(for: 4), selected: hoveredIndex == index)
                                 .frame(width: AnalysisBarLayout.width(slotWidth: proxy.size.width / CGFloat(slotCount), count: slotCount, hourly: hourly), height: height * (entered ? 1 : 0))
                                 .opacity(height > 0 ? 1 : 0)
                                 .animation(reduceMotion ? nil : .easeOut(duration: 0.38).delay(weekly ? Double(index) * 0.018 : 0), value: entered)
@@ -6121,7 +6144,7 @@ private struct TokenActivityHeatmap: View {
     private func activityCell(_ day: DailyTokenActivity?) -> some View {
         if let day {
             let level = ActivityHeatmapScale.level(value: Double(day.tokens), maximum: maximum)
-            AnalysisActivityMark(active: day.tokens > 0, opacity: ActivityHeatmapPalette.opacity(for: level), selected: hoveredDate == day.date)
+            AnalysisActivityMark(isCost: false, active: day.tokens > 0, opacity: ActivityHeatmapPalette.opacity(for: level), selected: hoveredDate == day.date)
                 .frame(width: Self.cellSize, height: Self.cellSize)
                 .contentShape(Rectangle())
                 .onHover { inside in
@@ -6214,7 +6237,7 @@ private struct CostActivityHeatmap: View {
     private func activityCell(_ day: DailyCostActivity?) -> some View {
         if let day {
             let level = ActivityHeatmapScale.level(value: Double(day.dollars), maximum: maximum)
-            AnalysisActivityMark(active: day.dollars > 0, opacity: ActivityHeatmapPalette.opacity(for: level), selected: hoveredDate == day.date)
+            AnalysisActivityMark(isCost: true, active: day.dollars > 0, opacity: ActivityHeatmapPalette.opacity(for: level), selected: hoveredDate == day.date)
                 .frame(width: Self.cellSize, height: Self.cellSize)
                 .contentShape(Rectangle())
                 .onHover { inside in

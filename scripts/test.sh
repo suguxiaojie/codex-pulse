@@ -229,5 +229,3 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   Tests/ContinuityTests.swift \
   -o "$continuity_test_binary"
 "$continuity_test_binary"
-
-python3 Tests/InstallHooksTests.py

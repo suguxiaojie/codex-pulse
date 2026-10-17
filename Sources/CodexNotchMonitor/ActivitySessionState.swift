@@ -99,7 +99,7 @@ struct ActivitySessionState {
     private var residentOrder: [String] = []
 
     mutating func update(projects: [ActiveProjectState], snapshots: [LocalSessionSnapshot],
-                         hookTasks: [MonitoredTask], usages: [String: TurnTokenUsage],
+                         usages: [String: TurnTokenUsage],
                          now: Date, completionHold: TimeInterval, threadNames: [String: String] = [:]) {
         var incoming: [ActivitySessionSnapshot] = []
         var seen: Set<String> = []
@@ -129,7 +129,6 @@ struct ActivitySessionState {
         var deadlines: [String: Date] = [:]
         for previous in rows where !seen.contains(previous.sessionID) {
             let local = snapshots.first { $0.sessionID == previous.sessionID }
-            let hook = hookTasks.first { $0.id == previous.sessionID }
             // A new turn supersedes the old receipt even before it is active.
             if let turn = local?.turnID, turn != previous.turnID { continue }
 
@@ -138,20 +137,11 @@ struct ActivitySessionState {
             if previous.phase.isActive {
                 guard previous.turnID?.isEmpty == false else { continue }
                 let localEnd = local?.turnID == previous.turnID ? local?.evidence?.endReason : nil
-                let hookEnd: SessionEndReason?
-                if hook?.turnID == previous.turnID, hook?.confirmsTurnEnd == true {
-                    switch hook?.phase {
-                    case .completed: hookEnd = .completed
-                    case .failed: hookEnd = .failed
-                    case .ended: hookEnd = .ended
-                    default: hookEnd = nil
-                    }
-                } else { hookEnd = nil }
-                guard let reason = localEnd ?? hookEnd else { continue }
+                guard let reason = localEnd else { continue }
                 row.phase = reason.phase
                 row.endReason = reason
                 row.actionText = row.statusTitle
-                row.updatedAt = min(now, localEnd != nil ? local?.evidence?.endedAt ?? local?.updatedAt ?? now : hook?.updatedAt ?? now)
+                row.updatedAt = min(now, local?.evidence?.endedAt ?? local?.updatedAt ?? now)
                 deadline = now.addingTimeInterval(completionHold)
             }
             guard let deadline, now < deadline else { continue }
@@ -180,37 +170,6 @@ struct ActivitySessionState {
             return order[$0.id, default: 0] < order[$1.id, default: 0]
         }
         receiptDeadlines = deadlines
-    }
-}
-
-/// Reject stale or retired Hook turns before they can replace the live task.
-/// This state is bounded to the same sessions retained by MonitorStore.
-struct ActivityHookState {
-    private var retired: [String: [String]] = [:]
-
-    mutating func accepts(_ incoming: MonitoredTask, replacing previous: MonitoredTask?) -> Bool {
-        // QuotaView CodexActivityTaskRegistry: ordinary SessionStart registers
-        // a session with hasTurn=false; it is not a user-prompt execution.
-        guard incoming.hookEventName != "SessionStart" else { return false }
-        guard incoming.phase.isActive || incoming.confirmsTurnEnd else { return false }
-        guard let previous else { return true }
-        guard incoming.updatedAt >= previous.updatedAt else { return false }
-        if let turn = incoming.turnID, retired[incoming.id, default: []].contains(turn) { return false }
-        if incoming.turnID != previous.turnID {
-            guard incoming.phase.isActive, incoming.turnID != nil else { return false }
-            if let turn = previous.turnID {
-                var turns = retired[incoming.id, default: []]
-                turns.append(turn)
-                retired[incoming.id] = Array(turns.suffix(64))
-            }
-        } else if !previous.phase.isActive && incoming.phase.isActive {
-            return false
-        }
-        return true
-    }
-
-    mutating func retain(sessionIDs: Set<String>) {
-        retired = retired.filter { sessionIDs.contains($0.key) }
     }
 }
 

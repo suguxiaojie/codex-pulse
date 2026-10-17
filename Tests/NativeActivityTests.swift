@@ -82,11 +82,11 @@ enum NativeActivityTests {
         expect(reader.readSnapshot(from: file)?.sessionKind == .memoryConsolidation, "copied classifier identifies internal memory tasks")
         var lifecycle = ActivitySessionState()
         let liveNative = running.applying(to: local)!
-        let projects = ProjectActivityAggregator.projects(snapshots: [liveNative], hookTasks: [], now: now, catalog: .empty)
-        lifecycle.update(projects: projects, snapshots: [liveNative], hookTasks: [], usages: [:], now: now, completionHold: 8)
+        let projects = ProjectActivityAggregator.projects(snapshots: [liveNative], now: now, catalog: .empty)
+        lifecycle.update(projects: projects, snapshots: [liveNative], usages: [:], now: now, completionHold: 8)
         expect(lifecycle.rows.first?.phase == .usingTool, "no-Hook native/local pipeline produces active card")
         let terminalNative = NativeActivityEvidence.project(try projection(status: "completed"), previous: running, now: now.addingTimeInterval(1))!.applying(to: local)!
-        lifecycle.update(projects: [], snapshots: [terminalNative], hookTasks: [], usages: [:], now: now.addingTimeInterval(1), completionHold: 8)
+        lifecycle.update(projects: [], snapshots: [terminalNative], usages: [:], now: now.addingTimeInterval(1), completionHold: 8)
         expect(lifecycle.rows.first?.phase == .completed && lifecycle.rows.first?.endReason == .completed, "native terminal creates completion receipt with zero Hook input")
         let fixtureState: [String: Any] = ["id": "thread", "source": "appServer", "title": "Native title", "requests": [request],
             "threadRuntimeStatus": ["type": "active", "activeFlags": ["waitingOnApproval"]],
@@ -96,11 +96,9 @@ enum NativeActivityTests {
         let monitor = NativeActivityObserver(client: fixtureClient)
         monitor.observe([local])
         for _ in 0..<100 where monitor.acceptedSnapshots == 0 { try await Task.sleep(nanoseconds: 10_000_000) }
-        let conflictingHook = MonitoredTask(id: "thread", turnID: "turn", projectName: "Example", projectPath: "/Example", phase: .completed, updatedAt: now, confirmsTurnEnd: true)
-        var merged = monitor.merge([local], names: [:], hooks: [conflictingHook])
+        var merged = monitor.merge([local], names: [:])
         expect(merged.snapshots.first?.nativePhase == .waitingApproval, "real adapter accepts owner-validated fixture stream")
         expect(merged.names["thread"] == "Native title", "desktop title hydrates local task")
-        expect(merged.hooks.isEmpty, "late Hook completion cannot override native current wait")
         fixture.emitRawPayload(try JSONSerialization.data(withJSONObject: ["type": "client-discovery-request", "requestId": "discovery"]), chunkBytes: 128)
         try await Task.sleep(nanoseconds: 100_000_000)
         expect(monitor.state == .connected, "protocol ownership refusal keeps observation connection alive")
@@ -110,17 +108,17 @@ enum NativeActivityTests {
         terminalState["turns"] = [["turnId": "turn", "status": "completed", "items": []]]
         fixture.setState(terminalState, revision: 8)
         for _ in 0..<100 where monitor.acceptedSnapshots < 2 { try await Task.sleep(nanoseconds: 10_000_000) }
-        expect(monitor.merge([local], names: [:], hooks: []).snapshots.first?.nativePhase == .completed, "terminal stream settles current turn")
+        expect(monitor.merge([local], names: [:]).snapshots.first?.nativePhase == .completed, "terminal stream settles current turn")
         fixture.setState(fixtureState, revision: 9)
         for _ in 0..<100 where monitor.acceptedSnapshots < 3 { try await Task.sleep(nanoseconds: 10_000_000) }
-        expect(monitor.merge([local], names: [:], hooks: []).snapshots.first?.nativePhase == .completed, "later stale active evidence cannot reopen settled turn")
+        expect(monitor.merge([local], names: [:]).snapshots.first?.nativePhase == .completed, "later stale active evidence cannot reopen settled turn")
         fixture.emitState(version: 99)
         for _ in 0..<100 where monitor.state != .disconnected { try await Task.sleep(nanoseconds: 10_000_000) }
-        merged = monitor.merge([local], names: [:], hooks: [conflictingHook])
-        expect(merged.snapshots.first?.nativePhase == .completed && merged.hooks.isEmpty, "disconnect preserves previously proved terminal against stale Hook")
+        merged = monitor.merge([local], names: [:])
+        expect(merged.snapshots.first?.nativePhase == .completed, "disconnect preserves previously proved terminal after disconnect")
         await monitor.stop()
-        merged = monitor.merge([local], names: [:], hooks: [conflictingHook])
-        expect(merged.snapshots.first?.nativePhase == nil && merged.hooks.count == 1, "without native evidence existing local/Hook pipeline remains available")
+        merged = monitor.merge([local], names: [:])
+        expect(merged.snapshots.first?.nativePhase == nil, "without native evidence existing local log pipeline remains available")
         print("Native activity tests: \(checks) passed")
         if ProcessInfo.processInfo.environment["CODEX_NATIVE_ACTIVITY_PROBE"] == "1" {
             let service = SessionActivityService()
@@ -132,7 +130,7 @@ enum NativeActivityTests {
             while Date() < expires {
                 let (locals, names) = await withCheckedContinuation { continuation in service.fetch { continuation.resume(returning: ($0, $1)) } }
                 observer.observe(locals)
-                let result = observer.merge(locals, names: names, hooks: [])
+                let result = observer.merge(locals, names: names)
                 let native = result.snapshots.filter { $0.nativePhase != nil }
                 let current = Set(native.compactMap { $0.nativePhase?.rawValue })
                 phases.formUnion(current); refreshes += 1
