@@ -12,6 +12,9 @@ enum ActivitySessionStateTests {
     }
 
     static func main() throws {
+        UserDefaults.standard.setVolatileDomain([CountStyle.preferenceKey: "western"], forName: UserDefaults.argumentDomain)
+        expect(CodexActivityTokenUsageFormatter.string(for: 128_000) == "128K", "western forwarding")
+        UserDefaults.standard.setVolatileDomain([CountStyle.preferenceKey: "chinese"], forName: UserDefaults.argumentDomain)
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".tmp/activity-session-tests/\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -125,7 +128,7 @@ enum ActivitySessionStateTests {
         let usageProjects = ProjectActivityAggregator.projects(snapshots: [usageSnapshot],  now: now, catalog: .empty)
         display.update(projects: usageProjects, snapshots: [usageSnapshot],
                        usages: ["usage-session": usageSnapshot.turnTokenUsage!], now: now, completionHold: 3)
-        expect(display.rows.first?.tokenTitle == "95.3M tokens", "card formats the upstream session total instead of the 6.9M turn count")
+        expect(display.rows.first?.tokenTitle == "9,530万 tokens", "card formats the upstream session total instead of the 6.9M turn count")
         expect(display.rows.first?.actionText == usageSnapshot.latestAssistantSummary, "thinking card shows public progress instead of stale file-read output")
         expect(display.rows.first?.tokenUsage?.total == 6_900_000, "island display choice does not overwrite existing turn accounting")
         let runningFile = try fixture("public-running", [event("task_started", "tool"), publicMessage,
@@ -133,7 +136,7 @@ enum ActivitySessionStateTests {
         let runningSnapshot = service.readSnapshot(from: runningFile)!
         let runningProjects = ProjectActivityAggregator.projects(snapshots: [runningSnapshot],  now: now, catalog: .empty)
         display.update(projects: runningProjects, snapshots: [runningSnapshot],  usages: [:], now: now, completionHold: 3)
-        expect(display.rows.first?.phase == .usingTool && display.rows.first?.actionText == "检查当前文件", "working card prioritizes the active tool over earlier commentary")
+        expect(display.rows.first?.phase == .usingTool && display.rows.first?.actionText == usageSnapshot.latestAssistantSummary && display.rows.first?.recentSteps.last?.title == "检查当前文件", "focus stage retains both latest assistant progress and current tool step")
         let nativeUsage: [String: Any] = ["thread_id": "thread", "turn_id": "turn",
             "thread_token_usage": ["total_tokens": 100000000], "turn_token_usage": ["total_tokens": 7000000], "usage": ["total_tokens": 1000]]
         expect(SessionActivityService.cumulativeTokens(type: "token_usage_record", payload: nativeUsage, sessionID: "thread") == 100000000,
@@ -144,7 +147,7 @@ enum ActivitySessionStateTests {
                "boolean token totals are rejected")
         expect(SessionActivityService.cumulativeTokens(type: "event_msg", payload: ["type": "token_count", "info": ["total_token_usage": ["total_tokens": 10], "last_token_usage": ["total_tokens": 11]]], sessionID: "thread") == nil,
                "inconsistent cumulative counters are rejected")
-        expect(CodexActivityTokenUsageFormatter.string(for: 128000) == "128K" && CodexActivityTokenUsageFormatter.string(for: 0) == "0",
+        expect(CodexActivityTokenUsageFormatter.string(for: 128000) == "12.8万" && CodexActivityTokenUsageFormatter.string(for: 0) == "0",
                "upstream count formatting removes unnecessary trailing decimal and preserves zero")
 
         let unknownEnd = try fixture("tail", [event("task_complete", "outside-tail")])
@@ -239,10 +242,10 @@ enum ActivitySessionStateTests {
         expect(service.readSnapshot(from: large)?.turnID == "outside-tail", "bounded large tail preserves terminal identity")
 
         func snapshot(_ id: String, turn: String = "turn", path: String = "/Demo", active: Bool = true,
-                      reason: SessionEndReason? = nil, offset: Double = 0) -> LocalSessionSnapshot {
+                      reason: SessionEndReason? = nil, offset: Double = 0, items: [SessionActivityItem]? = nil) -> LocalSessionSnapshot {
             LocalSessionSnapshot(sessionID: id, turnID: turn, cwd: path, model: "test", isActive: active,
                 updatedAt: now.addingTimeInterval(offset),
-                activities: [.init(id: id + "-activity", kind: .command, title: "Action " + id,
+                activities: items ?? [.init(id: id + "-activity", kind: .command, title: "Action " + id,
                                    isRunning: active, updatedAt: now.addingTimeInterval(offset))],
                 evidence: .init(lifecycleState: active, hasRunningTool: active, fileModifiedAt: now,
                                 endReason: reason, endedAt: reason == nil ? nil : now))
@@ -251,6 +254,30 @@ enum ActivitySessionStateTests {
             ProjectActivityAggregator.projects(snapshots: snapshots,  now: now,
                 catalog: .empty, threadNames: ["a": "Session A", "b": "Session B"])
         }
+        var stepState = ActivitySessionState()
+        let stepItems: [SessionActivityItem] = (0..<5).map { index in
+            .init(id: "step-\(index)", kind: index == 4 ? .progress : .command,
+                  title: "Step \(index)", isRunning: index == 3, updatedAt: now.addingTimeInterval(Double(index)))
+        }
+        var stepSource = snapshot("steps", items: stepItems)
+        stepState.update(projects: projects([stepSource]), snapshots: [stepSource], usages: [:], now: now, completionHold: 8)
+        expect(stepState.rows.first?.recentSteps.map(\.id) == ["step-1", "step-2", "step-3"], "steps exclude progress and take last three in chronological order")
+        expect(stepState.rows.first?.recentSteps.map(\.state) == [.done, .done, .running], "steps retain running and done states")
+        stepSource = snapshot("steps", items: [])
+        stepSource.nativePhase = .waitingApproval
+        stepState.update(projects: projects([stepSource]), snapshots: [stepSource], usages: [:], now: now, completionHold: 8)
+        expect(stepState.rows.first?.recentSteps.count == 3 && stepState.rows.first?.recentSteps.last?.state == .waiting, "same-turn sparse wait keeps steps and marks last waiting")
+        expect(stepState.rows.first?.hidingDetails().recentSteps.isEmpty == true, "privacy removes step titles")
+        let stepEnd = snapshot("steps", active: false, reason: .completed)
+        stepState.update(projects: [], snapshots: [stepEnd], usages: [:], now: now, completionHold: 8)
+        expect(stepState.rows.first?.recentSteps.map(\.state) == [.done, .done, .done], "receipt preserves steps as done")
+        stepState.update(projects: [], snapshots: [stepEnd], usages: [:], now: now.addingTimeInterval(8), completionHold: 8)
+        expect(stepState.rows.first?.isRetainedReceipt == true, "receipt boundary marks retained row")
+        expect(stepState.rows.first?.hidingDetails().isRetainedReceipt == true, "privacy preserves lifecycle retention flag")
+        let nextSteps = snapshot("steps", turn: "next", items: [])
+        stepState.update(projects: projects([nextSteps]), snapshots: [nextSteps], usages: [:], now: now, completionHold: 8)
+        expect(stepState.rows.first?.turnID == "next" && stepState.rows.first?.recentSteps.isEmpty == true && stepState.rows.first?.isRetainedReceipt == false, "new turn replaces retained receipt and clears steps")
+
         var state = ActivitySessionState()
         var retained = ActivitySessionState()
         var rich = snapshot("a")
@@ -327,7 +354,11 @@ enum ActivitySessionStateTests {
         update([bCancelled], offset: 15)
         expect(state.rows.count == 1, "terminal receipt remains inside bounded hold")
         update([bCancelled], offset: 16)
-        expect(state.rows.isEmpty, "duplicate terminal events do not extend retention")
+        expect(state.rows.first?.isRetainedReceipt == true, "receipt deadline expires without removing retained result")
+        update([bCancelled], offset: 59)
+        expect(state.rows.first?.isRetainedReceipt == true, "retained result survives until just before one minute")
+        update([bCancelled], offset: 60)
+        expect(state.rows.isEmpty, "terminal row expires 60 seconds after its end without extension")
 
         update([a], tokens: usages, offset: 20)
         let aComplete = snapshot("a", active: false, reason: .completed)
@@ -346,6 +377,84 @@ enum ActivitySessionStateTests {
         update([snapshot("a", turn: "third", active: false, reason: .completed, offset: 25)], offset: 25)
         expect(state.rows.first?.phase == .completed, "local terminal closes the same turn")
 
+        var retainedSignal = compactRows[1]
+        retainedSignal.endReason = .completed
+        retainedSignal.isRetainedReceipt = true
+        var observedSignal = retainedSignal; observedSignal.phase = .working
+        expect(ActivitySessionSnapshot.newlyCompleted(in: [retainedSignal], previous: [observedSignal]) == nil,
+               "retained result cannot trigger confetti or recreate compact receipt")
+        expect(!retainedSignal.isFreshReceipt, "retained result cannot trigger activityEnded or extend popup hold")
+        expect(ActivitySessionSnapshot.newAttention(in: [retainedSignal], previous: []) == nil,
+               "retained result never steals attention")
+        var attention = compactWorking; attention.phase = .waitingApproval; attention.replyRequestIDs = ["one"]
+        expect(ActivitySessionSnapshot.newAttention(in: [attention], previous: [compactWorking])?.id == attention.id,
+               "new request steals focus once")
+        expect(ActivitySessionSnapshot.newAttention(in: [attention], previous: [attention]) == nil,
+               "same pending request does not steal manual selection")
+        var nextAttention = attention; nextAttention.replyRequestIDs = ["two"]
+        expect(ActivitySessionSnapshot.newAttention(in: [nextAttention], previous: [attention]) != nil,
+               "new request identity can reclaim focus in same turn")
+
+        var focusA = compactRows[1]
+        focusA.endReason = .completed
+        let focusB = compactWorking
+        let freshFocusRows = [focusA, focusB]
+        expect(ActivitySessionSnapshot.autoFocus(rows: freshFocusRows, previous: freshFocusRows,
+            currentFocusID: focusA.id, manualFocusID: nil, now: now.addingTimeInterval(2.9))?.id == focusA.id,
+            "A keeps focus at 2.9 seconds after completion")
+        expect(ActivitySessionSnapshot.autoFocus(rows: freshFocusRows, previous: freshFocusRows,
+            currentFocusID: focusA.id, manualFocusID: nil, now: now.addingTimeInterval(3))?.id == focusB.id,
+            "A hands focus to B at exactly three seconds while receipt remains fresh")
+        expect(focusA.isFreshReceipt, "focus handoff does not expire the receipt")
+        expect(ActivitySessionSnapshot.autoFocus(rows: [focusA], previous: freshFocusRows,
+            currentFocusID: focusA.id, manualFocusID: nil, now: now.addingTimeInterval(3)) == nil,
+            "three-second deadline without live rows leaves terminal handling unchanged")
+        focusA.isRetainedReceipt = true
+        let retainedFocusRows = [focusA, focusB]
+        expect(ActivitySessionSnapshot.autoFocus(rows: retainedFocusRows, previous: freshFocusRows,
+            currentFocusID: focusA.id, manualFocusID: nil, now: now.addingTimeInterval(3))?.id == focusB.id,
+            "A retention refresh transfers focus to running B")
+        expect(ActivitySessionSnapshot.newlyCompleted(in: retainedFocusRows, previous: freshFocusRows) == nil,
+            "focus transfer at retention cannot replay completion signals")
+        expect(ActivitySessionSnapshot.autoFocus(rows: retainedFocusRows, previous: retainedFocusRows,
+            currentFocusID: focusB.id, manualFocusID: focusA.id, now: now.addingTimeInterval(3))?.id == focusA.id,
+            "manual completed A selection remains during expansion")
+        expect(ActivitySessionSnapshot.autoFocus(rows: retainedFocusRows, previous: retainedFocusRows,
+            currentFocusID: focusA.id, manualFocusID: nil, now: now.addingTimeInterval(3))?.id == focusB.id,
+            "clearing manual selection on collapse returns to B")
+        let otherLive = ActivitySessionSnapshot(sessionID: "other-live", turnID: "turn", projectID: "p",
+            projectName: "P", title: "Other", phase: .working, actionText: "", updatedAt: now, tokenUsage: nil)
+        for reason: CodexActivityWaitReason? in [nil, .userInput] {
+            var pendingB = focusB
+            pendingB.phase = .waitingApproval; pendingB.waitReason = reason
+            pendingB.replyRequestIDs = ["new-request"]
+            let pendingRows = [focusA, pendingB]
+            expect(ActivitySessionSnapshot.autoFocus(rows: pendingRows, previous: retainedFocusRows,
+                currentFocusID: focusA.id, manualFocusID: focusA.id, now: now.addingTimeInterval(3))?.id == pendingB.id,
+                "new approval or reply preempts even manual A")
+            expect(ActivitySessionSnapshot.autoFocus(rows: pendingRows, previous: pendingRows,
+                currentFocusID: pendingB.id, manualFocusID: nil, now: now.addingTimeInterval(3))?.id == pendingB.id,
+                "preempting request keeps focus after manual choice is cleared")
+            expect(ActivitySessionSnapshot.autoFocus(rows: pendingRows, previous: pendingRows,
+                currentFocusID: focusA.id, manualFocusID: focusA.id, now: now.addingTimeInterval(3))?.id == focusA.id,
+                "user can manually select A after request has already appeared")
+            expect(ActivitySessionSnapshot.autoFocus(rows: [otherLive, focusA, pendingB],
+                previous: pendingRows, currentFocusID: nil, manualFocusID: nil, now: now.addingTimeInterval(3))?.id == pendingB.id,
+                "fallback prefers a pending live row")
+        }
+        expect(ActivitySessionSnapshot.autoFocus(rows: retainedFocusRows, previous: retainedFocusRows,
+            currentFocusID: focusB.id, manualFocusID: nil, now: now.addingTimeInterval(3))?.id == focusB.id,
+            "active current focus stays selected")
+        expect(ActivitySessionSnapshot.autoFocus(rows: [focusB], previous: retainedFocusRows,
+            currentFocusID: focusA.id, manualFocusID: focusA.id, now: now.addingTimeInterval(3))?.id == focusB.id,
+            "missing manual row falls back to live session")
+        expect(ActivitySessionSnapshot.autoFocus(rows: [focusA], previous: retainedFocusRows,
+            currentFocusID: focusA.id, manualFocusID: focusA.id, now: now.addingTimeInterval(3)) == nil,
+            "terminal-only rows delegate to existing controller branches")
+        expect(ActivitySessionSnapshot.autoFocus(rows: [], previous: retainedFocusRows,
+            currentFocusID: focusA.id, manualFocusID: focusA.id, now: now.addingTimeInterval(3)) == nil,
+            "empty rows have no automatic live focus")
+
         var cold = ActivitySessionState()
         cold.update(projects: [], snapshots: [aComplete],  usages: usages, now: now, completionHold: 8)
         expect(cold.rows.isEmpty, "cold startup never replays historic completion")
@@ -360,14 +469,14 @@ enum ActivitySessionStateTests {
         var finishedTokens = ActivitySessionSnapshot(sessionID: "a", turnID: "turn", projectID: "p", projectName: "P",
             title: "T", phase: .completed, actionText: "已完成", updatedAt: now,
             tokenUsage: .init(sessionID: "a", turnID: "turn", total: 6_900_000), sessionTotalTokens: 122_100_000)
-        expect(finishedTokens.displayedTokenTitle == "本轮 6.9M tokens · 累计 122.1M tokens", "completed card distinguishes turn consumption and session total")
+        expect(finishedTokens.displayedTokenTitle == "本轮 690万 tokens · 累计 1.22亿 tokens", "completed card distinguishes turn consumption and session total")
         finishedTokens.tokenUsage = .init(sessionID: "a", turnID: "old", total: 100)
         expect(finishedTokens.displayedTokenTitle.hasPrefix("本轮 — tokens"), "previous turn tokens never appear as current completion consumption")
         finishedTokens.tokenUsage = .init(sessionID: "foreign", turnID: "turn", total: 100)
         expect(finishedTokens.displayedTokenTitle.hasPrefix("本轮 — tokens"), "foreign session tokens cannot appear in completion")
         expect(finishedTokens.hidingDetails().displayedTokenTitle == "— tokens", "privacy hides both token values")
         finishedTokens.phase = .working
-        expect(finishedTokens.displayedTokenTitle == "122.1M tokens", "running card keeps the established cumulative display")
+        expect(finishedTokens.displayedTokenTitle == "1.22亿 tokens", "running card keeps the established cumulative display")
         let settled = snapshot("a", active: false, reason: .completed)
         expect(projects([settled]).isEmpty, "settled local turns never create active cards")
         var nativeRunning = a; nativeRunning.nativePhase = .working

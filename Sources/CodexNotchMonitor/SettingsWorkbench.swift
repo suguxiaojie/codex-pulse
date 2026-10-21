@@ -24,26 +24,26 @@ struct SettingsWorkbench<Preview: View, Controls: View>: View {
         GeometryReader { geometry in
             if fullWidthPreview {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 30) {
+                    VStack(alignment: .leading, spacing: 26) {
                         preview.frame(maxWidth: .infinity)
                         controls
-                    }.padding(16).padding(.bottom, 20)
+                    }.padding(4).padding(.bottom, 20)
                 }.scrollDisabled(isAdjusting)
             } else if geometry.size.width >= 700 {
-                HStack(alignment: .top, spacing: 30) {
+                HStack(alignment: .top, spacing: 28) {
                     ScrollView { preview.frame(maxWidth: .infinity, alignment: .topLeading)
                         .environment(\.workbenchPreviewHeight, max(180, geometry.size.height - 18)) }
-                        .scrollIndicators(.hidden).frame(width: min(280, geometry.size.width * 0.34))
+                        .scrollIndicators(.hidden).frame(width: min(300, geometry.size.width * 0.36))
                     ScrollView { controls.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 28) }
                         .scrollDisabled(isAdjusting)
                 }
-                .padding(.horizontal, 16).padding(.top, 18)
+                .padding(4)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 30) {
+                    VStack(alignment: .leading, spacing: 26) {
                         preview.frame(maxWidth: 460).frame(maxWidth: .infinity, alignment: .leading)
                         controls
-                    }.padding(16).padding(.bottom, 20)
+                    }.padding(4).padding(.bottom, 20)
                 }.scrollDisabled(isAdjusting)
             }
         }
@@ -90,14 +90,6 @@ struct GlanceSettingsPreview: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 7) {
-                Circle().fill(PanelSettingsTheme.clay).frame(width: 5, height: 5)
-                Text("实时面板").font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Text("只读预览").font(.system(size: 10))
-                    .foregroundStyle(PanelSettingsTheme.secondary)
-            }
-            .foregroundStyle(PanelSettingsTheme.primary)
             ProportionalSettingsPreview(width: GlanceLayout.width + 24, height: panelHeight + 24,
                                         maximumHeight: max(140, availableHeight - 70)) {
                 ZStack {
@@ -112,8 +104,7 @@ struct GlanceSettingsPreview: View {
                 .frame(width: GlanceLayout.width + 24, height: panelHeight + 24)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            Text("当前账号真实数据 · 只读预览")
-                .font(.system(size: 10)).foregroundStyle(PanelSettingsTheme.secondary)
+
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("当前账号实时面板预览")

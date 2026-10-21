@@ -106,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        store.claude.stop()
         statusCountdownTimer?.invalidate()
         statusRotationTimer?.invalidate()
         statusCapacityRecoveryWork?.cancel()
@@ -148,6 +149,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.$activeProjects
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateStatusItem() }
+            .store(in: &statusCancellables)
+
+        NotificationCenter.default.publisher(for: CountStyle.didChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.store.objectWillChange.send()
+                self?.updateStatusItem()
+            }
             .store(in: &statusCancellables)
 
         NotificationCenter.default

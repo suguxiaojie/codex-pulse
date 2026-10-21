@@ -5,6 +5,21 @@
 import AppKit
 import SwiftUI
 
+// Drawing-only margins; the original metrics and animation curves are unchanged.
+extension ActivityIslandPanelMetrics {
+    init(shadowing base: ActivityIslandPanelMetrics) {
+        let side = IslandHardwareBlack.shadowHorizontalInset
+        hostSize = CGSize(width: base.hostSize.width + side * 2,
+                          height: base.hostSize.height + IslandHardwareBlack.shadowBottomInset)
+        compactRect = base.compactRect.offsetBy(dx: side, dy: 0)
+        expandedRect = base.expandedRect.offsetBy(dx: side, dy: 0)
+        rowHeight = base.rowHeight
+        visibleRowCount = base.visibleRowCount
+        hardwareGap = base.hardwareGap
+        maximumUsageHeight = base.maximumUsageHeight
+    }
+}
+
 final class ActivityIslandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -73,16 +88,14 @@ final class ActivityIslandSurface: NSView {
         let newRect = compact ? metrics.compactRect : metrics.expandedRect
         usageHost.frame = bounds
         usageGeometry.update(value: .init(rect: newRect, radius: 0, compact: compact), degree: 0.45, animated: animated)
-        let usesGlass = material == .liquidGlass && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         let changed = newRect != targetRect || lastCompact != compact || content.frame != bounds
-            || glassContainer.isHidden == usesGlass
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        shell.fillColor = usesGlass ? NSColor.clear.cgColor : NSColor.black.cgColor
-        shell.shadowOpacity = usesGlass ? 0 : 0.26
+        shell.fillColor = NSColor.black.cgColor
+        shell.shadowOpacity = 0 // The synchronized SwiftUI backdrop owns the hardware shadow.
         if content.frame != bounds { content.frame = bounds }
         if glassContainer.frame != bounds { glassContainer.frame = bounds }
-        glassContainer.isHidden = !usesGlass
-        content.layer?.mask = usesGlass ? nil : clipping
+        glassContainer.isHidden = false
+        content.layer?.mask = clipping
         for (host, rect) in [(compactHost, metrics.compactRect), (expandedHost, metrics.expandedRect)] {
             let frame = CGRect(x: rect.minX, y: bounds.height - rect.maxY, width: rect.width, height: rect.height)
             if host.frame != frame { host.frame = frame; layoutCommitCount += 1 }
@@ -90,18 +103,14 @@ final class ActivityIslandSurface: NSView {
         CATransaction.commit()
         if !animated { cancelAnimations() }
         let value = IslandGlassGeometry.Value(rect: newRect, radius: compact ? 13 : 24, compact: compact)
-        if usesGlass {
-            if let glassHost, let glassGeometry {
-                if glassHost.frame != bounds { glassHost.frame = bounds }
-                glassGeometry.update(value: value, degree: degree, animated: animated)
-            } else {
-                let geometry = IslandGlassGeometry(value: value, degree: degree)
-                let host = NSHostingView(rootView: IslandExpandedGlassBackdrop(model: model, geometry: geometry))
-                host.sizingOptions = []; host.frame = bounds
-                glassGeometry = geometry; glassHost = host; glassContainer.addSubview(host)
-            }
+        if let glassHost, let glassGeometry {
+            if glassHost.frame != bounds { glassHost.frame = bounds }
+            glassGeometry.update(value: value, degree: degree, animated: animated)
         } else {
-            glassGeometry?.stop(); glassHost?.removeFromSuperview(); glassHost = nil; glassGeometry = nil
+            let geometry = IslandGlassGeometry(value: value, degree: degree)
+            let host = NSHostingView(rootView: IslandExpandedGlassBackdrop(model: model, geometry: geometry))
+            host.sizingOptions = []; host.frame = bounds
+            glassGeometry = geometry; glassHost = host; glassContainer.addSubview(host)
         }
         guard changed else { return }
         let radius: CGFloat = compact ? 13 : 24
@@ -219,6 +228,7 @@ final class ActivityIslandPanelPresenter {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none; panel.contentView = surface
         panel.title = "Codex Pulse · 活动会话"
+        model.onApprovalMeasurementChange = { [weak self] in self?.onNeedsRefresh?() }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown],
             handler: { [weak self] event in
                 self?.handlePointerEvent(event); return event
@@ -282,16 +292,27 @@ final class ActivityIslandPanelPresenter {
         let presentationChanged = lastPresentation != model.presentation
         lastPresentation = model.presentation
         let usable = screen.visibleFrame
-        let metrics = ActivityIslandPanelMetrics(rowCount: model.sessions.count,
+        let hardwareGap = screen.safeAreaInsets.top > 0 ? max(0, screen.frame.width
+            - (screen.auxiliaryTopLeftArea?.width ?? 0) - (screen.auxiliaryTopRightArea?.width ?? 0)) : 0
+        let width = ActivityIslandWidthGeometry(screenWidth: usable.width, cameraWidth: hardwareGap).expandedWidth(preferred: preferences.expandedWidth)
+        let approvalHeight = model.approvalHeight(width: width - 56)
+        let focus = model.sessions.first { $0.id == model.focusedSessionID }
+            ?? ActivitySessionSnapshot.compactFocus(rows: model.sessions, selectedID: nil, receipt: nil)
+        let focusHeight = ActivityIslandPanelMetrics.focusHeight(for: model.privacyMode ? focus?.hidingDetails() : focus)
+        let taskHeight = ActivityIslandPanelMetrics.stageHeight(rowCount: model.sessions.count, focusHeight: focusHeight)
+            + approvalHeight + ActivityIslandPanelMetrics.headerHeight + ActivityIslandPanelMetrics.footerHeight
+        // Reuse the measured-page height cap for task content; rendering remains the task list.
+        let baseMetrics = ActivityIslandPanelMetrics(rowCount: model.sessions.count,
             availableSize: usable.size,
             expandedWidth: CGFloat(preferences.expandedWidth), safeAreaTop: screen.safeAreaInsets.top,
-            hardwareGap: screen.safeAreaInsets.top > 0 ? max(0, screen.frame.width
-                - (screen.auxiliaryTopLeftArea?.width ?? 0) - (screen.auxiliaryTopRightArea?.width ?? 0)) : 0,
+            hardwareGap: hardwareGap,
             floatingUsage: model.floatingUsageEnabled && !model.privacyMode,
-            usagePage: model.showsUsagePage, reservesUsagePage: true, usagePageHeight: model.usagePageHeight)
+            usagePage: model.showsUsagePage || approvalHeight > 0, reservesUsagePage: true,
+            usagePageHeight: model.showsUsagePage ? model.usagePageHeight : taskHeight, focusHeight: focusHeight)
+        let metrics = ActivityIslandPanelMetrics(shadowing: baseMetrics)
         if model.metrics != metrics { model.metrics = metrics }
-        let x = screen.frame.midX - metrics.hostSize.width / 2
-        let frame = CGRect(x: max(usable.minX, min(usable.maxX - metrics.hostSize.width, x)),
+        let x = screen.frame.midX - baseMetrics.hostSize.width / 2
+        let frame = CGRect(x: max(usable.minX, min(usable.maxX - baseMetrics.hostSize.width, x)) - IslandHardwareBlack.shadowHorizontalInset,
             y: screen.frame.maxY - metrics.hostSize.height,
             width: metrics.hostSize.width, height: metrics.hostSize.height)
         let geometryChanged = panel.frame != frame

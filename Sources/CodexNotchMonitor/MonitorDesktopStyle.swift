@@ -4,6 +4,9 @@ import SwiftUI
 /// Desktop windows have room for readable type; the menu bar and island keep
 /// their existing compact typography and geometry.
 enum MonitorDesktopTypography {
+    static let sectionLabel = Font.system(size: 11, weight: .semibold)
+    static let rowDetail = Font.system(size: 11.5)
+    static let valueBadge = Font.system(size: 12, weight: .semibold).monospacedDigit()
     static let pageTitle = Font.system(size: 22, weight: .semibold)
     static let pageSubtitle = Font.system(size: 12)
     static let cardTitle = Font.system(size: 15, weight: .semibold)
@@ -38,6 +41,10 @@ enum MonitorDesktopTheme {
     static let tertiaryText = secondaryText.opacity(0.88)
     static let faintText = secondaryText.opacity(0.72)
     static let accent = adaptive(0xd97757, 0xe08264)
+    static let glyphFill = accent.opacity(0.10)
+    static let stageHighlight = accent.opacity(0.06)
+    static let positive = adaptive(0x3f8f6b, 0x7cc4a0)
+    static let caution = adaptive(0xb7791f, 0xe0a458)
     // Data colors supplement the clay brand; they do not encode quota health.
     static let usageData = adaptive(0x39786e, 0x86b9ac)
     static let costData = accent

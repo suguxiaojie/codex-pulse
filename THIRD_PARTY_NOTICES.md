@@ -64,8 +64,8 @@ is retained in the adapted files and bundled notice.
 Desktop observation additionally adapts `CodexDesktopIPCClient.swift` and
 `CodexDesktopRequestProjection.swift` from the same pin, plus the session-kind
 and subagent identity declarations from `CodexActivityTaskIdentity.swift` and
-`CodexActivitySubagentIdentity.swift`. Approval/answer submission entry points
-are removed; an egress allowlist permits only observation and explicit protocol
+`CodexActivitySubagentIdentity.swift`. Explicit follower submission is restored
+from f779531 with an owner-targeted allowlist alongside observation and protocol
 refusals. Incremental cursor and line-buffering logic from
 `CodexLocalRolloutActivityClient.swift` is adapted to the existing transcript
 decoder. Native IPC fixtures are adapted from `CodexDesktopIPCClientTests.swift`.
@@ -164,3 +164,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Claude Code integration: transcript decoder/tail, usage scanner, standard price mapping, private Unix bridge, configuration installer, permission decision mapping and Claude-only helper adapted from QuotaView f7795311bf06c2a54c9b9756da375c50d0f4930e (MIT, Copyright (c) 2026 Duoasa). Runtime/UI adapted to Codex Pulse; scanner, numeric bounds and price snapshot revised. https://github.com/Duoasa/QuotaView/tree/f7795311bf06c2a54c9b9756da375c50d0f4930e
+
+Island approvals: CodexDesktopIPCClient submit/validate/refreshSnapshot/expireSnapshot/validResponse, AttemptIdentity and submission timeout handling, and restricted IslandApprovalProtocol option mapping adapted from QuotaView f7795311bf06c2a54c9b9756da375c50d0f4930e (MIT, Copyright (c) 2026 Duoasa). Pulse retains observation/refusal allowlisting and additionally rejects policy amendments and permission expansion. Synthetic submission tests adapt the upstream IPC/lifecycle cases.

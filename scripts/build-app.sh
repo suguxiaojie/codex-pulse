@@ -37,12 +37,16 @@ if [[ "$build_arch" == "universal" ]]; then
   arm64_bin_dir="$(build_one_architecture arm64 | tail -n 1)"
   x86_64_bin_dir="$(build_one_architecture x86_64 | tail -n 1)"
 
+  mkdir -p "$app_dir/Contents/Helpers"
+  lipo -create "$arm64_bin_dir/ClaudePulseHelper" "$x86_64_bin_dir/ClaudePulseHelper" -output "$app_dir/Contents/Helpers/ClaudePulseHelper"
   lipo -create \
     "$arm64_bin_dir/CodexNotchMonitor" \
     "$x86_64_bin_dir/CodexNotchMonitor" \
     -output "$app_dir/Contents/MacOS/CodexNotchMonitor"
 else
   bin_dir="$(build_one_architecture "$build_arch" | tail -n 1)"
+  mkdir -p "$app_dir/Contents/Helpers"
+  cp "$bin_dir/ClaudePulseHelper" "$app_dir/Contents/Helpers/ClaudePulseHelper"
   cp "$bin_dir/CodexNotchMonitor" "$app_dir/Contents/MacOS/CodexNotchMonitor"
 fi
 
@@ -64,6 +68,9 @@ verify_architectures() {
 }
 
 verify_architectures "$app_dir/Contents/MacOS/CodexNotchMonitor"
+verify_architectures "$app_dir/Contents/Helpers/ClaudePulseHelper"
+chmod 755 "$app_dir/Contents/Helpers/ClaudePulseHelper"
+codesign --force --sign - "$app_dir/Contents/Helpers/ClaudePulseHelper"
 
 cp "$project_dir/Resources/Info.plist" "$app_dir/Contents/Info.plist"
 cp \

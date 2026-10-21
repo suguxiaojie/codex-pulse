@@ -120,12 +120,7 @@ struct TurnTokenUsage: Equatable {
 
 enum MenuBarTokenFormatter {
     static func shortCount(_ total: Int) -> String {
-        let value = max(0, total)
-        if value >= 999_950_000 { return String(format: "%.1fB", Double(value) / 1_000_000_000) }
-        if value >= 999_950 { return String(format: "%.1fM", Double(value) / 1_000_000) }
-        if value == 0 { return "0K" }
-        if value < 50 { return "<0.1K" }
-        return String(format: "%.1fK", Double(value) / 1_000)
+        CountFormatter.display(Int64(total))
     }
 
     static func title(status: String, project: String?, usage: TurnTokenUsage?, quota: Int?, projectCount: Int = 1) -> String {

@@ -5,7 +5,8 @@
 - GitHub 仓库为 suguxiaojie/codex-pulse；应用更新接口、Release 校验与文档链接统一使用该仓库，安装包文件名继续保留 CodexNotchMonitor 兼容标识。
 - 应用展示名称为 Codex Pulse；为兼容现有配置与数据，保留 CodexNotchMonitor target／可执行文件／安装路径、com.coverai.codex-notch-monitor Bundle ID、既有偏好键与数据目录，不随品牌名称迁移。
 - 本项目是 Swift 实现的原生 macOS 应用，保持现有 Swift Package 结构和 AppKit／SwiftUI 技术栈。
-- 任务监控仅使用只读桌面 IPC 与本地日志；已移除 lifecycle Hook、Helper 及客户端配置写入，不重新引入安装／审核链路。
+- Codex 任务监控使用桌面 IPC 与本地日志；允许在用户明确点击后，经桌面 IPC follower 协议回答当前仍在等待的审批／提问，请求必须与快照中的 handle（epoch、owner、revision、nonce、rawRequest）完全一致；不恢复 Codex lifecycle Hook，不写 Codex 客户端配置；不自动批准。
+- Claude Code 独立接入允许可选专属 Hook／statusLine；启用前备份配置，只管理本应用标记项，停用恢复原状态栏并保留其他工具配置。不得读取账号凭据；审批必须对应当前真实请求，等待上限 2 分钟，失联／超时交回 Claude 原客户端。
 - 只修改与当前需求直接相关的文件，不清理、回滚或覆盖用户已有的未提交改动。
 
 ## 本地数据安全
@@ -23,6 +24,7 @@
 ## 验证
 
 - 会话连续性或账号归属改动后，至少运行 `Tests/ContinuityTests.swift` 对应的定向测试。
+- Claude Code 接入边界与来源见 `docs/claude-code-integration.md`；专属 Helper 位于 `Sources/ClaudePulseHelper`，隔离验证入口为 `scripts/test-claude.sh`。
 - 交付前运行项目现有完整测试脚本和 Release 构建；无法执行时明确说明未验证项。
 
 - 灵动岛空闲验收以语义正确为准：完成反馈后保留常驻额度／空闲横幅；允许窗口可见，但不得包含虚假活动任务、“思考中”卡片或运行态动效。不能再用“窗口必须消失”作为通过条件。

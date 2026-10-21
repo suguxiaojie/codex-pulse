@@ -132,8 +132,74 @@ final class MonitorStore: ObservableObject {
     @Published var displayCutoutMode: DisplayCutoutMode = .notched
 
     private let quotaService = QuotaService()
+    let claude = ClaudeCodeRuntime()
     private let sessionActivityService = SessionActivityService()
+    @Published private(set) var approvalRevision = 0
     private let nativeActivityObserver = NativeActivityObserver()
+    func islandApproval(for row: ActivitySessionSnapshot) -> IslandApprovalContent {
+        if row.provider == "Claude Code" {
+            guard let request = claude.requests.first(where: { $0.sessionID == row.sessionID }) else {
+                return .init(id: row.id + "-terminal", provider: row.provider, title: "待处理请求",
+                    summary: row.actionText, fallbackTitle: "请在终端处理")
+            }
+            var value = IslandApprovalContent(id: request.id, provider: row.provider,
+                title: request.questions.isEmpty ? (request.tool == "Bash" ? "执行命令" : "申请权限") : "需要回答",
+                summary: request.questions.isEmpty ? (request.input["command"] as? String ?? request.tool) : "",
+                command: request.tool == "Bash", deadline: request.deadline, fallbackTitle: "回终端")
+            value.questions = request.questions.map { .init(id: $0.text, title: $0.text, options: $0.options) }
+            if request.questions.isEmpty {
+                value.actions = [.init(id: "once", title: "允许一次")]
+                if !request.suggestions.isEmpty { value.actions.append(.init(id: "session", title: "本会话允许")) }
+                value.actions.append(.init(id: "deny", title: "拒绝", destructive: true))
+            }
+            value.submit = { [weak self] action, answers in
+                guard let self else { return "已交回 Claude Code 终端" }
+                guard request.questions.isEmpty || request.permitsIslandAnswers(answers) else { return "请选择有效选项" }
+                let choice: ClaudePermissionRequest.Choice
+                switch action { case "once", "answers": choice = .once; case "session": choice = .session; case "deny": choice = .deny; default: return "请在终端处理" }
+                self.claude.respond(request.id, choice: choice, answers: answers)
+                return "已发送决定，等待 Claude Code 响应"
+            }
+            value.fallback = { [weak self] in self?.claude.returnToTerminal(request.id) }
+            value.details = { [weak self] in self?.claude.showRequests(for: row.sessionID) }
+            return value
+        }
+        let snapshot = nativeActivityObserver.approvalSnapshots[row.sessionID]
+        guard let handle = snapshot?.requests.first(where: { $0.turnID == row.turnID }),
+              let wire = IslandCodexApproval(handle, context: snapshot?.interactionProjection?.requests.first(where: { $0.requestID == handle.requestID })?.contextItemData) else {
+            return .init(id: row.id + "-native", provider: "Codex", title: "待处理请求", summary: "请在终端处理",
+                fallbackTitle: "在 Codex 中处理", fallback: Self.openCodex)
+        }
+        var value = IslandApprovalContent(id: handle.identity, provider: "Codex", title: wire.title, summary: wire.summary,
+            command: handle.method == "item/commandExecution/requestApproval", message: nativeActivityObserver.submissionMessages[handle.identity],
+            fallback: Self.openCodex, details: Self.openCodex)
+        if handle.method == "item/permissions/requestApproval", wire.permissionGrant == nil {
+            value.details = nil
+            return value
+        }
+        if snapshot?.supportsUntrustedAppInput == true {
+            value.actions = wire.actions; value.questions = wire.questions
+            value.submit = { [weak self] action, answers in
+                guard let self, let data = wire.response(action, answers: answers) else { return "请求已变化，请在 Codex 中查看" }
+                return await self.nativeActivityObserver.submit(handle, result: data)
+            }
+        } else { value.summary = "请在 Codex 中处理" }
+        return value
+    }
+    private static func openCodex() {
+        let workspace = NSWorkspace.shared
+        let candidates = CodexExecutableLocator.bundledCandidatePaths.compactMap { path -> URL? in
+            guard let range = path.range(of: ".app/") else { return nil }
+            return URL(fileURLWithPath: String(path[..<range.lowerBound]) + ".app")
+        }
+        let app = workspace.urlForApplication(withBundleIdentifier: "com.openai.codex")
+            ?? candidates.first { $0.lastPathComponent == "Codex.app" && FileManager.default.fileExists(atPath: $0.path) }
+            ?? candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+        guard let app else { return }
+        let config = NSWorkspace.OpenConfiguration(); config.activates = true
+        workspace.openApplication(at: app, configuration: config)
+    }
+
     @Published private(set) var nativeActivityStatus = "本地日志监控"
     @Published private(set) var turnTokenUsages: [String: TurnTokenUsage] = [:]
     private let costService = CostService()
@@ -283,6 +349,8 @@ final class MonitorStore: ObservableObject {
     }
 
     func start() {
+        claude.onRowsChanged = { [weak self] in self?.publishActivityRows() }
+        claude.start()
         do { try AppPaths.prepareDirectories() } catch { }
         observeCodexTerminationForSidebarCleanup()
         processPendingSidebarCleanups()
@@ -2261,7 +2329,10 @@ final class MonitorStore: ObservableObject {
 
     func refreshSessionActivity(completion: (() -> Void)? = nil) {
         sessionActivityService.onChange = { [weak self] in self?.refreshSessionActivity() }
-        nativeActivityObserver.onChange = { [weak self] in self?.refreshSessionActivity() }
+        nativeActivityObserver.onChange = { [weak self] in
+            self?.approvalRevision += 1
+            self?.refreshSessionActivity()
+        }
         guard !isReadingSession else {
             pendingSessionRefresh = true
             completion?()
@@ -2315,11 +2386,10 @@ final class MonitorStore: ObservableObject {
                 projects: activeProjects, snapshots: snapshots,
                 usages: usages, now: Date(),
                 // Keep the bounded receipt through the popup plus two compact 3-second signals.
-                completionHold: ActivityIslandPreferences.load().expandedHold + 6, threadNames: threadNames
+                completionHold: ActivityIslandPreferences.load().expandedHold + 6,
+                retention: ActivityIslandSessionRetention.duration, threadNames: threadNames
             )
-            if self.activitySessions != self.activitySessionState.rows {
-                self.activitySessions = self.activitySessionState.rows
-            }
+            self.publishActivityRows()
             if let selected = self.selectedProjectID,
                !self.activeProjects.contains(where: { $0.id == selected }) {
                 self.selectedProjectID = nil
@@ -2327,6 +2397,11 @@ final class MonitorStore: ObservableObject {
             completion?()
             if catalogChanged { self.refreshCost() }
         }
+    }
+
+    private func publishActivityRows() {
+        let combined = activitySessionState.rows + claude.rows
+        if activitySessions != combined { activitySessions = combined }
     }
 
     deinit {

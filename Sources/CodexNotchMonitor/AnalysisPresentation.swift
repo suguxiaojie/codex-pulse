@@ -12,7 +12,12 @@ struct AnalysisCard: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(18)
-            .modifier(MonitorDesktopCardSurface(prominent: primary))
+            .background(MonitorDesktopTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(MonitorDesktopTheme.border.opacity(primary ? 0.70 : 0.45), lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            }
     }
 }
 
@@ -72,11 +77,10 @@ struct AnalysisPeriodPicker: View {
 struct AnalysisPeriodButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
-    @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(MonitorDesktopTheme.primaryText.opacity(enabled && hovered ? 0.035 : 0), in: Capsule())
-            .opacity(enabled ? (configuration.isPressed ? 0.82 : 1) : 0.45)
+            .background(MonitorDesktopTheme.primaryText.opacity(hovered ? 0.035 : 0), in: Capsule())
+            .opacity(configuration.isPressed ? 0.82 : 1)
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion, value: hovered)
             .animation(reduceMotion ? nil : MonitorDesktopTheme.pressMotion, value: configuration.isPressed)
@@ -86,15 +90,13 @@ struct AnalysisPeriodButtonStyle: ButtonStyle {
 struct AnalysisRowButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
-    @Environment(\.isEnabled) private var enabled
     @Environment(\.isFocused) private var focused
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(.horizontal, 8)
-            .background(MonitorDesktopTheme.primaryText.opacity(enabled ? (configuration.isPressed ? 0.075 : hovered ? 0.04 : 0) : 0), in: RoundedRectangle(cornerRadius: 8))
-            .scaleEffect(enabled && !reduceMotion && configuration.isPressed ? 0.992 : 1)
-            .opacity(enabled ? 1 : 0.45)
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(enabled && focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
+            .background(MonitorDesktopTheme.primaryText.opacity(configuration.isPressed ? 0.075 : hovered ? 0.04 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? 0.992 : 1)
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion, value: hovered)
             .animation(reduceMotion ? nil : MonitorDesktopTheme.pressMotion, value: configuration.isPressed)
@@ -232,10 +234,10 @@ struct AnalysisToolbarButtonStyle: ButtonStyle {
         configuration.label
             .font(MonitorDesktopTypography.control)
             .padding(.horizontal, 10).frame(height: 34)
-            .background(MonitorDesktopTheme.primaryText.opacity(enabled ? (configuration.isPressed ? 0.10 : hovered ? 0.065 : 0.025) : 0.025), in: RoundedRectangle(cornerRadius: 8))
-            .opacity(enabled ? 1 : 0.45)
-            .scaleEffect(enabled && configuration.isPressed && !reduceMotion ? 0.98 : 1)
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(enabled && focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
+            .background(MonitorDesktopTheme.primaryText.opacity(configuration.isPressed ? 0.10 : hovered && enabled ? 0.065 : 0.025), in: RoundedRectangle(cornerRadius: 8))
+            .opacity(enabled ? 1 : 0.35)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion, value: hovered)
             .animation(reduceMotion ? nil : MonitorDesktopTheme.pressMotion, value: configuration.isPressed)
@@ -283,14 +285,13 @@ struct MonitorQuietActionStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(MonitorDesktopTypography.control)
-            .foregroundStyle(MonitorDesktopTheme.secondaryText)
-            .opacity(enabled ? 1 : 0.45)
+            .foregroundStyle(enabled ? MonitorDesktopTheme.secondaryText : MonitorDesktopTheme.tertiaryText)
             .padding(.horizontal, 11).frame(height: 34)
             .background(MonitorDesktopTheme.primaryText.opacity(enabled ? (configuration.isPressed ? 0.08 : hovered ? 0.045 : 0) : 0),
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 14))
-            .scaleEffect(enabled && configuration.isPressed && !reduceMotion ? 0.97 : 1)
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(enabled && focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion, value: hovered)
             .animation(reduceMotion ? nil : MonitorDesktopTheme.pressMotion, value: configuration.isPressed)
@@ -337,16 +338,15 @@ struct MonitorSelectionMenu<Option: Hashable>: View {
                             Spacer(minLength: 8)
                         }
                         .font(MonitorDesktopTypography.control)
-                        .foregroundStyle(selection == option ? MonitorDesktopTheme.accent : MonitorDesktopTheme.primaryText)
+                        .foregroundStyle(MonitorDesktopTheme.primaryText)
                         .frame(height: 30)
-                        .background(selection == option ? MonitorDesktopTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(AnalysisRowButtonStyle())
                     .focused($focused, equals: option)
                     .accessibilityValue(selection == option ? "已选择" : "")
                 }
             }
-            .padding(8).frame(minWidth: 160).background(MonitorDesktopTheme.elevated)
+            .padding(8).frame(minWidth: 160).background(MonitorDesktopTheme.surface)
             .onAppear { focused = selection }
             .onExitCommand { presented = false }
             .onMoveCommand { direction in
@@ -366,10 +366,10 @@ private struct AnalysisFilterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(.horizontal, 12).frame(height: 34)
-            .background(MonitorDesktopTheme.primaryText.opacity(enabled ? (configuration.isPressed ? 0.075 : hovered ? 0.045 : 0.025) : 0.025), in: RoundedRectangle(cornerRadius: 8))
-            .opacity(enabled ? 1 : 0.45)
+            .background(MonitorDesktopTheme.primaryText.opacity(configuration.isPressed ? 0.075 : hovered ? 0.045 : 0.025), in: RoundedRectangle(cornerRadius: 8))
+            .opacity(enabled ? 1 : 0.4)
             .contentShape(RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(enabled && focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : MonitorDesktopTheme.hoverMotion, value: hovered)
     }

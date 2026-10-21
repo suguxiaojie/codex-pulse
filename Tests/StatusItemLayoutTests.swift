@@ -9,9 +9,15 @@ enum StatusItemLayoutTests {
         func measure(_ text: String) -> Double {
             Double((text as NSString).size(withAttributes: [.font: font]).width)
         }
-        let long = "执行中 · 一个非常长的项目名称 · ＋12个项目 · 本轮 999.9M Token · 余 100%"
-        let compact = "执行 ＋12 · 999.9M Token · 余 100%"
-        let minimal = "999.9M Token ＋12"
+        for style in CountStyle.allCases {
+            let title = "本轮 " + CountFormatter.string(5_410_000, style: style) + " Token"
+            let width = ceil(measure(title)) + 36
+            check(StatusItemLayout.resolve(candidates: [title], budget: width, measure: measure).title == title)
+            check(StatusItemLayout.resolve(candidates: [title], budget: width - 1, measure: measure).title.isEmpty)
+        }
+        let long = "执行中 · 一个非常长的项目名称 · ＋12个项目 · 本轮 10亿 Token · 余 100%"
+        let compact = "执行 ＋12 · 10亿 Token · 余 100%"
+        let minimal = "10亿 Token ＋12"
         let budget = StatusItemLayout.budget(menuRegionWidth: 772)
         check(budget == 193)
         let result = StatusItemLayout.resolve(candidates: [long, compact, minimal], budget: budget, measure: measure)
@@ -31,20 +37,20 @@ enum StatusItemLayoutTests {
         check(StatusItemLayout.resolve(candidates: [long], budget: 240, measure: measure).title.isEmpty)
         // Content transitions always produce a finite fixed width. No dependence
         // on a previous button frame or intermediate intrinsicContentSize.
-        let small = StatusItemLayout.resolve(candidates: ["1.2K Token"], budget: budget, measure: measure)
+        let small = StatusItemLayout.resolve(candidates: ["1,200 Token"], budget: budget, measure: measure)
         let restored = StatusItemLayout.resolve(candidates: [long, compact, minimal], budget: budget, measure: measure)
         check(small.width < restored.width)
         check(restored == result)
         let priority = StatusItemLayout.taskTitles(status: "待确认", project: "项目A", projectCount: 3,
-                                                   token: "本轮 1.2M", quota: "17%")
-        check(priority[0] == "17% · 待确认 · 项目A ＋2 · 本轮 1.2M")
+                                                   token: "本轮 120万", quota: "17%")
+        check(priority[0] == "17% · 待确认 · 项目A ＋2 · 本轮 120万")
         check(priority[1] == "17% · 待确认 · 项目A ＋2")
-        check(priority[2] == "17% · 待确认 · 本轮 1.2M")
+        check(priority[2] == "17% · 待确认 · 本轮 120万")
         check(priority[3] == "17% · 待确认 ＋2")
         check(priority.allSatisfy { $0.hasPrefix("17% · 待确认") })
         let single = StatusItemLayout.taskTitles(status: "执行", project: "项目A", projectCount: 1,
-                                                 token: "本轮 1.2M", quota: "17%")
-        check(single[1] == "17% · 执行 · 本轮 1.2M")
+                                                 token: "本轮 120万", quota: "17%")
+        check(single[1] == "17% · 执行 · 本轮 120万")
         check(single[2] == "17% · 执行 · 项目A")
         let unknown = StatusItemLayout.taskTitles(status: "待确认", project: "项目A", projectCount: 2,
                                                   token: nil, quota: "17%")
@@ -53,7 +59,7 @@ enum StatusItemLayoutTests {
             let chosen = StatusItemLayout.resolve(candidates: priority, budget: budget, measure: measure)
             check(chosen.title.isEmpty || chosen.title.contains("待确认"))
         }
-        let pages = StatusItemRotation.fittingPages(["执行 · 项目A", "执行 · 本轮 1.2M", "执行 · 余 17%"], budget: 193, measure: measure)
+        let pages = StatusItemRotation.fittingPages(["执行 · 项目A", "执行 · 本轮 120万", "执行 · 余 17%"], budget: 193, measure: measure)
         check(pages.count == 3)
         var rotation = StatusItemRotation()
         check(rotation.configure(identity: "session/turn", pages: pages))
@@ -63,7 +69,7 @@ enum StatusItemLayoutTests {
         check(rotation.advance(hovered: false))
         check(rotation.title == pages[1])
         var updated = pages
-        updated[1] = "执行 · 本轮 1.3M"
+        updated[1] = "执行 · 本轮 130万"
         check(!rotation.configure(identity: "session/turn", pages: updated))
         check(rotation.title == updated[1])
         let workingPages = updated.map { $0.replacingOccurrences(of: "执行", with: "思考") }
@@ -125,10 +131,10 @@ enum StatusItemLayoutTests {
         check(!capacity.observe(width: 32, onMenuBar: true, occluded: true))
         check(capacity.constrain(193, context: "automatic/screen") == 193)
         let visualQuota = StatusItemLayout.taskTitles(status: "思考", project: "项目A", projectCount: 1,
-                                                       token: "本轮 6.5M", quota: "14%")
+                                                       token: "本轮 650万", quota: "14%")
         check(visualQuota == [
-            "14% · 思考 · 项目A · 本轮 6.5M",
-            "14% · 思考 · 本轮 6.5M",
+            "14% · 思考 · 项目A · 本轮 650万",
+            "14% · 思考 · 本轮 650万",
             "14% · 思考 · 项目A",
             "14% · 思考"
         ])

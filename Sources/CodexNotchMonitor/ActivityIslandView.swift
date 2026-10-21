@@ -14,8 +14,30 @@ struct ActivityIslandSnapshot: Equatable {
 
 }
 
+enum IslandUsageProvider: String, CaseIterable { case codex = "Codex", claude = "Claude Code" }
+
 @MainActor
 final class ActivityIslandViewModel: ObservableObject {
+    let mascotContext = IslandMascotContext()
+    var approvalContent: ((ActivitySessionSnapshot) -> IslandApprovalContent?)?
+    private(set) var approvalMeasurement: IslandApprovalMeasurement?
+    var onApprovalMeasurementChange: (() -> Void)?
+    var approvalRow: ActivitySessionSnapshot? {
+        sessions.first { $0.id == (focusedSessionID ?? snapshot?.sessionID ?? sessions.first?.id) && $0.phase == .waitingApproval }
+    }
+    func recordApprovalMeasurement(_ measured: IslandApprovalMeasurement) {
+        guard let row = approvalRow, let content = approvalContent?(row), measured.sessionID == row.id,
+              measured.identity == content.guardIdentity + (privacyMode || row.isPrivate ? "-private" : ""),
+              approvalMeasurement != measured else { return }
+        approvalMeasurement = measured
+        onApprovalMeasurementChange?()
+    }
+    func approvalHeight(width: CGFloat) -> CGFloat {
+        guard let row = approvalRow, let content = approvalContent?(row), let measured = approvalMeasurement,
+              measured.sessionID == row.id, abs(measured.width - width) < 1,
+              measured.identity == content.guardIdentity + (privacyMode || row.isPrivate ? "-private" : "") else { return 0 }
+        return measured.height + ActivityIslandListLayout.rowSpacing
+    }
     @Published var snapshot: ActivityIslandSnapshot?
     @Published var sessions: [ActivitySessionSnapshot] = []
     @Published var presentation: ActivityIslandPresentation = .hidden
@@ -28,6 +50,21 @@ final class ActivityIslandViewModel: ObservableObject {
     @Published var floatingUsageEnabled = true
     @Published var glassAppearance: ActivityIslandGlassAppearance = .dark
     @Published var quotaState: QuotaState = .loading
+    @Published private(set) var usageProvider: IslandUsageProvider = .codex
+    @Published private(set) var claudeEnabled = false
+    @Published var claudeStatusLineEnabled = false
+    @Published var claudeUsage: ClaudeCodeUsageSummary?
+    @Published var claudeLimits: ClaudeCodeRateLimits?
+    func selectUsageProvider(_ provider: IslandUsageProvider) {
+        guard !resetBusy, !resetConfirmationPresented, provider != .claude || claudeEnabled else { return }
+        usageProvider = provider
+    }
+    func updateClaudeEnabled(_ enabled: Bool) {
+        claudeEnabled = enabled
+        if !enabled {
+            usageProvider = .codex; claudeUsage = nil; claudeLimits = nil
+        }
+    }
     @Published var showsUsagePage = false
     var usagePageHeight: CGFloat = 580
     @Published var usageCost: CostSnapshot = .empty
@@ -35,6 +72,14 @@ final class ActivityIslandViewModel: ObservableObject {
     @Published var resetCredits: QuotaResetCreditSummary?
     var showsFloatingUsage: Bool { floatingUsageEnabled && !privacyMode && !showsUsagePage }
     @Published var focusedSessionID: String?
+    /// Timer-only focus update: receipt, celebration and lifecycle signals are untouched.
+    func handoffFocus(now: Date) -> ActivitySessionSnapshot? {
+        guard let focus = ActivitySessionSnapshot.autoFocus(rows: sessions, previous: sessions,
+            currentFocusID: focusedSessionID, manualFocusID: nil, now: now),
+              focus.id != focusedSessionID else { return nil }
+        focusedSessionID = focus.id
+        return focus
+    }
     @Published var isPinned = false
     @Published var metrics = ActivityIslandPanelMetrics(rowCount: 1,
                                                        availableSize: CGSize(width: 1000, height: 800))
@@ -73,11 +118,18 @@ final class ActivityIslandViewModel: ObservableObject {
     // never a fabricated activity row or a hidden primary interface.
     var showsCompactQuota: Bool {
         if sessions.isEmpty { return true }
-        guard sessions.allSatisfy({ $0.phase == .completed }) else { return false }
+        guard sessions.allSatisfy({ $0.phase == .completed || $0.isRetainedReceipt }) else { return false }
         guard let receipt = compactReceipt else { return true }
-        return !sessions.contains { $0.id == receipt.id && $0.turnID == receipt.turnID && $0.phase == .completed }
+        return !sessions.contains { $0.id == receipt.id && $0.turnID == receipt.turnID && $0.phase == .completed && !$0.isRetainedReceipt }
     }
-    var idleSummary: String { sessions.isEmpty ? "暂无运行任务" : "全部任务已完成" }
+    var idleSummary: String {
+        sessions.isEmpty ? "暂无运行任务" : sessions.allSatisfy { $0.phase == .completed }
+            ? "全部任务已完成" : "暂无运行任务"
+    }
+    var compactQuotaAccessibilitySummary: String {
+        idleSummary + "，剩余额度 " + compactQuotaPercent
+            + (sessions.isEmpty ? "" : "，\(sessions.count) 会话")
+    }
     var compactQuotaPercent: String {
         guard !privacyMode, IslandFloatingQuotaPeriods.current(quotaState) else { return "—" }
         let windows = IslandFloatingQuotaPeriods.windows(quotaState)
@@ -110,7 +162,7 @@ struct ActivityIslandView: View {
     var body: some View {
         Group {
             if compact && model.showsCompactQuota {
-                ActivityIslandCompactQuotaContent(model: model)
+                IslandMascotCompactQuotaContent(model: model).id("compact-quota")
             } else if compact, let row = ActivitySessionSnapshot.compactFocus(rows: model.sessions,
                 selectedID: model.focusedSessionID, receipt: model.compactReceipt) {
                 ActivityIslandCompactContent(row: model.privacyMode ? row.hidingDetails() : row,
@@ -120,7 +172,9 @@ struct ActivityIslandView: View {
                     reduceMotion: motionIsReduced,
                     onExpand: model.onExpand,
                     replyCueVisible: model.playbackVisible && model.presentation == .compact,
-                    claimReplyCue: { model.claimReplyCue(for: $0) })
+                    claimReplyCue: { model.claimReplyCue(for: $0) },
+                    hasInlineApproval: model.approvalContent?(row)?.hasInlineControls == true)
+                    .id("compact-task")
             } else if !compact && model.showsUsagePage {
                 ActivityIslandUsageDashboard(model: model)
                     .environment(\.islandLiquidGlassEnabled, model.material == .liquidGlass)
@@ -134,15 +188,18 @@ struct ActivityIslandView: View {
                     reduceMotion: motionIsReduced, pinned: model.isPinned,
                     onPin: model.onPin, onSelect: model.onSelect, onSettings: model.onOpenSettings, onRefresh: model.onRefresh,
                     onOpenUsage: model.onOpenUsage, quotaTitle: model.compactQuotaPercent,
-                    claimReplyCue: { model.claimReplyCue(for: $0) })
+                    claimReplyCue: { model.claimReplyCue(for: $0) }, approvalContent: model.approvalContent, onApprovalMeasured: { model.recordApprovalMeasurement($0) })
                     .environment(\.islandLiquidGlassEnabled, model.material == .liquidGlass)
                     .transition(.opacity)
             }
         }
+        .environment(\.islandMascotContext, model.mascotContext)
+        .environment(\.islandMascotSerial, model.completionBurstSerial)
         .environment(\.colorScheme, .dark)
         .modifier(IslandGlassAppearanceContext(appearance: model.glassAppearance, material: model.material))
         .animation(motionIsReduced ? nil : .easeOut(duration: 0.22), value: model.showsUsagePage)
         .environment(\.islandGlassActive, model.presentation == (compact ? .compact : .expanded))
+        .environment(\.islandHardwareBlack, true)
     }
     private var motionIsReduced: Bool { reduceMotion || model.reduceMotionOverride }
 }
@@ -176,8 +233,9 @@ struct IslandCompactContentLayout: Layout {
 }
 
 // Presentation only: terminal evidence, focus ordering and lifecycle stay in their owners.
-private struct IslandSessionPresentation {
+struct IslandSessionPresentation {
     let row: ActivitySessionSnapshot
+    var hasInlineApproval = false
     var isResult: Bool { !row.phase.isActive }
     private var status: (title: String, symbol: String, color: Color) {
         if row.endReason == .cancelled {
@@ -204,17 +262,29 @@ private struct IslandSessionPresentation {
     }
     var runningDetail: String {
         let action = row.actionText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let generic = action.isEmpty || action == row.phase.title || action == row.statusTitle
         if row.phase == .waitingApproval {
-            if row.waitReason == .userInput { return "请在 Codex 中选择或回复" }
-            return generic ? "请在 Codex 中处理批准请求" : "请在 Codex 中处理 · " + action
+            if hasInlineApproval { return "在下方卡片中处理" }
+            return row.provider == "Claude Code" ? "请在 Claude Code 中确认" : "请在 Codex 中处理"
         }
-        if !generic { return action }
+        if !action.isEmpty && action != row.phase.title && action != row.statusTitle { return action }
         return row.projectName.isEmpty ? "Codex 任务" : "项目 · " + row.projectName
     }
+    var currentStepDetail: String {
+        guard let step = row.recentSteps.last else { return runningDetail }
+        let action = row.phase == .waitingApproval ? runningDetail : row.actionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return action.isEmpty || action == step.title || action == row.phase.title || action == row.statusTitle
+            ? step.title : step.title + " · " + action
+    }
     var compactTitle: String {
+        if isResult {
+            if row.isPrivate { return "会话详情已隐藏" }
+            let taskTitle = row.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return summaryGroup + " · " + (taskTitle.isEmpty ? row.provider + " 任务" : taskTitle)
+        }
+        if !row.isPrivate && !isResult && !row.recentSteps.isEmpty { return currentStepDetail }
+
         if row.phase == .waitingApproval && row.waitReason == .userInput {
-            return title + " · " + (row.isPrivate ? "会话详情已隐藏" : row.title)
+            return title + " · " + (row.isPrivate ? "会话详情已隐藏" : row.title + " · " + runningDetail)
         }
         return (isResult ? summaryGroup : title) + " · " + (row.isPrivate ? "会话详情已隐藏" : isResult ? row.title : runningDetail)
     }
@@ -234,7 +304,7 @@ private struct IslandSessionPresentation {
     }
     var accessibilitySummary: String {
         if row.isPrivate { return title + "，会话详情已隐藏" }
-        let detail = isResult ? "耗时 " + duration() + "，" + turnTokens : runningDetail + "，已运行 " + duration()
+        let detail = isResult ? "耗时 " + duration() + "，" + turnTokens : currentStepDetail + "，已运行 " + duration() + "，" + turnTokens
         return [row.title, title, detail, modelTitle, cumulativeTokens].joined(separator: "，")
     }
     private var summaryGroup: String {
@@ -286,7 +356,7 @@ private struct IslandSessionSummaryView: View {
 }
 
 /// Replay history belongs to the model, while this modifier owns only the brief cue.
-private struct IslandReplyCue: ViewModifier {
+struct IslandReplyCue: ViewModifier {
     let row: ActivitySessionSnapshot
     let visible: Bool
     let reduceMotion: Bool
@@ -340,29 +410,46 @@ struct ActivityIslandCompactContent: View {
     var replyCueVisible = false
     var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     @State private var replyCueActive = false
-    private var presentation: IslandSessionPresentation { .init(row: row) }
+    var hasInlineApproval = false
+    private var presentation: IslandSessionPresentation { .init(row: row, hasInlineApproval: hasInlineApproval) }
     private var symbol: some View {
-        Group {
-            if !presentation.isResult && animated && !reduceMotion && (row.phase == .working || row.phase == .usingTool) {
-                RippleGlowOrb(phase: row.phase, animated: true)
-            } else {
-                Image(systemName: presentation.symbol).font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(presentation.color)
-            }
-        }.frame(width: 18, height: 18)
+        IslandSessionMascot(row: row, size: 20, animated: animated, reduceMotion: reduceMotion,
+            replyCueActive: replyCueActive)
+            .frame(width: 20, height: 20)
             .scaleEffect(replyCueActive ? 1.12 : 1)
             .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: replyCueActive)
             .frame(width: 30).accessibilityHidden(true)
     }
-    private var taskText: some View {
-        IslandScrollingText(text: presentation.compactTitle, font: .systemFont(ofSize: 12, weight: .semibold),
-                            visible: animated && !presentation.isResult && row.waitReason != .userInput, reduceMotion: reduceMotion)
+    var taskText: some View {
+        Group {
+            if presentation.isResult {
+                Text(presentation.compactTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(FloatingSurfaceTheme.primary())
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(height: 15, alignment: .leading)
+            } else {
+                IslandScrollingText(text: presentation.compactTitle, font: .systemFont(ofSize: 12, weight: .semibold),
+                                    visible: animated && row.waitReason != .userInput, reduceMotion: reduceMotion)
+            }
+        }
     }
     private var statistics: some View {
         let side = max(0, (width - 40 - hardwareGap - (hardwareGap > 0 ? 16 : 0)) / 2)
-        return IslandSessionSummaryView(rows: rows)
-            .font(FloatingSurfaceTypography.action).foregroundStyle(FloatingSurfaceTheme.secondary())
-            .frame(width: min(220, side), alignment: .trailing)
+        let others = rows.filter { $0.id != row.id }
+        return HStack(spacing: 4) {
+            if others.isEmpty {
+                Text(presentation.duration()).monospacedDigit()
+                Text(presentation.turnTokens).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+            } else {
+                ForEach(Array(others.prefix(6))) { other in
+                    Capsule().fill(IslandSessionPresentation(row: other).color).frame(width: 3, height: 14)
+                }
+                if others.count > 6 { Text("+\(others.count - 6)") }
+            }
+        }.font(FloatingSurfaceTypography.metadata).foregroundStyle(FloatingSurfaceTheme.secondary())
+            .frame(maxWidth: min(220, side), alignment: .trailing)
+
     }
     var body: some View {
         Button { onExpand?() } label: {
@@ -401,7 +488,8 @@ struct ActivityIslandTaskCard: View {
     var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     @State private var hovered = false
     @State private var replyCueActive = false
-    private var presentation: IslandSessionPresentation { .init(row: row) }
+    var hasInlineApproval = false
+    private var presentation: IslandSessionPresentation { .init(row: row, hasInlineApproval: hasInlineApproval) }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -450,7 +538,8 @@ struct ActivityIslandTaskCard: View {
         }
         .islandGlass(RoundedRectangle(cornerRadius: 16, style: .continuous),
             tint: row.phase == .completed ? Color(red: 0.025, green: 0.055, blue: 0.035).opacity(hovered ? 0.32 : 0.42) : .black.opacity(hovered ? 0.32 : 0.42),
-            solidTint: Color(white: 0.055))
+            solidTint: Color(white: 0.055),
+            hardwareTint: row.phase == .completed ? IslandHardwareBlack.completedSurface : IslandHardwareBlack.surface)
         .onHover { hovered = $0 }
         .help(row.isPrivate ? presentation.accessibilitySummary : "\(row.projectName) · \(row.title)\n\(presentation.accessibilitySummary)\n\(row.actionText)")
         .accessibilityElement(children: .ignore)
@@ -476,7 +565,7 @@ struct ActivityIslandTaskCard: View {
     }
     private var metadataLine: some View {
         HStack(spacing: 8) {
-            Text(presentation.modelTitle).lineLimit(1).truncationMode(.tail)
+            Text((row.provider == "Codex" ? "" : "Claude · ") + presentation.modelTitle).lineLimit(1).truncationMode(.tail)
                 .help(presentation.modelTitle)
             Spacer(minLength: 4)
             if !presentation.isResult {
@@ -514,6 +603,8 @@ struct ActivityIslandExpandedList: View {
     var onOpenUsage: (() -> Void)?
     var quotaTitle = "—"
     var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
+    var approvalContent: ((ActivitySessionSnapshot) -> IslandApprovalContent?)?
+    var onApprovalMeasured: ((IslandApprovalMeasurement) -> Void)?
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -539,16 +630,31 @@ struct ActivityIslandExpandedList: View {
                 .frame(height: ActivityIslandPanelMetrics.headerHeight)
             if rows.isEmpty {
                 Text("暂无运行任务").font(FloatingSurfaceTypography.body).foregroundStyle(FloatingSurfaceTheme.secondary())
-                    .frame(width: width - 56, height: listHeight)
+                    .frame(width: width - 56, height: listHeight).clipped()
             } else {
-                ActivityIslandTaskScroll(rows: rows, playback: animated,
-                    rowHeight: rowHeight, onInteraction: onInteraction, effect: effect,
-                    focusedID: focusedID ?? rows.first?.id, reduceMotion: reduceMotion, onSelect: onSelect,
-                    claimReplyCue: claimReplyCue)
-                    .frame(width: width - 56, height: listHeight)
+                ScrollView(.vertical, showsIndicators: false) {
+                    if let focus = rows.first(where: { $0.id == focusedID })
+                        ?? ActivitySessionSnapshot.compactFocus(rows: rows, selectedID: nil, receipt: nil) {
+                        VStack(spacing: ActivityIslandListLayout.rowSpacing) {
+                            ActivityIslandFocusCard(row: focus, animated: animated,
+                                rowHeight: ActivityIslandPanelMetrics.focusHeight(for: focus), effect: effect,
+                                reduceMotion: reduceMotion, claimReplyCue: claimReplyCue,
+                                hasInlineApproval: approvalContent?(focus)?.hasInlineControls == true)
+                            if focus.phase == .waitingApproval, let approval = approvalContent?(focus) {
+                                let identity = approval.guardIdentity + (focus.isPrivate ? "-private" : "")
+                                ActivityIslandApprovalCard(content: approval, privacy: focus.isPrivate, onHeightChange: { height in
+                                    onApprovalMeasured?(.init(sessionID: focus.id, identity: identity, width: width - 56, height: height))
+                                }).id(identity)
+                            }
+                            if rows.count > 1 {
+                                ActivityIslandSessionRail(rows: rows.filter { $0.id != focus.id }, onSelect: onSelect)
+                            }
+                        }.padding(.vertical, ActivityIslandListLayout.verticalInset)
+                    }
+                }.frame(width: width - 56, height: listHeight).clipped()
+                    .simultaneousGesture(DragGesture().onChanged { _ in onInteraction?() })
             }
             HStack(spacing: 8) {
-                Text("\(rows.count) 个会话")
                 Spacer(minLength: 0)
                 IslandSessionSummaryView(rows: rows)
                 Button { onRefresh?() } label: { chromeIcon("arrow.clockwise") }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true))

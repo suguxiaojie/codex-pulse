@@ -1,5 +1,5 @@
 // Activity Island child page, adapted from QuotaView d16307f (MIT).
-// Settings follow the app desktop theme; the QuotaView preview renderer is retained.
+// Settings follow the app desktop theme; previews reuse the production focus stage.
 import SwiftUI
 
 struct QuotaStyleSettingsView: View {
@@ -28,22 +28,23 @@ struct QuotaStyleSettingsView: View {
         Binding(get: { Int(ActivityIslandPreferences.normalizedDuration(expandedHold)) }, set: { expandedHold = Double($0) })
     }
     var body: some View {
-        SettingsWorkbench(isAdjusting: isAdjustingSlider, fullWidthPreview: true) {
-            previewSection
-        } controls: {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 22) {
-                    VStack(spacing: 22) { appearanceGroup; effectsGroup }
-                        .frame(maxWidth: .infinity)
-                    VStack(spacing: 22) { contentGroup; automaticGroup }
-                        .frame(maxWidth: .infinity)
-                }.frame(minWidth: 670)
-                VStack(spacing: 22) { appearanceGroup; contentGroup; effectsGroup; automaticGroup }
+        GeometryReader { layout in
+            SettingsWorkbench(isAdjusting: isAdjustingSlider, fullWidthPreview: true) {
+                previewSection
+            } controls: {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 22) {
+                        VStack(spacing: 26) { appearanceGroup; effectsGroup }
+                            .frame(maxWidth: .infinity)
+                        VStack(spacing: 26) { contentGroup; automaticGroup }
+                            .frame(maxWidth: .infinity)
+                    }.frame(width: max(670, layout.size.width - 8)).frame(minWidth: 670)
+                    VStack(spacing: 26) { appearanceGroup; contentGroup; effectsGroup; automaticGroup }
+                }
             }
         }
         .font(MonitorDesktopTypography.body).foregroundStyle(PanelSettingsTheme.primary)
         .tint(PanelSettingsTheme.clay).accentColor(PanelSettingsTheme.clay)
-        .background(PanelSettingsTheme.canvas, in: RoundedRectangle(cornerRadius: 16))
         .onAppear { previewVisible = true; geometry = .current() }
         .onDisappear { previewVisible = false; isAdjustingSlider = false }
         .onChange(of: material) { _ in signal() }.onChange(of: glassDegree) { _ in signal() }
@@ -55,43 +56,24 @@ struct QuotaStyleSettingsView: View {
     }
 
     private var previewSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("完整预览", systemImage: "rectangle.topthird.inset.filled")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Text("示例数据").font(.system(size: 11)).foregroundStyle(PanelSettingsTheme.secondary)
-            }
-            ProportionalSettingsPreview(width: 620, height: 240) {
+        SettingsStage(title: "完整预览", status: "示例数据", caption: "外观设置即时联动", accessory: { enlargeButton }) {
+            ProportionalSettingsPreview(width: 620, height: 340) {
                 islandPreview(animated: previewVisible && !showsLargePreview)
             }
-            .frame(maxWidth: 620).frame(maxWidth: .infinity)
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    Text("完整场景 · 外观设置即时联动").font(.system(size: 11)).foregroundStyle(PanelSettingsTheme.secondary)
-                    Spacer()
-                    enlargeButton
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("完整场景 · 外观设置即时联动").font(.system(size: 11)).foregroundStyle(PanelSettingsTheme.secondary)
-                    enlargeButton
-                }
-            }
+            .frame(maxWidth: 620).frame(maxWidth: .infinity).padding(.vertical, 6)
         }
-        .padding(16)
-        .background(PanelSettingsTheme.surface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(PanelSettingsTheme.border.opacity(0.55), lineWidth: 0.5))
+        .modifier(MonitorDesktopReveal(delay: 0))
         .sheet(isPresented: $showsLargePreview) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text("灵动岛完整预览").font(.system(size: 15, weight: .semibold))
+                    Text("灵动岛完整预览").font(MonitorDesktopTypography.cardTitle)
                     Spacer()
                     Button("完成") { showsLargePreview = false }
                         .buttonStyle(PanelSettingsActionStyle()).keyboardShortcut(.cancelAction)
                 }
-                islandPreview(animated: previewVisible).frame(width: 620, height: 240)
+                islandPreview(animated: previewVisible).frame(width: 620, height: 340)
                 Text("示例数据 · 展示当前外观设置，实际任务与额度以本机数据为准。")
-                    .font(.system(size: 11)).foregroundStyle(PanelSettingsTheme.secondary)
+                    .font(MonitorDesktopTypography.rowDetail).foregroundStyle(PanelSettingsTheme.secondary)
             }
             .padding(24).frame(width: 668)
             .foregroundStyle(PanelSettingsTheme.primary).background(PanelSettingsTheme.canvas)
@@ -105,48 +87,46 @@ struct QuotaStyleSettingsView: View {
     }
     private var appearanceGroup: some View {
         PanelSettingsGroup(title: "外观与布局", symbol: "slider.horizontal.3") {
-            VStack(alignment: .leading, spacing: 10) {
-                rowLabel("材质", detail: "")
+            SettingsRow(symbol: "square.stack.3d.up", title: "岛外胶囊材质", detail: "仅影响悬浮额度胶囊；岛体始终为纯黑。") {
                 PanelSettingsSegments(options: ActivityIslandMaterial.allCases.map(\.title), selection: Binding(
                     get: { (ActivityIslandMaterial(rawValue: material) ?? .liquidGlass).title },
                     set: { title in
                         if let option = ActivityIslandMaterial.allCases.first(where: { $0.title == title }) { material = option.rawValue }
                     }
-                ), width: 220, title: "灵动岛材质")
-            }.padding(.vertical, 14)
+                ), width: 220, title: "岛外胶囊材质")
+            }
             if material == ActivityIslandMaterial.liquidGlass.rawValue {
-                PanelSettingsTheme.divider
-                VStack(alignment: .leading, spacing: 10) {
-                    rowLabel("玻璃外观", detail: "影响底栏与悬浮胶囊，自动跟随系统外观。")
+                SettingsRowDivider()
+                SettingsRow(symbol: "circle.lefthalf.filled", title: "岛外胶囊外观", detail: "仅影响悬浮额度胶囊；自动模式跟随系统外观。") {
                     PanelSettingsSegments(options: ActivityIslandGlassAppearance.allCases.map(\.title), selection: Binding(
                         get: { (ActivityIslandGlassAppearance(rawValue: glassAppearance) ?? .dark).title },
                         set: { title in
                             if let option = ActivityIslandGlassAppearance.allCases.first(where: { $0.title == title }) { glassAppearance = option.rawValue }
                         }
-                    ), width: 220, title: "玻璃外观")
-                }.padding(.vertical, 14)
-                PanelSettingsTheme.divider
-                IslandSettingsSliderRow(title: "黑色遮罩比例", detail: "数值越高，黑色遮罩区域越大。", value: Binding(
-                    get: { 1 - glassDegree }, set: { glassDegree = 1 - $0 }
-                ), range: 0.2...0.8, step: 0.01, display: "\(Int(((1 - glassDegree) * 100).rounded()))%",
-                    lowerLabel: "遮罩更少", upperLabel: "遮罩更多", onEditingChanged: { isAdjustingSlider = $0 })
+                    ), width: 220, title: "岛外胶囊外观")
+                }
             }
-            PanelSettingsTheme.divider
+            SettingsRowDivider()
+            IslandSettingsSliderRow(title: "边缘光强度", detail: "岛体为纯黑；边缘光颜色跟随任务状态", value: Binding(
+                get: { IslandHardwareBlack.sliderValue(glassDegree) }, set: { glassDegree = IslandHardwareBlack.sliderValue($0) }
+            ), range: 0.2...0.8, step: 0.01, display: "\(Int((IslandHardwareBlack.sliderValue(glassDegree) * 100).rounded()))%",
+                lowerLabel: "更暗", upperLabel: "更亮", onEditingChanged: { isAdjustingSlider = $0 }, symbol: "circle.dotted")
+            SettingsRowDivider()
             IslandSettingsSliderRow(title: "展开宽度", detail: "刘海两侧保留安全空间。", value: widthBinding,
                       range: geometry.settingsRange, step: 1, display: "\(Int(widthBinding.wrappedValue)) pt",
-                      lowerLabel: "更窄", upperLabel: "更宽", onEditingChanged: { isAdjustingSlider = $0 })
+                      lowerLabel: "更窄", upperLabel: "更宽", onEditingChanged: { isAdjustingSlider = $0 }, symbol: "arrow.left.and.right")
             if #unavailable(macOS 26.0) {
-                Text("原生液态玻璃需要 macOS 26 或更新版本；当前系统使用半透明材质。")
-                    .font(.system(size: 11)).foregroundStyle(PanelSettingsTheme.secondary).padding(.bottom, 14)
+                Label("岛外悬浮胶囊的液态玻璃需要 macOS 26 或更新版本；当前系统使用半透明材质。", systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 11)).foregroundStyle(MonitorDesktopTheme.caution).padding(.leading, 40).padding(.bottom, 14)
             }
-        }
+        }.modifier(MonitorDesktopReveal(delay: 0.04))
     }
     private var contentGroup: some View {
         PanelSettingsGroup(title: "显示内容", symbol: "rectangle.on.rectangle") {
-            toggle("悬浮用量胶囊", detail: "显示剩余额度和重置倒计时。", value: $floatingUsageEnabled)
-            PanelSettingsTheme.divider
-            toggle("隐私模式", detail: "隐藏任务内容、模型与账户数据。", value: $privacyMode)
-        }
+            toggle("悬浮用量胶囊", symbol: "capsule.portrait", detail: "显示剩余额度和重置倒计时。", value: $floatingUsageEnabled)
+            SettingsRowDivider()
+            toggle("隐私模式", symbol: "eye.slash", detail: "隐藏任务内容、模型与账户数据。", value: $privacyMode)
+        }.modifier(MonitorDesktopReveal(delay: 0.08))
     }
     private var effectsGroup: some View {
         PanelSettingsGroup(title: "任务特效", symbol: "sparkles") {
@@ -157,21 +137,21 @@ struct QuotaStyleSettingsView: View {
                         .accessibilityLabel(option.title).accessibilityValue(effect == option.rawValue ? "已选择" : "未选择")
                         .accessibilityAddTraits(effect == option.rawValue ? .isSelected : [])
                 }
-            }.padding(.vertical, 16)
-        }
+            }.padding(.vertical, 14)
+        }.modifier(MonitorDesktopReveal(delay: 0.12))
     }
     private var automaticGroup: some View {
         PanelSettingsGroup(title: "自动展开", symbol: "arrow.up.left.and.arrow.down.right") {
-            toggle("自动弹出", detail: "新任务、完成或待确认时展开。", value: $automaticPopup)
-            PanelSettingsTheme.divider
-            settingRow("停留时间", detail: "待确认或固定时保持展开。") {
+            toggle("自动弹出", symbol: "bolt", detail: "新任务、完成或待确认时展开。", value: $automaticPopup)
+            SettingsRowDivider()
+            SettingsRow(symbol: "timer", title: "停留时间", detail: "待确认或固定时保持展开。") {
                 Picker("停留时间", selection: durationBinding) {
                     ForEach(1...10, id: \.self) { Text("\($0) 秒").tag($0) }
                 }.labelsHidden().pickerStyle(.menu).frame(width: 100)
                     .modifier(MonitorMenuTrigger(minimumHeight: 30, horizontalPadding: 8))
                     .disabled(!automaticPopup)
             }
-        }
+        }.modifier(MonitorDesktopReveal(delay: 0.12))
     }
     private func islandPreview(animated: Bool) -> some View {
         ActivityIslandDesktopPreview(material: ActivityIslandMaterial(rawValue: material) ?? .liquidGlass,
@@ -183,97 +163,11 @@ struct QuotaStyleSettingsView: View {
             glassAppearance: ActivityIslandGlassAppearance(rawValue: glassAppearance) ?? .dark)
     }
     private func signal() { ActivityIslandPreferenceSignal.post() }
-    private func rowLabel(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 13, weight: .medium))
-            if !detail.isEmpty {
-                Text(detail).font(.system(size: 11)).foregroundStyle(PanelSettingsTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-    private func settingRow<Control: View>(_ title: String, detail: String, @ViewBuilder control: () -> Control) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                rowLabel(title, detail: detail).frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
-                control().fixedSize(horizontal: true, vertical: false)
-            }
-            VStack(alignment: .leading, spacing: 10) { rowLabel(title, detail: detail); control() }
-        }.padding(.vertical, 14).frame(minHeight: 62)
-    }
-    private func toggle(_ title: String, detail: String, value: Binding<Bool>) -> some View {
-        settingRow(title, detail: detail) {
+    private func toggle(_ title: String, symbol: String, detail: String, value: Binding<Bool>) -> some View {
+        SettingsRow(symbol: symbol, title: title, detail: detail) {
             Toggle(title, isOn: value).labelsHidden()
                 .toggleStyle(PanelSettingsToggleStyle(onTitle: "开启", offTitle: "关闭"))
                 .accessibilityLabel(title)
         }
-    }
-}
-
-struct ActivityIslandDesktopPreview: View {
-    let material: ActivityIslandMaterial
-    let degree: Double
-    let effect: ActivityIslandProgressEffect
-    let expandedWidth: Double
-    var maximumExpandedWidth: CGFloat = 680
-    let animated: Bool
-    let reduceMotion: Bool
-    var privacyMode = false
-    var floatingUsageEnabled = true
-    var glassAppearance: ActivityIslandGlassAppearance = .dark
-    private var sample: ActivitySessionSnapshot {
-        ActivitySessionSnapshot(sessionID: "preview", turnID: "preview", projectID: "preview", projectName: "示例项目",
-            title: "整理项目资料", phase: .usingTool, actionText: "汇总文档，准备更新说明", updatedAt: Date(),
-            tokenUsage: .init(sessionID: "preview", turnID: "preview", total: 128000),
-            modelName: "gpt-6.1-sol", reasoningEffort: "high", startedAt: Date().addingTimeInterval(-120), sessionTotalTokens: 128000)
-    }
-    var body: some View {
-        GeometryReader { proxy in
-            let width = min(proxy.size.width - 24, 510) * min(1, CGFloat(expandedWidth) / max(1, maximumExpandedWidth))
-            let shape = IslandNotchShape(bottomRadius: 24)
-            ZStack(alignment: .top) {
-                if let image = ActivityIslandPreviewAssets.image("Wallpaper") {
-                    Image(nsImage: image).resizable().scaledToFill().frame(width: proxy.size.width, height: proxy.size.height)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                VStack(spacing: 0) {
-                    HStack {
-                        Text("1 个会话").font(.system(size: 12, weight: .medium))
-                        Spacer()
-                        icon("pin"); icon("chevron.up")
-                    }.padding(.horizontal, 28).frame(height: 36)
-                    ActivityIslandTaskCard(row: privacyMode ? sample.hidingDetails() : sample, animated: animated,
-                        rowHeight: 62, selected: true, effect: effect, reduceMotion: reduceMotion, preview: true)
-                        .padding(.horizontal, 28).padding(.vertical, 12)
-                    HStack { Text("1 个会话"); Spacer(); Text("1 工作中"); icon("arrow.clockwise"); icon("gearshape") }
-                        .modifier(IslandGlassChrome())
-                        .font(.system(size: 12)).padding(.horizontal, 28).padding(.bottom, 12).frame(height: 36)
-                }.frame(width: width).background {
-                    if material == .classic { shape.fill(.black) }
-                    else {
-                        ZStack {
-                            Color.clear.modifier(IslandNativeBackdropMaterial(shape: shape)).modifier(IslandGlassChrome())
-                            LinearGradient(stops: ActivityIslandGlassDegree.gradientStops(degree), startPoint: .top, endPoint: .bottom).clipShape(shape)
-                        }
-                    }
-                }
-                if floatingUsageEnabled && !privacyMode {
-                    IslandUsageCapsuleContent(windows: [
-                        .init(usedPercent: 28, windowDurationMinutes: 300, resetsAt: Date(timeIntervalSince1970: 12000)),
-                        .init(usedPercent: 54, windowDurationMinutes: 10080, resetsAt: Date(timeIntervalSince1970: 345600))
-                    ], current: true, now: Date(timeIntervalSince1970: 0))
-                    .modifier(IslandGlassChrome())
-                    .padding(.top, 166)
-                }
-            }.frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-        }.environment(\.islandLiquidGlassEnabled, material == .liquidGlass)
-            .modifier(IslandGlassAppearanceContext(appearance: glassAppearance, material: material))
-            .allowsHitTesting(false).accessibilityElement(children: .ignore)
-            .accessibilityLabel("灵动岛外观预览")
-            .accessibilityValue("\(effect.title)，隐私模式\(privacyMode ? "已开启" : "已关闭")，展开宽度 \(Int(expandedWidth)) pt")
-            .transaction { $0.animation = nil }
-    }
-    private func icon(_ name: String) -> some View {
-        IslandChromeIcon(name: name)
     }
 }

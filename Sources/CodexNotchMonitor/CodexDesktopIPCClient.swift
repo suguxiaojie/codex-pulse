@@ -1,5 +1,5 @@
-// Adapted from QuotaView d16307f (MIT), Copyright (c) 2026 Duoasa.
-// Source/license: THIRD_PARTY_NOTICES.md. Observation-only adaptation; no response submission.
+// Adapted from QuotaView d16307f and submission path f779531 (MIT), Copyright (c) 2026 Duoasa.
+// Source/license: THIRD_PARTY_NOTICES.md. Explicit user actions only; never claims ownership.
 import Foundation
 import CoreFoundation
 #if canImport(Darwin)
@@ -55,6 +55,7 @@ public struct CodexDesktopIPCRequestHandle: Equatable, Sendable {
     public let revision: Int64
     public let rawRequest: Data
     fileprivate let nonce: UUID
+    var identity: String { nonce.uuidString }
 }
 
 public struct CodexDesktopConversationSnapshot: Sendable {
@@ -73,7 +74,10 @@ public struct CodexDesktopConversationSnapshot: Sendable {
     public var conversationState: Data { stateData ?? (try? decodedState?.encode()) ?? Data() }
     /// Conservative serialized size, maintained from changed subtrees.
     public let conversationStateByteCount: Int
-    public let supportsUntrustedAppInput: Bool
+    public private(set) var supportsUntrustedAppInput: Bool
+    func disablingSubmission() -> Self {
+        var copy = self; copy.supportsUntrustedAppInput = false; return copy
+    }
     public let requests: [CodexDesktopIPCRequestHandle]
     /// Computed once on the transport actor; avoids decoding history again on MainActor.
     public var interactionProjection: CodexDesktopInteractionProjection? = nil
@@ -118,6 +122,11 @@ public struct CodexDesktopIPCInvalidation: Equatable, Sendable {
     public var diagnosticCode: String = "conversation_budget"
 }
 
+public enum CodexDesktopIPCSubmissionResult: Equatable, Sendable {
+    /// An IPC acknowledgement; settlement must come from a newer state stream.
+    case acceptedForDispatch
+}
+
 public enum CodexDesktopIPCError: Error, Equatable, LocalizedError {
     case unavailable, peerMismatch, unsupportedProtocol, invalidMessage, resourceLimit
     case staleRequest, alreadySubmitted, invalidResponse, outcomeUnknown
@@ -144,6 +153,7 @@ public enum CodexDesktopIPCError: Error, Equatable, LocalizedError {
 public actor CodexDesktopIPCClient {
     public private(set) var lastConnectionError: String?
     static let observationMethods: Set<String> = ["initialize", "thread-owner-discovery", "thread-stream-following-changed"]
+    static let submissionMethods: Set<String> = ["thread-follower-command-approval-decision", "thread-follower-file-approval-decision", "thread-follower-permissions-request-approval-response", "thread-follower-submit-user-input", "thread-follower-submit-mcp-server-elicitation-response", "thread-follower-steer-turn"]
     public struct Configuration: Sendable {
         public let isEnabled: Bool
         public let socketURL: URL
@@ -191,6 +201,23 @@ public actor CodexDesktopIPCClient {
         var stateByteCount: Int
         var handles: [CodexDesktopIPCRequestHandle]
     }
+    private struct AttemptIdentity: Hashable {
+        let connectionEpoch: UInt64
+        let ownerClientID: String
+        let conversationID: String
+        let turnID: String
+        let requestID: CodexDesktopIPCRequestID
+        let method: String
+        init(_ handle: CodexDesktopIPCRequestHandle) {
+            connectionEpoch = handle.connectionEpoch; ownerClientID = handle.ownerClientID
+            conversationID = handle.conversationID; turnID = handle.turnID
+            requestID = handle.requestID; method = handle.method
+        }
+    }
+    private struct SnapshotWaiter {
+        let continuation: CheckedContinuation<Void, Error>
+        let timer: Task<Void, Never>
+    }
     private struct FollowRecovery {
         let id: UUID
         let task: Task<Void, Never>
@@ -200,6 +227,7 @@ public actor CodexDesktopIPCClient {
         let owner: String?
         let continuation: CheckedContinuation<Data, Error>
         let timer: Task<Void, Never>
+        let submission: Bool
     }
     typealias Connector = @Sendable (URL) async throws -> CodexDesktopIPCTransport
     private let configuration: Configuration
@@ -225,6 +253,8 @@ public actor CodexDesktopIPCClient {
     private var owners: [FollowKey: Owner] = [:]
     private var ledger: [FollowKey: Ledger] = [:]
     private var nextStreamGeneration: UInt64 = 0
+    private var attempted: Set<AttemptIdentity> = []
+    private var snapshotWaiters: [FollowKey: [UUID: SnapshotWaiter]] = [:]
     private var snapshotHandler: (@Sendable (CodexDesktopConversationSnapshot) async -> Void)?
     private var stateHandler: (@Sendable (CodexDesktopIPCConnectionState) async -> Void)?
     private var invalidationHandler: (@Sendable (CodexDesktopIPCInvalidation) async -> Void)?
@@ -299,6 +329,92 @@ public actor CodexDesktopIPCClient {
         return current.streamGeneration == snapshot.streamGeneration
             && current.owner.clientID == snapshot.ownerClientID
             && current.revision == snapshot.revision
+    }
+    public func submit(handle: CodexDesktopIPCRequestHandle, result: Data) async throws -> CodexDesktopIPCSubmissionResult {
+        let key = FollowKey(conversationID: handle.conversationID, hostID: "local")
+        try validate(handle, key: key)
+        let response = try DesktopIPCJSON.decode(result, limit: 1_048_576)
+        if handle.kind == .asynchronousQuestion {
+            // Native desktop uses follower steering for these questions. It has
+            // no cross-IPC expected-turn CAS; refresh and revalidate immediately
+            // before this one user action, then await the native reply in stream.
+            guard Self.validResponse(response, method: "item/tool/requestUserInput") else { throw CodexDesktopIPCError.invalidResponse }
+            try await refreshSnapshot(key)
+            try validate(handle, key: key)
+            guard let entry = ledger[key], let question = try DesktopIPCJSON.decode(handle.rawRequest, limit: 1_048_576)["params"]?["questions"]?.array?.first,
+                  let questionID = question["id"]?.string, handle.requestID == .string(questionID),
+                  let title = question["question"]?.string,
+                  let answers = response["answers"]?.object, answers.count == 1,
+                  let selected = answers[questionID]?["answers"]?.array, selected.count == 1,
+                  let answer = selected.first?.string, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  answer.utf8.count <= 65_536 else { throw CodexDesktopIPCError.invalidResponse }
+            let reply = DesktopIPCJSON.array([.object(["questionItemId": .string(questionID), "question": .string(title), "answer": .string(answer)])])
+            let text = CodexDesktopRequestProjector.asyncReplyOpeningTag + "\n" + String(decoding: try reply.encode(), as: UTF8.self) + "\n" + CodexDesktopRequestProjector.asyncReplyClosingTag
+            let messageID = UUID().uuidString
+            let context: DesktopIPCJSON = .object(["prompt": .string(title + "\n" + answer), "turnTrigger": .string("send_user_message_async_question"),
+                "addedFiles": .array([]), "fileAttachments": .array([]), "imageAttachments": .array([]), "commentAttachments": .array([]),
+                "ideContext": .null, "workspaceRoots": entry.state["cwd"]?.string.map { .array([.string($0)]) } ?? .array([])])
+            let restore: DesktopIPCJSON = .object(["id": .string(messageID), "cwd": entry.state["cwd"] ?? .null, "context": context])
+            attempted.insert(AttemptIdentity(handle))
+            let data = try await request(method: "thread-follower-steer-turn", version: 1, targetOwner: handle.ownerClientID,
+                params: ["conversationId": .string(handle.conversationID), "clientUserMessageId": .string(messageID),
+                    "input": .array([.object(["type": .string("text"), "text": .string(text), "text_elements": .array([])])]),
+                    "restoreMessage": restore, "attachments": .array([])], submission: true)
+            let acknowledgement = try DesktopIPCJSON.decode(data, limit: configuration.maximumFrameBytes)
+            guard acknowledgement["result"]?["turnId"]?.string == handle.turnID else { throw CodexDesktopIPCError.outcomeUnknown }
+            return .acceptedForDispatch
+        }
+        let verb: String
+        let valueKey: String
+        switch handle.method {
+        case "item/commandExecution/requestApproval": verb = "thread-follower-command-approval-decision"; valueKey = "decision"
+        case "item/fileChange/requestApproval": verb = "thread-follower-file-approval-decision"; valueKey = "decision"
+        case "item/permissions/requestApproval": verb = "thread-follower-permissions-request-approval-response"; valueKey = "response"
+        case "item/tool/requestUserInput": verb = "thread-follower-submit-user-input"; valueKey = "response"
+        case "mcpServer/elicitation/request": verb = "thread-follower-submit-mcp-server-elicitation-response"; valueKey = "response"
+        default: throw CodexDesktopIPCError.invalidResponse
+        }
+        guard Self.validResponse(response, method: handle.method),
+              let raw = try? DesktopIPCJSON.decode(handle.rawRequest, limit: 1_048_576),
+              handle.method != "item/permissions/requestApproval" || response["permissions"] == .object([:])
+                || response["permissions"] == CodexDesktopPermissionGrant(raw["params"]?["permissions"])?.permissions else { throw CodexDesktopIPCError.invalidResponse }
+        let submittedValue = valueKey == "decision" ? response["decision"]! : response
+        attempted.insert(AttemptIdentity(handle))
+        let data = try await request(method: verb, version: 1, targetOwner: handle.ownerClientID,
+            params: ["conversationId": .string(handle.conversationID), "requestId": handle.requestID.json, valueKey: submittedValue], submission: true)
+        let acknowledgement = try DesktopIPCJSON.decode(data, limit: configuration.maximumFrameBytes)
+        guard acknowledgement["ok"]?.bool == true else { throw CodexDesktopIPCError.outcomeUnknown }
+        return .acceptedForDispatch
+    }
+    private func validate(_ handle: CodexDesktopIPCRequestHandle, key: FollowKey) throws {
+        guard initialized, transport != nil else { throw CodexDesktopIPCError.unavailable }
+        guard handle.connectionEpoch == epoch, follows.contains(key), let entry = ledger[key],
+              entry.owner.clientID == handle.ownerClientID, entry.owner.supportsInput, entry.revision >= handle.revision,
+              entry.handles.contains(handle),
+              !handle.turnID.isEmpty else { throw CodexDesktopIPCError.staleRequest }
+        guard !attempted.contains(AttemptIdentity(handle)) else { throw CodexDesktopIPCError.alreadySubmitted }
+    }
+    private func refreshSnapshot(_ key: FollowKey) async throws {
+        guard let owner = owners[key] else { throw CodexDesktopIPCError.staleRequest }
+        let id = UUID(), run = epoch
+        try await withCheckedThrowingContinuation { continuation in
+            let timer = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64((self?.configuration.requestTimeoutSeconds ?? 5) * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                await self?.expireSnapshot(key: key, id: id, epoch: run)
+            }
+            snapshotWaiters[key, default: [:]][id] = .init(continuation: continuation, timer: timer)
+            do {
+                try broadcast(method: "thread-stream-following-changed", version: 1,
+                    params: ["conversationId": .string(key.conversationID), "hostId": .string(key.hostID), "following": .bool(true)], targets: [owner.clientID])
+            } catch {
+                let waiter = snapshotWaiters[key]?.removeValue(forKey: id); waiter?.timer.cancel(); waiter?.continuation.resume(throwing: error)
+            }
+        }
+    }
+    private func expireSnapshot(key: FollowKey, id: UUID, epoch run: UInt64) {
+        guard run == epoch, let waiter = snapshotWaiters[key]?.removeValue(forKey: id) else { return }
+        waiter.continuation.resume(throwing: CodexDesktopIPCError.unavailable)
     }
     private func maintainConnection() async {
         var backoff: UInt64 = 250_000_000
@@ -411,13 +527,13 @@ public actor CodexDesktopIPCClient {
         }
     }
     private func request(method: String, version: Int64, targetOwner: String? = nil,
-                         params: [String: DesktopIPCJSON]) async throws -> Data {
-        let envelope = try await requestEnvelope(method: method, version: version, targetOwner: targetOwner, params: params)
+                         params: [String: DesktopIPCJSON], submission: Bool = false) async throws -> Data {
+        let envelope = try await requestEnvelope(method: method, version: version, targetOwner: targetOwner, params: params, submission: submission)
         guard let result = try DesktopIPCJSON.decode(envelope, limit: configuration.maximumFrameBytes)["result"] else { throw CodexDesktopIPCError.invalidMessage }
         return try result.encode()
     }
     private func requestEnvelope(method: String, version: Int64, targetOwner: String? = nil,
-                                 params: [String: DesktopIPCJSON]) async throws -> Data {
+                                 params: [String: DesktopIPCJSON], submission: Bool = false) async throws -> Data {
         guard transport != nil else { throw CodexDesktopIPCError.unavailable }
         let id = UUID().uuidString, run = epoch
         var message: [String: DesktopIPCJSON] = ["type": .string("request"), "requestId": .string(id),
@@ -429,11 +545,11 @@ public actor CodexDesktopIPCClient {
                 guard !Task.isCancelled else { return }
                 await self?.expire(id: id, epoch: run)
             }
-            pending[id] = .init(method: method, owner: targetOwner, continuation: continuation, timer: timer)
-            do { try write(.object(message)) }
+            pending[id] = .init(method: method, owner: targetOwner, continuation: continuation, timer: timer, submission: submission)
+            do { try write(.object(message), submissionOwner: submission ? targetOwner : nil) }
             catch {
                 let request = pending.removeValue(forKey: id); request?.timer.cancel()
-                request?.continuation.resume(throwing: error)
+                request?.continuation.resume(throwing: submission ? CodexDesktopIPCError.outcomeUnknown : error)
             }
         }
     }
@@ -456,8 +572,16 @@ public actor CodexDesktopIPCClient {
         default: return false
         }
     }
-    private func write(_ message: DesktopIPCJSON) throws {
-        guard Self.permitsObservationMessage(message) else { throw CodexDesktopIPCError.invalidMessage }
+    static func permitsSubmissionMessage(_ message: DesktopIPCJSON, owner: String?) -> Bool {
+        guard let owner, !owner.isEmpty else { return false }
+        return message["type"]?.string == "request" && submissionMethods.contains(message["method"]?.string ?? "")
+            && message["targetClientId"] == .string(owner)
+            && message["targetClientIds"] == nil
+    }
+    private func write(_ message: DesktopIPCJSON, submissionOwner: String? = nil) throws {
+        guard Self.permitsObservationMessage(message) || Self.permitsSubmissionMessage(message, owner: submissionOwner) else {
+            throw CodexDesktopIPCError.invalidMessage
+        }
         guard let transport else { throw CodexDesktopIPCError.unavailable }
         try transport.write(CodexDesktopIPCFrameDecoder.frame(try message.encode(), maximumFrameBytes: configuration.maximumFrameBytes))
     }
@@ -531,11 +655,11 @@ public actor CodexDesktopIPCClient {
             guard let id = message["requestId"]?.string, let request = pending.removeValue(forKey: id) else { return }
             request.timer.cancel()
             guard message["resultType"]?.string == "success" else {
-                request.continuation.resume(throwing: CodexDesktopIPCError.rejected(message["error"]?.string ?? "error")); return
+                request.continuation.resume(throwing: request.submission ? CodexDesktopIPCError.outcomeUnknown : CodexDesktopIPCError.rejected(message["error"]?.string ?? "error")); return
             }
             guard message["method"]?.string == request.method,
                   request.owner == nil || message["handledByClientId"]?.string == request.owner else {
-                request.continuation.resume(throwing: CodexDesktopIPCError.peerMismatch); return
+                request.continuation.resume(throwing: request.submission ? CodexDesktopIPCError.outcomeUnknown : CodexDesktopIPCError.peerMismatch); return
             }
             request.continuation.resume(returning: data)
         case "client-discovery-request":
@@ -640,10 +764,17 @@ public actor CodexDesktopIPCClient {
                 turnID: question.turnID, requestID: id, method: "desktop/tool/requestUserInputAsync", revision: oldHandle?.revision ?? revision,
                 rawRequest: raw, nonce: oldHandle?.nonce ?? UUID()))
         }
+        if projection.pendingRequestsAreAuthoritative {
+            let live = Set(handles.map(AttemptIdentity.init))
+            attempted = attempted.filter { $0.conversationID != conversation || $0.ownerClientID != source || live.contains($0) }
+        }
         let streamGeneration: UInt64
         if let existing = ledger[key] { streamGeneration = existing.streamGeneration }
         else { nextStreamGeneration += 1; streamGeneration = nextStreamGeneration }
         ledger[key] = .init(streamGeneration: streamGeneration, owner: owner, revision: revision, state: state, stateByteCount: stateByteCount, handles: handles)
+        if change["type"]?.string == "snapshot", let waiters = snapshotWaiters.removeValue(forKey: key) {
+            for waiter in waiters.values { waiter.timer.cancel(); waiter.continuation.resume() }
+        }
         await snapshotHandler?(.init(conversationID: conversation, hostID: host, ownerClientID: source,
                                      connectionEpoch: run, revision: revision, streamGeneration: streamGeneration, state: state, byteCount: stateByteCount,
                                      supportsUntrustedAppInput: owner.supportsInput && host == "local" && projection.pendingRequestsAreAuthoritative,
@@ -651,12 +782,35 @@ public actor CodexDesktopIPCClient {
     }
     private static let submittableMethods: Set<String> = ["item/commandExecution/requestApproval", "item/fileChange/requestApproval",
         "item/permissions/requestApproval", "item/tool/requestUserInput", "mcpServer/elicitation/request"]
+    static func validResponse(_ response: DesktopIPCJSON, method: String) -> Bool {
+        guard let object = response.object else { return false }
+        switch method {
+        case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
+            guard object.count == 1, let decision = object["decision"] else { return false }
+            if let choice = decision.string { return ["accept", "acceptForSession", "decline", "cancel"].contains(choice) }
+            return false // Policy amendments are never submitted by this island.
+        case "item/tool/requestUserInput":
+            guard Set(object.keys) == ["answers"], let answers = object["answers"]?.object, answers.count <= 64 else { return false }
+            return answers.values.allSatisfy { value in
+                guard let entry = value.object, Set(entry.keys) == ["answers"], let values = entry["answers"]?.array else { return false }
+                return values.allSatisfy { $0.string != nil }
+            }
+        case "item/permissions/requestApproval":
+            return Set(object.keys).isSubset(of: ["permissions", "scope"]) && object["permissions"]?.object != nil
+                && (object["scope"] == nil || ["turn", "session"].contains(object["scope"]?.string ?? ""))
+        case "mcpServer/elicitation/request":
+            return Set(object.keys).isSubset(of: ["action", "content", "_meta"]) && ["accept", "decline", "cancel"].contains(object["action"]?.string ?? "")
+        default: return false
+        }
+    }
     private func removeLedger(_ key: FollowKey) {
+        // A stream gap is not settlement. Keep submission identities until an
+        // authoritative snapshot proves removal, even when new handles are minted.
         ledger.removeValue(forKey: key)
     }
     private func expire(id: String, epoch run: UInt64) {
         guard run == epoch, let request = pending.removeValue(forKey: id) else { return }
-        request.continuation.resume(throwing: CodexDesktopIPCError.unavailable)
+        request.continuation.resume(throwing: request.submission ? CodexDesktopIPCError.outcomeUnknown : CodexDesktopIPCError.unavailable)
     }
     private func invalidateResourceLimit(_ key: FollowKey, epoch run: UInt64, diagnosticCode: String = "conversation_budget") async {
         guard run == epoch, !resourceBlockedFollows.contains(key) else { return }
@@ -664,6 +818,9 @@ public actor CodexDesktopIPCClient {
         followRecoveries.removeValue(forKey: key)?.task.cancel()
         let owner = owners.removeValue(forKey: key)
         removeLedger(key)
+        if let waiters = snapshotWaiters.removeValue(forKey: key) {
+            for waiter in waiters.values { waiter.timer.cancel(); waiter.continuation.resume(throwing: CodexDesktopIPCError.resourceLimit) }
+        }
         if let owner {
             try? broadcast(method: "thread-stream-following-changed", version: 1,
                 params: ["conversationId": .string(key.conversationID), "hostId": .string(key.hostID), "following": .bool(false)], targets: [owner.clientID])
@@ -695,11 +852,50 @@ public actor CodexDesktopIPCClient {
         frameDeadline?.cancel(); frameDeadline = nil; deadlineFrame = nil
         reader?.cancel(); reader = nil; transport?.close(); transport = nil
         followRecoveries.values.forEach { $0.task.cancel() }; followRecoveries.removeAll()
-        owners.removeAll(); ledger.removeAll(); followingInFlight.removeAll()
+        owners.removeAll(); ledger.removeAll(); attempted.removeAll(); followingInFlight.removeAll()
+        let waiting = snapshotWaiters.values.flatMap { $0.values }; snapshotWaiters.removeAll()
+        for waiter in waiting { waiter.timer.cancel(); waiter.continuation.resume(throwing: CodexDesktopIPCError.unavailable) }
         let requests = pending.values; pending.removeAll()
-        for request in requests { request.timer.cancel(); request.continuation.resume(throwing: CodexDesktopIPCError.unavailable) }
+        for request in requests { request.timer.cancel(); request.continuation.resume(throwing: request.submission ? CodexDesktopIPCError.outcomeUnknown : CodexDesktopIPCError.unavailable) }
         reconnectWaiter?.resume(); reconnectWaiter = nil
         await stateHandler?(.disconnected)
+    }
+}
+
+/// Shared presentation/egress projection of all recognized permissions.
+/// Adapted from QuotaView f779531 IslandApprovalProtocol.permissions and Draft.result.
+struct CodexDesktopPermissionGrant {
+    let permissions: DesktopIPCJSON
+    let titles: [String]
+    init?(_ requested: DesktopIPCJSON?) {
+        guard let object = requested?.object, Set(object.keys).isSubset(of: ["network", "fileSystem"]) else { return nil }
+        var grants: [String: DesktopIPCJSON] = [:]
+        var titles: [String] = []
+        if let network = object["network"], network != .null {
+            guard network.object != nil else { return nil }
+            if network["enabled"]?.bool == true {
+                grants["network"] = network; titles.append("Network")
+            }
+        }
+        if let filesystem = object["fileSystem"], filesystem != .null {
+            guard let fs = filesystem.object, Set(fs.keys).isSubset(of: ["read", "write", "entries"]) else { return nil }
+            var files: [String: DesktopIPCJSON] = [:]
+            for group in ["read", "write", "entries"] {
+                guard let value = fs[group], value != .null else { continue }
+                guard let values = value.array else { return nil }
+                if !values.isEmpty { files[group] = .array(values) }
+                for entry in values {
+                    if group == "entries" {
+                        let path = entry["path"]
+                        let title = [path?["path"]?.string, path?["pattern"]?.string, path?["value"]?.string]
+                            .compactMap { $0 }.first { !$0.isEmpty } ?? "路径未提供"
+                        titles.append((entry["access"]?.string ?? "access") + " · " + title)
+                    } else { titles.append(group + " · " + (entry.string ?? "路径未提供")) }
+                }
+            }
+            if !files.isEmpty { grants["fileSystem"] = .object(files) }
+        }
+        permissions = .object(grants); self.titles = titles
     }
 }
 

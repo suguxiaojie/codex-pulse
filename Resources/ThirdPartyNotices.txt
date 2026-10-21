@@ -4,7 +4,7 @@ Original list/transition source: f632288fb706b83e691000e365004f6ed9654d94
 Full presentation source: d16307f4666f75b94a40cdb3933777a028d8fa8a (v0.8.2-build.2)
 
 Adapted files:
-- CodexDesktopIPCClient.swift: desktop follower transport, framing, peer/owner/revision validation and reconnect; all approval/answer submission entry points removed and outgoing observation/refusal messages allowlisted.
+- CodexDesktopIPCClient.swift: desktop follower transport, framing, peer/owner/revision validation and reconnect; explicit follower approval/answer submission restored from f779531, with owner-targeted egress allowlisting.
 - CodexDesktopRequestProjection.swift, CodexActivityTaskIdentity.swift and CodexActivitySubagentIdentity.swift: current-turn/wait projection and source classification.
 - CodexLocalRolloutActivityClient.swift: bounded incremental cursor, file replacement handling and complete-line buffering adapted to the existing local decoder.
 - IslandConceptBoard.swift: fixed-canvas surface, path/content transitions, pointer routing and task-card hierarchy.
@@ -18,7 +18,7 @@ Adapted files:
 - CodexActivityIsland.swift: completion/confirmation edge glow, outline, palette, geometry and shared compositor pulse.
 - SettingsIslandPreview assets: wallpaper and three effect thumbnails; Codex provider SVG.
 
-Codex Monitor adaptations use local session/turn identity, event-driven read-only activity updates, a 680-point default expanded surface, selected-card effects and native NSScrollView gestures. QuotaView approval actions, archive and quota-capsule features are not included. Decorative visual progress is not a measured task-completion percentage.
+Codex Monitor adaptations use local session/turn identity, event-driven read-only activity updates, a 680-point default expanded surface, selected-card effects and native NSScrollView gestures. Restricted approval actions are adapted from f779531; archive is not included. Decorative visual progress is not a measured task-completion percentage.
 
 MIT License
 
@@ -114,3 +114,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Claude Code integration: transcript decoder/tail, usage scanner, standard price mapping, private Unix bridge, configuration installer, permission decision mapping and Claude-only helper adapted from QuotaView f7795311bf06c2a54c9b9756da375c50d0f4930e (MIT, Copyright (c) 2026 Duoasa). Runtime/UI adapted to Codex Pulse; scanner, numeric bounds and price snapshot revised. https://github.com/Duoasa/QuotaView/tree/f7795311bf06c2a54c9b9756da375c50d0f4930e
+
+Island approvals: CodexDesktopIPCClient submit/validate/refreshSnapshot/expireSnapshot/validResponse, AttemptIdentity and submission timeout handling, and restricted IslandApprovalProtocol option mapping adapted from QuotaView f7795311bf06c2a54c9b9756da375c50d0f4930e (MIT, Copyright (c) 2026 Duoasa). Pulse retains observation/refusal allowlisting and additionally rejects policy amendments and permission expansion. Synthetic submission tests adapt the upstream IPC/lifecycle cases.

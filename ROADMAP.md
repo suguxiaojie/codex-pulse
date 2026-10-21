@@ -6,13 +6,31 @@
 
 ## 当前阶段
 
-GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.4（Build 30）已正式发布，源码提交为 6b77d7a497151a668d462a4b556347aa9d44a1ed，已推送 main。两处 Credits 主值统一向下取整与千位分隔，正余额不足 1 显示“<1”，悬停和辅助功能保留完整数值；原始数据精度、现有功能与玻璃效果保留，用户已确认显示正常。arm64／Intel 独立 DMG、签名、CRC、镜像内容及公开附件下载哈希核对通过，本机已备份安装 arm64 版。按用户要求未运行自动化测试或额外 UI 验收，Intel 无真机验收；工作区 AnalysisPresentation.swift 的另有界面改动保持未提交，未混入发行包。
+GitHub 仓库为 suguxiaojie/codex-pulse，当前发行候选为 v1.9.0（Build 31）。灵动岛焦点舞台、光眼球、硬件黑材质、气象面板、Claude Code 接入与数字单位已纳入本次发布范围。正常环境完整测试与独立 Claude 专项均通过，arm64／x86_64 DMG 版本、架构、签名与镜像校验通过；提交推送、tag 与 GitHub Latest Release 待完成。未覆盖安装，Intel 未做真机运行验收。
 
 当前本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
 本地开发交接笔记不随公开发行包上传；历史版本变化以 Git 历史为准。
 
 ## 进行中与待办
+
+- 2026-10-22 04:13：v1.9.0 发布继续：仅清理 5 个新增 Swift 文件末尾多余空行，保留单个结尾换行。正常环境完整测试、独立 Claude 专项及双架构 DMG 验证已通过；按用户授权复用已校验产物，不重建。准备完成白名单提交、main 推送、附注 tag 与 Latest Release 及公开附件核对。提交清单：build/qa/release-1.9.0/commit-files.txt。
+
+- 2026-10-22 03:15：灵动岛设置完整／放大预览已复用生产焦点舞台：硬件黑与状态边缘光、投影、光眼球、步骤、本轮 Token、会话胶囊排及底栏；继续使用中性示例数据，设置直接联动。预览测试 48/48、硬件黑 50/50、角色 69/69、会话状态 148/148 与 arm64 Release／严格签名通过，普通／隐私离屏图已检查。完整脚本面板组因 NSScreen 不可用停止；续跑连续性原图断言、Claude socket bindFailed 失败，Claude Runtime 被前置失败阻断，待原生环境验收。8 个受保护文件本轮哈希未变（Motion 与基线的既有差异保留）。未改 Glance，未安装、提交或推送。证据：.tmp/island-settings-preview/。
+
+- 2026-10-22 00:46：大数字统一格式已实现，验证未全部完成。默认中文万／亿，设置可切换 K／M／B；Token、社区计数、图表悬停与辅助功能共用 CountFormatter，金额与小计数不变。20 个主测试组中 17 组通过，新增格式化 71 项、菜单栏宽度 176 项通过；Claude 祖先解析 22/22 通过。AnalysisPresentation、ActivityIslandPanel、Claude Runtime／审批编译受沙箱宏插件启动限制；Claude 核心 socket bindFailed，独立探针确认 EPERM；Continuity 图片导出断言失败，原因待确认。arm64 Release 构建在 SwiftPM manifest 沙箱启动阶段被阻止，未生成本次 App；界面切换与完整类型检查待本机复验。8 个受保护文件与施工前哈希一致。未安装、提交或推送。替换点、旧断言和验证说明：docs/number-format.md 第 8 节；日志与施工前快照：.tmp/number-format/。
+
+- 2026-10-21 22:42：菜单栏方向 C“气象”已实现，待 Claude 本机复跑与视觉验收：瓶颈额度／速度预报、状态染色、七日成本／Token 条带、三格指标、全板不透明度与辅助功能回退，旧七项偏好保留。新增纯逻辑测试 1,197 项通过；arm64 Debug、Release App 与 deep／strict 签名通过。scripts/test.sh 在面板组因 Metal／无 NSScreen 退出，后续原组已用临时脚本续跑：Claude 核心 socket bindFailed、Runtime 启用断言失败，独立 AF_UNIX 探针确认沙箱 EPERM；Continuity 图片导出断言失败，尚不能确认环境归因，留待本机复核；其余组通过。未修改灵动岛源码／测试，未安装、写 /Applications、提交或推送。方案：docs/glance-weather.md；日志、施工前哈希与范围核对：.tmp/glance-weather/；产物：build/CodexNotchMonitor.app。
+
+- 2026-10-22 00:05：灵动岛第 5 轮 Claude 进程归属修正完成，待 Claude 本机复验。Helper 用 sysctl KERN_PROC_PID 沿父链最多检查 8 层，跳过 sh／bash／zsh／dash／fish／env／login／timeout，检测环路与缺失信息，发送首个非中间进程的 PID 和名称；无法确认时不发送。Runtime 仅接受事件到达时 kill(pid,0)==0 且名称非中间进程的 PID，最新有效值替换旧值，无效／缺失证据关闭进程兜底。祖先解析 22/22、Runtime 隔离回归（shell／死进程拒绝、有效 PID 替换、有效 owner 退出）通过，arm64 Release 主程序／Helper 架构与深度严格签名通过。此前 3 秒焦点交接、回执、60 秒保留、配置缓冲与转录兜底不变，受保护动效未改。本轮未安装、未写入 /Applications、未提交或推送。说明：docs/claude-code-integration.md；日志及差异：.tmp/claude-process-owner/。
+
+- 2026-10-21 20:00：灵动岛审批第 3 轮视觉修正与隔离验证完成，未安装。验收方反馈第 2 轮已安装版本的真实 Claude 允许／拒绝端到端通过；Codex 真实审批、第 3 轮实机视觉与 VoiceOver 仍待验收。离屏截图可检查按钮排布和高度，但现有反馈样式的完整文字／颜色捕获仍有限制。报告：[REPORT.md](.tmp/island-approvals/REPORT.md)。
+
+- 2026-10-21 16:54：Claude Code 可选完整接入已实现、测试并备份覆盖安装，真实官方额度成功态与长期规则落盘待验收；真实允许／拒绝审批已由 Claude 验收方反馈通过，见最新岛内审批记录。复用 QuotaView f779531 的 MIT 日志解码／增量统计／配置安装恢复／私有通信／Claude 专属 Helper，增加独立入口、来源任务与显式请求窗口；原 Codex 只读限制已由后续显式岛内审批授权取代，见最新记录。完整回归通过（连续性 37/37），最终 Claude 核心 42 项与实际运行态回归通过；最终 arm64 Release、主程序／Helper 签名和安装哈希通过。本机已启用 14 个专属事件入口、请求处理和 statusLine，其他配置及原状态栏核对一致。真实 Claude CLI 2.1.306 无工具调用两次成功，实机确认连接、完成回执保留、7 份日志／2 天／367.1M Token／$135.49 估算、日期轴与明细一致；SessionEnd 不覆盖真实终态，空会话退出不制造回执。默认关闭；本机按用户授权启用，现有会话可能需重开。说明：docs/claude-code-integration.md；证据：build/qa/claude-integration/。未提交／发布。本轮之前的回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-claude-integration-20261021-163859.app 。回滚前先在新页停用 Claude 接入以恢复客户端配置。
+
+- 2026-10-21：监控四页（用量分析／成本估算／动态中心／会话管理）按设置页同一设计语言重构，已备份覆盖安装，待用户自行验收。Claude 设计（.tmp/monitor-redesign/DESIGN.md）、Codex 执行与测试、Claude 终验并退回一轮修复（操作与备份展开区固定高度挤压会话表；成本吞吐量单位错位）。统一卡片头字形图块与元信息胶囊、主指标／次指标排版、输入／输出／缓存构成胶囊、图表内衬、空状态、动态列表合卡与时间轴节点、会话表卡片化与语义胶囊；新增 MonitorCenterComponents.swift。统计、计价、筛选、归属与证据状态、确认流程及 AnalysisPresentation.swift 未改；恢复记录类型由菜单改为同值分段。完整测试（连续性 37/37）与 arm64 Release／签名通过；真实数据（30 项目／151 会话／31 条社区动态）写保护沙箱截图见 build/qa/monitor-redesign/。无凭据下官方额度成功态、真实导入导出／恢复、辅助功能组合未实测。未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-monitor-redesign-20261021-041142.app 。记录：.tmp/monitor-redesign/。
+
+- 2026-10-21：设置三页（菜单栏与面板／安装与权限／灵动岛设置）视觉重构已备份覆盖安装，待用户自行验收。Claude 出设计方案（.tmp/settings-redesign/DESIGN.md），Codex 执行与测试，Claude 终验。去除页面底板、行首字形图块、卡片外分组标签、预览舞台、统一行节奏，开关／分段／滑杆细化；安装与权限新增只读状态总览（复用既有状态，不新增逻辑）与引导步骤点。偏好键、绑定、文案、侧栏结构、预览渲染与无障碍不变；scripts/test.sh 仅为面板测试补编 MonitorDesktopStyle.swift。完整测试与 arm64 Release／签名通过，12 张离屏窗口截图（三页 × 浅深色 × 1060×760／900×640）见 build/qa/settings-redesign/；VoiceOver、减少动态效果／增强对比、macOS 26 以下材质回退未实测；浅色宿主下灵动岛预览顶栏文字对比不足为既有问题（正式应用固定深色），本轮未改。未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-settings-redesign-20261021-032416.app 。记录：.tmp/settings-redesign/。
 
 - 2026-10-17 12:33：v1.8.1 已在新仓库正式发布；v1.8.0 用户需从新 Release 手动安装一次，之后沿用新仓库更新入口。测试与实机验收由用户自行执行。工作区另有 AnalysisPresentation.swift 界面改动，保持未提交且未混入本次发行快照。
 
@@ -100,6 +118,20 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.4（Build 30）已正式发布�
 
 ## 最近完成
 
+- 2026-10-22 04:11：v1.9.0（Build 31）发行准备完成：英文 README 与中文定稿结构、链接、图片、数据边界对应，中文 README 哈希保持不变；完整测试、Claude 专项及双架构 DMG 验证通过，SHA256SUMS-v1.9.0.txt 已生成。公开发布结果待核对。
+
+- 2026-10-21 20:00：灵动岛审批第 3 轮完成：操作胶囊 28 pt／水平 12 pt／间距 8 pt，主／次／危险／回退分类和自动换行，详情右置箭头，选项行选中态；移除固定卡片高度，实际测量进入原生列表高度与锚点，问题区 200 pt 内滚动，屏幕限高并裁切页脚边界；按来源区分副标题并同步紧凑与辅助说明。保留第 2 轮单数 targetClientId、权限构造、单次提交、不重试、Claude 120 秒与 settings 字节保留。仅指定 UI 四文件与测试变更，完整合成回归和 arm64 Release／签名通过。未安装、提交、推送或真实审批。报告：[REPORT.md](.tmp/island-approvals/REPORT.md)，第 3 轮差异：[change.diff](.tmp/island-approvals/round3/change.diff)。
+
+- 2026-10-21 20:08：灵动岛内直接审批（用户授权 Codex 可写回答、Claude 等待 2 分钟）已实现并备份安装。方案 .tmp/island-approvals/PLAN.md；Codex 执行 3 轮，Claude 验收退回：①提交请求误带 targetClientIds（方案错误，已对齐上游仅 targetClientId）；②权限授予原样回传请求对象，改为按上游规则只授予已识别项、含未知键不进岛；③按钮像文字（用户反馈）、卡片固定高度挤压页脚、Claude 行文案误写 Codex。Codex 提交路径移植自 QuotaView f779531（MIT）：完整 handle 校验、单次提交、不自动重试、Codex 原生界面并存；AGENTS.md 已按授权改写。Claude route decisionTimeoutSeconds=120 已在本机生效，~/.claude/settings.json 未改。Claude 复跑完整测试（审批 169、面板 173/173、Claude 66、连续性 37/37、Runtime）与 arm64 Release／签名。真实 Claude 端到端：允许一次→执行返回 200；拒绝→DENIED；不操作→约 2 分钟交回；回终端→交回。发现用户环境另有 Agent Guard PreToolUse Hook（服务不可用时仅审计全部放行），会使 Claude 跳过权限请求、岛内卡片在日常会话中不出现；测试使用仅含本插件 Hook 的临时 settings，未改用户配置。Codex 桌面端真实审批待用户在需批准权限模式下触发后验收。未提交／发布。回滚：build/backups/CodexNotchMonitor-before-island-approvals-20261021-073325.app（审批前）；本轮按钮修正前：build/backups/CodexNotchMonitor-before-approval-buttons-20261021-080722.app 。
+
+- 2026-10-21 18:40：用户实机反馈来源切换被刘海遮挡（第 1 轮把切换放进页头中部，规格错误）。第 3 轮：页头仅保留左返回／右置顶收起，切换移回内容区首行，改为 240×28 整体分段胶囊（滑动选中，保留禁用与无障碍语义）；窄宽度额度卡三档回退避免文字相撞。第 4 轮按用户要求为两段加 logo：Codex 复用 Island-Codex.svg，Claude 为代码绘制的星芒 Shape（#D97757，无外部资源）。Claude 复跑完整测试（面板 147/147、Claude 59、连续性 37/37、Runtime）与 arm64 Release，备份后覆盖安装；实机 560 宽刘海屏确认切换可见、双向切换、Claude 真实官方额度显示、窄卡无相撞（.tmp/island-usage-refactor/review4-real-*.png）。页脚位于玻璃外为既有表现，未改。未提交／发布。本轮覆盖前备份：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-island-switch-logo-20261021-064009.app ；重构前回滚仍为 CodexNotchMonitor-before-island-usage-refactor-20261021-060904.app 。
+
+- 2026-10-21 18:09：灵动岛用量页重构 Claude 终验通过并已备份覆盖安装。退回一轮视觉修正（额度卡被来源卡撑高后内容堆顶、指标条带日期时标题错位），第 2 轮仅改 IslandUsageSections.swift，Codex 高度 616→596 pt。Claude 独立复跑完整测试（面板 139/139、Claude 核心 59、连续性 37/37、Runtime 通过）与 arm64 Release，1.8.4 Build 30、签名有效；备份全包哈希与覆盖前一致、安装与源包一致，进程已启动。合成数据真实渲染截图见 .tmp/island-usage-refactor/review*-*.png。真实桌面中用量页交互、Claude 上次观测态实机呈现未验收。未提交／发布。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-island-usage-refactor-20261021-060904.app 。
+
+- 2026-10-21 17:51：灵动岛用量页统一纯值展示模型并拆分为额度行、来源卡、指标条与合并趋势卡；Claude 额度保留明确标注的上次观测、部分成本显示下界、最近记录日补日期，增加 fast／美国驻留计价和缓存拆分修复、内容去重。专项／完整测试与 arm64 Release 通过，面板 139/139、Claude 核心 59 项、连续性 37/37，Runtime 通过；同夹具 Codex 高度 616→608 pt，Claude 583 pt。未安装／提交／发布，待 Claude 实机验收。首轮完整测试误走既有本机日志只读路径，最终改用合成数据和运行时沙箱；详情与边界：.tmp/island-usage-refactor/REPORT.md。
+
+- 2026-10-21 17:22：灵动岛用量页补齐 Codex／Claude Code 来源切换，额度、最近一天／30 天／累计 Token、成本柱图与热图共用现有玻璃布局并同步来源；新增独立 Claude 展示适配，日标签按本地日还原、过期窗口／未知价格不回退 Codex。切换清除成本／热图选中与悬停并重置滚动位置，停用 Claude 返回 Codex；Claude 隐藏 Credits／套餐／真实重置，重置确认或执行期间锁定来源。完整测试与 arm64 Release 通过，已备份覆盖安装并实机双向切换、成本／热图选择清理、每天／每周／累计切换验收；临时固定已恢复。真实 Claude 额度尚未上报，成功态由隔离样例验证。证据：build/qa/island-provider-switch/。未提交／发布。
+
 - 2026-10-17 21:10：v1.8.4（Build 30）Credits 余额格式化已正式发布，源码 6b77d7a497151a668d462a4b556347aa9d44a1ed，main 已推送。菜单栏面板与灵动岛用量看板共用 CreditBalanceFormatter.summary，向下取整、千位分隔，正余额不足 1 显示“<1”；悬停／辅助功能保留完整数值，原始数据与统计精度不变。用户确认显示正常；两架构构建、镜像／签名及公开下载哈希通过，本机已完整备份覆盖安装 arm64。未运行自动化测试或额外 UI 验收；无关界面改动排除。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-v1.8.4-20261017-210741.app 。证据：.tmp/release-v1.8.4/。
 
 - 2026-10-17 18:23：发布 v1.8.3（Build 29）待回复视觉与单次提醒，源码提交 dfe6fe07ed1a08fe1e4ca78b9025ad575c1d2371 已推送 main，远端 tag 指向同一提交，GitHub 为最新正式 Release。按结构化问题标识在紧凑／展开界面共用去重，首次可见时轻提示，持续等待为静态图标及细轮廓，回答后恢复原运行效果；保留隐私、减少动态、玻璃及原交互。用户已实测确认核心动效流程；两架构包及三份公开附件下载校验通过，本机已完整备份安装。未运行自动化测试或额外 UI 验收，Intel 无真机验收，工作区无关界面改动排除。发布页：https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.8.3 。证据：.tmp/release-v1.8.3/；产物：build/releases/v1.8.3/；回滚 App：build/backups/CodexNotchMonitor-before-v1.8.3-20261017-182142.app。
@@ -126,21 +158,17 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.4（Build 30）已正式发布�
 
 - 2026-10-16 20:00：移除菜单栏任务、密度及内容选择入口，运行时固定圆环＋百分比，旧偏好保留但不再生效；透明度复用灵动岛连续拖动／松手回稳滑杆并增加拖动期间滚动互斥；内容／外观复用滑移导航；会话搜索、状态菜单与导入／导出／详情使用统一轻描边控件。未改会话读取、导入导出和归属逻辑，Hook 仍屏蔽。完整测试与 arm64 Release 后备份覆盖安装。
 
-- 2026-10-16 19:03：日志来源重排为并列 Token／API 等价成本，独立对齐官方与补充目录同步行，模型映射收进计价说明，未定价提示保持可见。动态中心复用滑移导航与悬停样式，移除原生灰色分段／筛选样式，来源降为辅助信息。未改统计、价格、关联或 Hook 数据；完整测试／arm64 Release 通过并备份覆盖安装。
-
-- 2026-10-16 18:04：按用户要求将历史社区线索直接自动标记：匹配后备份并保存 communityAssociation，自动显示 Tibo 重置、进入 Tibo 分类并退出待确认列表，无需逐条操作；重启保留，重复刷新不重复标记／备份。原始 reason／ID／额度变化／来源与既有人工分类保留，人工显示分类优先，来源时间差异留在可展开依据中；不补发旧通知。实际 18 条中自动标记 5 条，2 条保留未明；Hook 继续屏蔽，已备份覆盖 arm64 安装版。
-
-- 2026-10-16 17:13：日志来源接入官方费率自动更新：每 24 小时只读取 OpenAI pricing.md 的 Standard 支持模型表，线上官方费率优先于内置快照与社区目录，解析长短上下文倍率后重算实际成本。分开显示官方同步时间与补充目录同步时间；网络／schema 异常保留最后有效价格与日期，6 小时后重试，304 需可用缓存，服务器取消 ETag 时清除旧标签。缓存仅在 Library/Caches，未改账号／会话／Hook，Hook 继续屏蔽；已备份覆盖安装 arm64 开发版。
-
-- 2026-10-16 17:00：成本与 Token 活动统一青蓝色视觉与交互：柱子和热力格复用同一填充／3 pt 圆角／0.7 pt 描边组件，零值中性暗灰；详情栏共用右上方排版与数字字体，热图取消半秒延迟、黑胶囊及虚线占位。悬停统一轻微提亮／细描边，成本热图补对应 Token，按有效范围触发共同淡入过渡并尊重减少动态效果。计价、账号与日志链未变，Hook 继续屏蔽；完整测试／arm64 Release 后备份覆盖安装。
-
-- 2026-10-16 16:44：成本与 Token 活动改为短周期柱状图、长周期热力图：成本日视图复用真实小时序列，周／月及独立 30 日按天，90 日／半年保持热力图；未来小时留空、零值不抬高，悬停显示精确值及成本对应 Token。两页共用柱状图，移除常驻悬停提示；未改计价、账号归属或日志扫描，Hook 继续屏蔽。完整测试／arm64 Release 通过并备份覆盖安装。
-
-- 2026-10-16 15:55：去掉菜单栏多余宽度占位：先更新圆环、字体和标题，再以 AppKit cellSize 测量真实内容宽度，不将候选预算或轮播预算作为可见槽宽。当前圆环＋36% 的按钮从 66 pt 收紧到 50 pt；同时修正无任务时紧凑模式丢掉额度候选。保留现有任务显示选项与其他设置，Hook 仍屏蔽；已备份覆盖 arm64 安装版。
-
-- 2026-10-16 15:45：HTML 大图加入鼠标锚点滚轮缩放、指针捕获拖动、双击／按钮／0 还原、+/− 键盘缩放及实际像素比例显示；切图与重开清除偏移，窗口变化重新适配并限制边界。实测发现 108×66 小图放大后仍小于画布而被锁住，修正为小图可在画布内移动、大图按边缘限位。未改图片恢复、脱敏或备份链，Hook 保持屏蔽；完整备份后覆盖 arm64 安装版并确认运行。
-
 ## 最近验证
+
+- 2026-10-22 04:11：v1.9.0 正常环境 scripts/test.sh 与独立 zsh scripts/test-claude.sh 均退出 0，连续性 37/37、岛内审批 169 项、Claude 核心 90 项及 Runtime 回归通过。两架构构建退出 0，只读挂载确认 1.9.0／Build 31，主程序与 Helper 架构准确，deep／strict ad-hoc 签名及镜像校验有效。日志与哈希：build/qa/release-1.9.0/。未安装，未做 Intel 真机验收。
+
+- 2026-10-21 20:00：灵动岛审批第 3 轮合成沙箱验证：面板专项及全量均 173／173；独立 Claude 专项和完整脚本退出 0，含核心 66、审批 169、实际 Helper／Runtime，连续性 37／37。实际测量：短命令 101 pt、300 pt 窄宽度换行 137 pt、多问题及更多选项均 287 pt（问题区 200 pt），原生视口页眉／页脚边界与不抢焦点断言通过。arm64 Release 主程序／Helper、deep／strict 签名及 git diff --check 通过。无新增警告；业务协议源码与上游 160 份 Swift 哈希不变。证据：.tmp/island-approvals/round3/。
+
+- 2026-10-21 17:51：灵动岛重构最终 scripts/test-claude.sh、scripts/test.sh、build-app.sh arm64 均退出 0；完整测试使用项目内合成 HOME 投影与运行时文件访问沙箱，成本夹具为 1,200 Token。主程序／Helper 均为 arm64，App 深度严格签名及 git diff --check 通过；专项 42 条／Release 9 条编译警告与基线一致。原费率表及 reset 页面／flight／ticket 逐字节保留。证据：.tmp/island-usage-refactor/；没有安装或真实桌面视觉验收。
+
+- 2026-10-21 17:22：灵动岛来源切换完整 scripts/test.sh 退出 0（面板 111/111、连续性 37/37、Claude 核心 42 项与 Runtime 通过），arm64 Release 退出 0，安装前后签名／清单／哈希一致。实机确认 Codex 官方折算 $4,087.44／30 天 8.2B 与 Claude 模型估算 $135.49／30 天 367.1M 独立，Claude 5 小时／每周未知占位、无 Codex Credits／重置；双向切换后成本回到最近一天、热图日期选中清空，三种活动模式可切换。未执行真实额度重置，Claude 官方额度成功态无真实数据。证据：build/qa/island-provider-switch/。
+
+- 2026-10-21 16:54：Claude 接入完整旧回归退出 0，新增核心 42 项及实际 Runtime／Helper／socket 回归退出 0，覆盖重试、拒绝、停用释放、完成后 SessionEnd 与空会话退出；最终 arm64 Release 退出 0、安装签名／完整清单一致。真实 CLI 返回成功标记并在应用显示已连接／已完成，原状态栏与外部配置保留校验通过。界面确认统一开关／周期／刷新、真实统计、日期轴及明细；官方额度保留等待状态，真实交互式审批未实测。证据：build/qa/claude-integration/。
 
 - 2026-10-17 21:10：v1.8.4 公开发布核对：latest API 为 v1.8.4 正式版，远端 tag 指向源码 6b77d7a497151a668d462a4b556347aa9d44a1ed；两份 DMG 与 SHA256SUMS.txt 下载后 SHA-256 及 GitHub digest 逐一等于本地产物。隔离构建的全部 Sources／Resources／Package 与打包脚本逐文件等于发行提交；工作区无关界面源码未改、未混入。用户确认 Credits 显示正常；未运行测试或额外 UI 验收，Intel 无真机验收。证据：.tmp/release-v1.8.4/public-release.json、public-download-review.json、source-scope-review.json。
 
@@ -171,16 +199,6 @@ GitHub 仓库为 suguxiaojie/codex-pulse，v1.8.4（Build 30）已正式发布�
 - 2026-10-17 12:00：概览卡精简 arm64 Release App 构建退出 0；源包、覆盖前 App、完整备份与安装包均为 Codex Pulse／1.7.0 Build 25／arm64，签名有效；备份全包哈希与覆盖前目标一致，安装全包哈希与源包一致，启动进程已确认。本轮源码差异仅限 costOverviewCard、usageOverviewCard 与 UsageCountMetric，图表和服务实现不变；受保护源码哈希一致。按用户要求未运行测试、截图或交互验收。证据：.tmp/overview-card-simplify/release-build.log、install.json、scope-review.json、change.diff。
 
 - 2026-10-17 11:55：Codex Pulse 命名迭代 arm64 Release App 构建退出 0；源包／安装包 CFBundleDisplayName 与 CFBundleName 均为 Codex Pulse，Bundle ID／可执行文件与覆盖前一致。源包、旧包与完整备份均为 1.7.0 Build 25／arm64，签名有效；备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。数据路径／偏好／Store／打包脚本等受保护源码哈希不变。未运行测试或 UI 验收，配置沿用与界面显示由用户自行确认；构建保留既有 Swift 并发警告。证据：.tmp/pulse-name/release-build.log、install.json、change.diff、protected-sha256.json。
-
-- 2026-10-17 11:52：品牌 Logo 替换 arm64 Release App 构建退出 0；已核对构建包中的 SVG、ICNS 与 Resources 正式素材逐字节一致、CFBundleIconFile 指向正确且显示名称仍为 Codex Monitor。源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致、安装全包文件哈希与源包一致，启动进程已确认。未运行应用测试或界面验收；各尺寸显示及系统图标缓存呈现由用户自行查看。证据：.tmp/pulse-logo-replace/release-build.log、install.json。
-
-- 2026-10-17 11:48：品牌静态素材导出检查：6 份 SVG 经 XML 解析；使用 macOS sips 导出 5 份 1024×1024 图形与 1600×1080 方案板，已目视检查最终方案板和主标预览。修正 Quick Look 方形缩略图裁切后改用按原画幅导出，并使用明确中性色描边避免 SVG 透明描边渲染差异。未构建应用、运行应用测试或覆盖安装。证据：docs/brand/codex-pulse-concept/、.tmp/pulse-brand/render-report.json。
-
-- 2026-10-17 11:42：本轮面板版本回滚完成：恢复来源、安装 App 与 build App 全包文件哈希一致，arm64／1.7.0 Build 25 签名有效，恢复后二进制 SHA-256 为 808e5cb6eaac040e81410101905c80b21796f79b8f007c1c9d94805d2aa09c17；撤回前 App 完整备份校验一致，三份源码与上轮改动前快照一致，启动进程已确认。未重新构建、运行测试或界面验收。证据：.tmp/rollback-glance-chrome/install.json。
-
-- 2026-10-17 11:40：面板页头／周期／底栏改造 arm64 Release App 最终构建退出 0；首轮构建通过后补充原生菜单跟踪保护，再次构建通过。源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；账号长文案、更多菜单／退出、独立周期菜单与键盘、菜单防误收起、底栏跳转／刷新及高度由用户自行验收。证据：.tmp/glance-chrome-controls-cds/release-build.log、release-build-attempt1.log、change.diff、install.json。
-
-- 2026-10-17 11:32：Glance 阅读层／成本状态／Token／高度改造 arm64 Release App 构建退出 0；源 App、安装 App 与备份均为 1.7.0 Build 25／arm64，签名有效，备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。按用户要求未运行测试、截图或界面交互检查；玻璃可读性／透明度、加载／缺失／零值／未计价、周期与开关组合、测量高度／小屏滚动及真实设置预览由用户自行验收。证据：.tmp/glance-reading-cost-cds/release-build.log、change.diff、install.json。
 
 ## 验证与产物入口
 

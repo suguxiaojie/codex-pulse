@@ -33,14 +33,16 @@ struct IslandSettingsSlider: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let travel = max(1, geometry.size.width - 16)
+            let travel = max(1, geometry.size.width - 18)
             ZStack(alignment: .leading) {
-                Capsule().fill(PanelSettingsTheme.track).frame(height: 4)
+                Capsule().fill(PanelSettingsTheme.track).frame(height: 5)
                 Capsule().fill(PanelSettingsTheme.clay)
-                    .frame(width: 8 + travel * progress, height: 4)
+                    .frame(width: 9 + travel * progress, height: 5)
                 Circle().fill(PanelSettingsTheme.sliderThumb)
                     .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
-                    .frame(width: 16, height: 16)
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().strokeBorder(MonitorDesktopTheme.border, lineWidth: 0.5))
+                    .overlay(Circle().stroke(MonitorDesktopTheme.accent.opacity(enabled && dragging ? 0.18 : 0), lineWidth: 4).padding(-2))
                     .scaleEffect(enabled && !reduceMotion ? (dragging ? 1.06 : hovered ? 1.03 : 1) : 1)
                     .animation(reduceMotion ? nil : PanelSettingsTheme.pressMotion, value: dragging)
                     .animation(reduceMotion ? nil : PanelSettingsTheme.hoverMotion, value: hovered)
@@ -52,8 +54,8 @@ struct IslandSettingsSlider: View {
                 .onChanged { gesture in
                     guard enabled else { return }
                     if dragOrigin == nil {
-                        let center = 8 + travel * progress
-                        dragOrigin = abs(gesture.startLocation.x - center) <= 16 ? progress : min(1, max(0, (gesture.startLocation.x - 8) / travel))
+                        let center = 9 + travel * progress
+                        dragOrigin = abs(gesture.startLocation.x - center) <= 16 ? progress : min(1, max(0, (gesture.startLocation.x - 9) / travel))
                         focused = true
                     }
                     if !dragging { onEditingChanged(true) }
@@ -118,39 +120,46 @@ struct IslandSettingsSliderRow: View {
     let upperLabel: String
     var onEditingChanged: (Bool) -> Void = { _ in }
 
+    var symbol: String? = nil
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title).font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(PanelSettingsTheme.primary)
+            HStack(alignment: .top, spacing: 12) {
+                if let symbol { SettingsGlyph(symbol: symbol) }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(MonitorDesktopTypography.rowTitle)
+                        .foregroundStyle(PanelSettingsTheme.primary)
+                    Text(detail).font(MonitorDesktopTypography.rowDetail)
+                        .foregroundStyle(PanelSettingsTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 4)
-                Text(display).font(.system(size: 12, weight: .medium)).monospacedDigit()
+                Text(display).font(MonitorDesktopTypography.valueBadge)
                     .foregroundStyle(PanelSettingsTheme.clay)
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(PanelSettingsTheme.clay.opacity(0.10), in: Capsule())
+                    .background(MonitorDesktopTheme.glyphFill, in: Capsule())
                     .fixedSize().accessibilityHidden(true)
             }
-            Text(detail).font(.system(size: 11))
-                .foregroundStyle(PanelSettingsTheme.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            IslandSettingsSlider(value: $value, range: range, step: step, title: title,
-                                 onEditingChanged: onEditingChanged)
-                .accessibilityValue(display)
-                .accessibilityHint(detail)
-            HStack {
-                Text(lowerLabel)
-                Spacer()
-                Text(upperLabel)
-            }
-            .font(.system(size: 11)).foregroundStyle(PanelSettingsTheme.secondary)
-            .accessibilityHidden(true)
-        }.padding(.vertical, 14)
+            VStack(spacing: 6) {
+                IslandSettingsSlider(value: $value, range: range, step: step, title: title,
+                                     onEditingChanged: onEditingChanged)
+                    .accessibilityValue(display)
+                    .accessibilityHint(detail)
+                HStack {
+                    Text(lowerLabel)
+                    Spacer()
+                    Text(upperLabel)
+                }
+                .font(.system(size: 10.5)).foregroundStyle(MonitorDesktopTheme.faintText)
+                .accessibilityHidden(true)
+            }.padding(.leading, symbol == nil ? 0 : 40)
+        }.padding(.vertical, 12).frame(minHeight: 58)
     }
 }
 
 enum IslandSettingsEffectPreviewMetrics {
-    static let previewCornerRadius: CGFloat = 8
-    static let height: CGFloat = 36
+    static let previewCornerRadius: CGFloat = 10
+    static let height: CGFloat = 52
 }
 
 struct IslandSettingsEffectOptionStyle: ButtonStyle {
@@ -172,7 +181,7 @@ struct IslandSettingsEffectOptionStyle: ButtonStyle {
             }
                 .frame(height: IslandSettingsEffectPreviewMetrics.height)
                 .clipShape(RoundedRectangle(cornerRadius: IslandSettingsEffectPreviewMetrics.previewCornerRadius, style: .continuous))
-                .opacity(selected || hovered ? 1 : 0.65)
+                .opacity(selected ? 1 : hovered ? 0.9 : 0.6)
                 .overlay(alignment: .topTrailing) {
                     if selected {
                         Image(systemName: "checkmark.circle.fill")
@@ -186,7 +195,12 @@ struct IslandSettingsEffectOptionStyle: ButtonStyle {
                 .foregroundStyle(selected ? PanelSettingsTheme.clay : PanelSettingsTheme.secondary)
                 .lineLimit(1).minimumScaleFactor(0.85)
         }
-        .frame(maxWidth: .infinity).contentShape(Rectangle())
+        .padding(6)
+        .frame(maxWidth: .infinity)
+        .background(MonitorDesktopTheme.subtleCardFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(selected ? MonitorDesktopTheme.accent : .clear, lineWidth: 1.5))
+        .contentShape(Rectangle())
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? PanelSettingsTheme.clay : .clear, lineWidth: 1.5).padding(-3))
         .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
         .animation(reduceMotion ? nil : PanelSettingsTheme.hoverMotion, value: hovered)

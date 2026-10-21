@@ -1,5 +1,5 @@
 // Adapted from QuotaView d16307f (MIT), Copyright (c) 2026 Duoasa.
-// Source/license: THIRD_PARTY_NOTICES.md. Observation-only adaptation; no response submission.
+// Source/license: THIRD_PARTY_NOTICES.md. Owner-validated projection; explicit submission path adapted from QuotaView f779531 (MIT).
 import Foundation
 
 /// Public confirmation content only. Transcript text and reasoning never cross this boundary.

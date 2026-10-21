@@ -1,5 +1,12 @@
 import Foundation
 
+struct IslandStep: Identifiable, Equatable {
+    enum State { case done, running, waiting }
+    let id: String
+    var title: String
+    var state: State
+}
+
 /// One row always belongs to one session and one observed turn, never to a
 /// project's representative task or merged activity list.
 struct ActivitySessionSnapshot: Identifiable, Equatable {
@@ -18,9 +25,13 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     var reasoningEffort: String? = nil
     var startedAt: Date? = nil
     var sessionTotalTokens: Int? = nil
+    var provider = "Codex"
     var isPrivate = false
     var waitReason: CodexActivityWaitReason? = nil
     var replyRequestIDs: Set<String> = []
+
+    var recentSteps: [IslandStep] = []
+    var isRetainedReceipt = false
 
     var tokenTitle: String {
         guard !isPrivate, let sessionTotalTokens else { return "— tokens" }
@@ -37,9 +48,9 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     }
     func hidingDetails() -> Self {
         Self(sessionID: sessionID, turnID: turnID, projectID: projectID, projectName: "项目",
-             title: "Codex 任务", phase: phase, actionText: "任务内容已隐藏", updatedAt: updatedAt,
-             tokenUsage: nil, endReason: endReason, isPrivate: true,
-             waitReason: waitReason, replyRequestIDs: replyRequestIDs)
+             title: provider + " 任务", phase: phase, actionText: "任务内容已隐藏", updatedAt: updatedAt,
+             tokenUsage: nil, endReason: endReason, provider: provider, isPrivate: true,
+             waitReason: waitReason, replyRequestIDs: replyRequestIDs, isRetainedReceipt: isRetainedReceipt)
     }
 
     var statusTitle: String {
@@ -86,6 +97,36 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
         return rows.first(where: { $0.phase.isActive }) ?? selected
     }
 
+    var isFreshReceipt: Bool { !phase.isActive && endReason != nil && !isRetainedReceipt }
+
+    /// Expanded-stage selection only. Nil leaves terminal-only handling to the controller.
+    static func autoFocus(rows: [Self], previous: [Self], currentFocusID: String?,
+                          manualFocusID: String?, now: Date = Date()) -> Self? {
+        let live = rows.filter { $0.phase.isActive }
+        guard !live.isEmpty else { return nil }
+        if let attention = newAttention(in: live, previous: previous) { return attention }
+        if let manual = rows.first(where: { $0.id == manualFocusID }) { return manual }
+        if let current = rows.first(where: { $0.id == currentFocusID }) {
+            let elapsed = now.timeIntervalSince(current.updatedAt)
+            if current.phase.isActive || (current.endReason != nil && elapsed >= 0
+                && elapsed < ActivityIslandFocusHandoff.duration) { return current }
+        }
+        return live.first(where: { $0.phase == .waitingApproval }) ?? live.first
+    }
+
+    static func newlyCompleted(in rows: [Self], previous: [Self]) -> Self? {
+        rows.filter { row in row.phase == .completed && !row.isRetainedReceipt && previous.contains {
+            $0.id == row.id && $0.turnID == row.turnID && $0.phase.isActive
+        } }.max { $0.updatedAt < $1.updatedAt }
+    }
+
+    static func newAttention(in rows: [Self], previous: [Self]) -> Self? {
+        rows.first { row in row.phase == .waitingApproval && !previous.contains {
+            $0.id == row.id && $0.turnID == row.turnID && $0.phase == .waitingApproval
+                && $0.replyRequestIDs == row.replyRequestIDs
+        } }
+    }
+
     static func matchingUsage(_ usages: [String: TurnTokenUsage], sessionID: String,
                               turnID: String?) -> TurnTokenUsage? {
         guard let turnID, !turnID.isEmpty, let usage = usages[sessionID], usage.sessionID == sessionID,
@@ -99,11 +140,12 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
 struct ActivitySessionState {
     private(set) var rows: [ActivitySessionSnapshot] = []
     private var receiptDeadlines: [String: Date] = [:]
+    private var retentionDeadlines: [String: Date] = [:]
     private var residentOrder: [String] = []
 
     mutating func update(projects: [ActiveProjectState], snapshots: [LocalSessionSnapshot],
                          usages: [String: TurnTokenUsage],
-                         now: Date, completionHold: TimeInterval, threadNames: [String: String] = [:]) {
+                         now: Date, completionHold: TimeInterval, retention: TimeInterval = 60, threadNames: [String: String] = [:]) {
         var incoming: [ActivitySessionSnapshot] = []
         var seen: Set<String> = []
         for project in projects {
@@ -116,8 +158,22 @@ struct ActivitySessionState {
                 let activity = session.activities.filter { $0.kind != .progress && $0.isRunning }.max { $0.updatedAt < $1.updatedAt }
                 let action = task.phase == .waitingApproval && local?.nativeWaitReason == .userInput
                     ? "请在 Codex 中选择或回复"
-                    : task.phase == .usingTool ? activity?.title ?? task.phase.title
+                    : task.phase == .usingTool ? local?.latestAssistantSummary ?? activity?.title ?? task.phase.title
                     : local?.latestAssistantSummary ?? task.phase.title
+                // The existing parser resets activities on turn start; no new source is read.
+                let currentActivities = session.activities.filter { $0.kind != .progress }
+                    .sorted { $0.updatedAt == $1.updatedAt ? $0.id < $1.id : $0.updatedAt < $1.updatedAt }
+                var steps = currentActivities.suffix(3).map {
+                    IslandStep(id: $0.id, title: $0.title, state: $0.isRunning ? .running : .done)
+                }
+                if steps.isEmpty {
+                    steps = (sameTurn?.recentSteps ?? []).map { step in
+                        var step = step
+                        if step.state == .waiting && task.phase != .waitingApproval { step.state = .running }
+                        return step
+                    }
+                }
+                if task.phase == .waitingApproval, !steps.isEmpty { steps[steps.count - 1].state = .waiting }
                 incoming.append(ActivitySessionSnapshot(
                     sessionID: session.id, turnID: task.turnID, projectID: project.id,
                     projectName: project.name, title: title.isEmpty ? previous?.title ?? project.name : title,
@@ -129,11 +185,13 @@ struct ActivitySessionState {
                     startedAt: task.startedAt ?? local?.startedAt ?? sameTurn?.startedAt,
                     sessionTotalTokens: [local?.sessionTotalTokens, previous?.sessionTotalTokens].compactMap { $0 }.max(),
                     waitReason: task.phase == .waitingApproval ? local?.nativeWaitReason ?? sameTurn?.waitReason : nil,
-                    replyRequestIDs: task.phase == .waitingApproval ? local?.nativeReplyRequestIDs ?? sameTurn?.replyRequestIDs ?? [] : []
+                    replyRequestIDs: task.phase == .waitingApproval ? local?.nativeReplyRequestIDs ?? sameTurn?.replyRequestIDs ?? [] : [],
+                    recentSteps: steps
                 ))
             }
         }
         var deadlines: [String: Date] = [:]
+        var retainedDeadlines: [String: Date] = [:]
         for previous in rows where !seen.contains(previous.sessionID) {
             let local = snapshots.first { $0.sessionID == previous.sessionID }
             // A new turn supersedes the old receipt even before it is active.
@@ -141,6 +199,7 @@ struct ActivitySessionState {
 
             var row = previous
             var deadline = receiptDeadlines[row.sessionID]
+            var retentionDeadline = retentionDeadlines[row.sessionID]
             if previous.phase.isActive {
                 guard previous.turnID?.isEmpty == false else { continue }
                 let localEnd = local?.turnID == previous.turnID ? local?.evidence?.endReason : nil
@@ -150,8 +209,11 @@ struct ActivitySessionState {
                 row.actionText = row.statusTitle
                 row.updatedAt = min(now, local?.evidence?.endedAt ?? local?.updatedAt ?? now)
                 deadline = now.addingTimeInterval(completionHold)
+                retentionDeadline = row.updatedAt.addingTimeInterval(retention)
+                row.recentSteps = row.recentSteps.map { IslandStep(id: $0.id, title: $0.title, state: .done) }
             }
-            guard let deadline, now < deadline else { continue }
+            guard let deadline, let retentionDeadline, now < retentionDeadline else { continue }
+            row.isRetainedReceipt = now >= deadline
             if let usage = ActivitySessionSnapshot.matchingUsage(usages, sessionID: row.sessionID, turnID: row.turnID) {
                 row.tokenUsage = usage
             }
@@ -166,6 +228,7 @@ struct ActivitySessionState {
             }
             incoming.append(row)
             deadlines[row.sessionID] = deadline
+            retainedDeadlines[row.sessionID] = retentionDeadline
         }
 
         // Stable resident order; only requests needing attention move to the front.
@@ -177,41 +240,13 @@ struct ActivitySessionState {
             return order[$0.id, default: 0] < order[$1.id, default: 0]
         }
         receiptDeadlines = deadlines
+        retentionDeadlines = retainedDeadlines
     }
 }
 
 // Reused from QuotaView d16307f, Copyright (c) 2026 Duoasa, MIT.
 enum CodexActivityTokenUsageFormatter {
     static func string(for totalTokens: Int64) -> String {
-        let tokens = max(totalTokens, 0)
-        if tokens >= 1_000_000_000 {
-            return compact(Double(tokens) / 1_000_000_000, suffix: "B")
-        }
-        if tokens >= 1_000_000 {
-            return compact(
-                Double(tokens) / 1_000_000,
-                suffix: "M"
-            )
-        }
-        if tokens >= 1_000 {
-            return compact(Double(tokens) / 1_000, suffix: "K")
-        }
-        return String(tokens)
-    }
-
-    private static func compact(
-        _ value: Double,
-        suffix: String
-    ) -> String {
-        let rounded = (value * 10).rounded() / 10
-        if rounded.rounded() == rounded {
-            return "\(Int64(rounded))\(suffix)"
-        }
-        return String(
-            format: "%.1f%@",
-            locale: Locale(identifier: "en_US_POSIX"),
-            rounded,
-            suffix
-        )
+        CountFormatter.display(totalTokens)
     }
 }

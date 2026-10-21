@@ -90,15 +90,21 @@ struct IslandFloatingUsageCapsule: View {
 // no-notch fitting layout as the running branch. No orb or activity renderer.
 struct ActivityIslandCompactQuotaContent: View {
     @ObservedObject var model: ActivityIslandViewModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var percent: some View {
         Text(model.compactQuotaPercent).monospacedDigit().fixedSize().foregroundStyle(FloatingSurfaceTheme.accent())
     }
     private var summary: some View {
-        IslandScrollingText(text: model.idleSummary, font: .systemFont(ofSize: 12, weight: .semibold),
-            visible: model.playbackVisible && model.presentation == .compact,
-            reduceMotion: reduceMotion || model.reduceMotionOverride)
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        Text(model.idleSummary).font(.system(size: 12, weight: .semibold))
+            .fixedSize(horizontal: true, vertical: false)
+    }
+    private var trailingSummary: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                summary
+                if !model.sessions.isEmpty { statistics }
+            }.fixedSize(horizontal: true, vertical: false)
+            summary
+        }
     }
     private var statistics: some View {
         let completed = model.sessions.filter { $0.phase == .completed }.count
@@ -118,16 +124,16 @@ struct ActivityIslandCompactQuotaContent: View {
                     HStack(spacing: 0) {
                         percent.frame(width: side, alignment: .leading).frame(maxWidth: .infinity).clipped()
                         Color.clear.frame(width: gap + 16)
-                        HStack(spacing: 6) { summary; statistics }
+                        trailingSummary
                             .frame(width: side, alignment: .trailing).frame(maxWidth: .infinity).clipped()
                     }
                 } else {
-                    IslandCompactContentLayout { percent; summary; statistics }
+                    HStack(spacing: 12) { percent; Spacer(minLength: 0); trailingSummary }
                 }
             }.padding(.horizontal, 20).frame(width: width, height: model.metrics.compactRect.height)
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).font(FloatingSurfaceTypography.action)
-            .accessibilityLabel("\(model.idleSummary)，剩余额度 \(model.compactQuotaPercent)，\(model.sessions.count) 会话")
+            .accessibilityLabel(model.compactQuotaAccessibilitySummary)
             .help("悬停展开灵动岛，点击查看额度与用量")
             .accessibilityHint("悬停展开灵动岛，点击查看额度与用量")
     }

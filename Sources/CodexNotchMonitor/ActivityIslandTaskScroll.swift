@@ -8,6 +8,13 @@ final class ActivityIslandRowVisibility: ObservableObject {
     @Published var sessionIDs: Set<String> = []
 }
 
+struct IslandApprovalMeasurement: Equatable {
+    let sessionID: String
+    let identity: String
+    let width: CGFloat
+    let height: CGFloat
+}
+
 struct ActivityIslandRowsDocument: View {
     let rows: [ActivitySessionSnapshot]
     let playback: Bool
@@ -19,6 +26,8 @@ struct ActivityIslandRowsDocument: View {
     var onSelect: ((String) -> Void)?
     var liquidGlassEnabled = true
     var glassActive = true
+    var approvalContent: ((ActivitySessionSnapshot) -> IslandApprovalContent?)?
+    var onApprovalMeasured: ((IslandApprovalMeasurement) -> Void)?
     var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     @ObservedObject var visibility: ActivityIslandRowVisibility
     var body: some View {
@@ -31,6 +40,13 @@ struct ActivityIslandRowsDocument: View {
                             .accessibilityAddTraits((focusedID ?? rows.first?.id) == row.id ? .isSelected : [])
                     } else { card(row) }
                 }
+                if row.phase == .waitingApproval, (focusedID ?? rows.first?.id) == row.id,
+                   let approval = approvalContent?(row) {
+                    let identity = approval.guardIdentity + (row.isPrivate ? "-private" : "")
+                    ActivityIslandApprovalCard(content: approval, privacy: row.isPrivate, onHeightChange: { height in
+                        onApprovalMeasured?(.init(sessionID: row.id, identity: identity, width: width, height: height))
+                    }).id(identity)
+                }
             }
         }.padding(.vertical, ActivityIslandListLayout.verticalInset)
             .frame(width: width).transaction { $0.animation = nil }
@@ -42,7 +58,7 @@ struct ActivityIslandRowsDocument: View {
         ActivityIslandTaskCard(row: row,
             animated: playback && visibility.sessionIDs.contains(row.id), rowHeight: rowHeight,
             selected: (focusedID ?? rows.first?.id) == row.id, effect: effect, reduceMotion: reduceMotion,
-            claimReplyCue: claimReplyCue)
+            claimReplyCue: claimReplyCue, hasInlineApproval: approvalContent?(row)?.hasInlineControls == true)
     }
 }
 
@@ -57,6 +73,8 @@ struct ActivityIslandTaskScroll: NSViewRepresentable {
     var focusedID: String?
     var reduceMotion = false
     var onSelect: ((String) -> Void)?
+    var approvalContent: ((ActivitySessionSnapshot) -> IslandApprovalContent?)?
+    var onApprovalMeasured: ((IslandApprovalMeasurement) -> Void)?
     var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     func makeNSView(context: Context) -> ActivityIslandNativeScroll { ActivityIslandNativeScroll() }
     func updateNSView(_ view: ActivityIslandNativeScroll, context: Context) {
@@ -64,7 +82,7 @@ struct ActivityIslandTaskScroll: NSViewRepresentable {
                        onInteraction: onInteraction, effect: effect, focusedID: focusedID,
                        reduceMotion: reduceMotion, onSelect: onSelect,
                        liquidGlassEnabled: liquidGlassEnabled, glassActive: glassActive,
-                       claimReplyCue: claimReplyCue)
+                       claimReplyCue: claimReplyCue, approvalContent: approvalContent, onApprovalMeasured: onApprovalMeasured)
     }
     static func dismantleNSView(_ view: ActivityIslandNativeScroll, coordinator: ()) { view.stop() }
 }
@@ -84,12 +102,15 @@ final class ActivityIslandNativeScroll: NSScrollView {
     private var documentWidth: CGFloat = 0
     var onInteraction: (() -> Void)?
     private var effect: ActivityIslandProgressEffect = .stateSmoke
+    private var approvalContent: ((ActivitySessionSnapshot) -> IslandApprovalContent?)?
     private var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     private var focusedID: String?
     private var reduceMotion = false
     private var liquidGlassEnabled = true
     private var glassActive = true
     private var onSelect: ((String) -> Void)?
+    private var approvalMeasurement: IslandApprovalMeasurement?
+    private var onApprovalMeasured: ((IslandApprovalMeasurement) -> Void)?
 
     init() {
         super.init(frame: .zero)
@@ -104,6 +125,7 @@ final class ActivityIslandNativeScroll: NSScrollView {
             width: 1, rowHeight: 70, visibility: visibility))
         host.sizingOptions = []
         documentView = host
+        contentView.wantsLayer = true; contentView.layer?.masksToBounds = true
         contentView.postsBoundsChangedNotifications = true
         for (name, object) in [(NSView.boundsDidChangeNotification, contentView as AnyObject),
                                (NSWindow.didChangeOcclusionStateNotification, NSApp as AnyObject),
@@ -124,9 +146,19 @@ final class ActivityIslandNativeScroll: NSScrollView {
                    rowHeight: CGFloat, onInteraction: (() -> Void)?, effect: ActivityIslandProgressEffect = .stateSmoke,
                    focusedID: String? = nil, reduceMotion: Bool = false, onSelect: ((String) -> Void)? = nil,
                    liquidGlassEnabled: Bool = true, glassActive: Bool = true,
-                   claimReplyCue: ((ActivitySessionSnapshot) -> Bool)? = nil) {
+                   claimReplyCue: ((ActivitySessionSnapshot) -> Bool)? = nil,
+                   approvalContent: ((ActivitySessionSnapshot) -> IslandApprovalContent?)? = nil,
+                   onApprovalMeasured: ((IslandApprovalMeasurement) -> Void)? = nil) {
+        self.onApprovalMeasured = onApprovalMeasured
+        self.approvalContent = approvalContent
         self.claimReplyCue = claimReplyCue
-        let next = ActivityIslandListLayout(sessionIDs: rows.map(\.id), rowHeight: rowHeight)
+        var next = ActivityIslandListLayout(sessionIDs: rows.map(\.id), rowHeight: rowHeight)
+        if let row = rows.first(where: { $0.id == (focusedID ?? rows.first?.id) }), row.phase == .waitingApproval,
+           let approval = approvalContent?(row), let measured = approvalMeasurement,
+           measured.sessionID == row.id, measured.identity == approval.guardIdentity + (row.isPrivate ? "-private" : ""),
+           abs(measured.width - max(1, contentSize.width)) < 0.5 {
+            next.extraHeights[row.id] = measured.height + ActivityIslandListLayout.rowSpacing
+        }
         let changed = next != listLayout
         let offset = contentView.bounds.minY
         let anchor = changed ? listLayout.anchor(at: offset) : nil
@@ -153,10 +185,26 @@ final class ActivityIslandNativeScroll: NSScrollView {
                 width: width, rowHeight: listLayout.rowHeight, effect: effect, focusedID: focusedID,
                 reduceMotion: reduceMotion, onSelect: onSelect,
                 liquidGlassEnabled: liquidGlassEnabled, glassActive: glassActive,
-                claimReplyCue: claimReplyCue, visibility: visibility)
+                approvalContent: approvalContent, onApprovalMeasured: { [weak self] measurement in
+                    DispatchQueue.main.async { self?.acceptApprovalMeasurement(measurement) }
+                }, claimReplyCue: claimReplyCue, visibility: visibility)
         }
         let size = CGSize(width: width, height: max(contentSize.height, listLayout.contentHeight))
         if host.frame.size != size { host.setFrameSize(size) }
+    }
+    private func acceptApprovalMeasurement(_ measured: IslandApprovalMeasurement) {
+        guard measured.height.isFinite, measured.height > 0,
+              abs(measured.width - max(1, contentSize.width)) < 0.5,
+              let row = rows.first(where: { $0.id == (focusedID ?? rows.first?.id) }), row.phase == .waitingApproval,
+              let approval = approvalContent?(row), measured.sessionID == row.id,
+              measured.identity == approval.guardIdentity + (row.isPrivate ? "-private" : ""),
+              approvalMeasurement != measured else { return }
+        let offset = contentView.bounds.minY, anchor = listLayout.anchor(at: contentView.bounds.minY)
+        approvalMeasurement = measured
+        listLayout.extraHeights = [row.id: measured.height + ActivityIslandListLayout.rowSpacing]
+        updateDocument()
+        scroll(to: anchor.flatMap { listLayout.offset(for: $0) } ?? offset)
+        onApprovalMeasured?(measured)
     }
     func scroll(to offset: CGFloat) {
         let maximum = max(0, listLayout.contentHeight - contentSize.height)

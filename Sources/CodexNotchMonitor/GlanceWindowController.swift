@@ -45,6 +45,18 @@ final class GlanceGlassCompositionView: NSView {
 }
 
 private final class GlanceGlassChromeView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(accessibilityChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+
+    @objc private func accessibilityChanged() { needsDisplay = true }
+
     var surfaceOpacity: CGFloat = 0.38 {
         didSet { needsDisplay = true }
     }
@@ -74,9 +86,12 @@ private final class GlanceGlassChromeView: NSView {
         let usesLightAppearance = effectiveAppearance.bestMatch(
             from: [.aqua, .darkAqua]
         ) == .aqua
+        let opaque = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            || NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        let opacity: CGFloat = opaque ? 1 : min(0.90, max(0.10, surfaceOpacity))
         let fill = usesLightAppearance
-            ? NSColor.white.withAlphaComponent(surfaceOpacity)
-            : NSColor.black.withAlphaComponent(surfaceOpacity)
+            ? NSColor.white.withAlphaComponent(opacity)
+            : NSColor.black.withAlphaComponent(opacity)
         fill.setFill()
         shape.fill()
 
@@ -386,7 +401,7 @@ enum GlanceGlassSurface {
         fallback.material = .underWindowBackground
         fallback.blendingMode = blendingMode
         fallback.state = .active
-        fallback.alphaValue = 0.62
+        fallback.alphaValue = 1
         fallback.wantsLayer = true
         fallback.layer?.cornerRadius = GlanceLayout.cornerRadius
         fallback.layer?.cornerCurve = .continuous

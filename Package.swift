@@ -8,6 +8,7 @@ let package = Package(
         .executable(name: "CodexNotchMonitor", targets: ["CodexNotchMonitor"]),
     ],
     targets: [
+        .executableTarget(name: "ClaudePulseHelper", path: "Sources/ClaudePulseHelper"),
         .target(name: "CZstdDecoder", path: "Vendor/Zstd", exclude: ["README.md", "LICENSE"], publicHeadersPath: "include"),
         .executableTarget(
             name: "CodexNotchMonitor",

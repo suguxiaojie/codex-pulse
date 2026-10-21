@@ -13,9 +13,11 @@ final class ActivityIslandWindowController: NSObject {
     private var lifecycle = ActivityIslandLifecycle()
     private var preferences = ActivityIslandPreferences.load()
     private let collapseTimer = ActivityIslandCollapseTimer()
+    private let focusHandoffTimer = ActivityIslandCollapseTimer()
     private var hasObservedSessions = false
     private let startupAt = Date()
     private var terminalIdentity: String?
+    private var manualFocusID: String?
     private var compactReceiptClose: DispatchWorkItem?
     private var compactStatisticTick: DispatchWorkItem?
     var onOpenSettings: (() -> Void)?
@@ -35,8 +37,11 @@ final class ActivityIslandWindowController: NSObject {
         }
         presenter.onNeedsRefresh = { [weak self] in self?.refresh(animated: false) }
         // @Published emits before assignment; defer until the visible flag is committed.
-        model.$playbackVisible.removeDuplicates().filter { $0 }.receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.synchronizeCompactSignals() }.store(in: &cancellables)
+        model.$playbackVisible.removeDuplicates().receive(on: RunLoop.main)
+            .sink { [weak self] visible in
+                self?.updateMascotVisibility()
+                if visible { self?.synchronizeCompactSignals() }
+            }.store(in: &cancellables)
         model.onExpand = { [weak self] in
             self?.handle(.expandRequested)
             self?.rescheduleTransitions()
@@ -56,15 +61,26 @@ final class ActivityIslandWindowController: NSObject {
             else { self.presenter.suppressHover(); self.handle(.collapseRequested) }
             self.rescheduleTransitions()
         }
+        model.approvalContent = { [weak store] row in store?.islandApproval(for: row) }
+        store.$approvalRevision.sink { [weak self] _ in self?.model.objectWillChange.send() }.store(in: &cancellables)
+        store.claude.$requests.receive(on: RunLoop.main).sink { [weak self] _ in
+            self?.model.objectWillChange.send()
+        }.store(in: &cancellables)
         model.onSelect = { [weak self] id in
             guard let self, let row = self.model.sessions.first(where: { $0.id == id }) else { return }
+            self.focusHandoffTimer.update(deadline: nil, onExpire: {})
+            self.manualFocusID = self.lifecycle.presentation == .expanded ? id : nil
             self.model.focusedSessionID = id
             self.model.snapshot = self.snapshot(for: row, rows: self.model.sessions)
+            self.refresh(animated: true)
         }
         model.onOpenSettings = { [weak self] in self?.onOpenSettings?() }
         model.onRefresh = { [weak self] in
             guard let self else { return }
-            if self.model.showsUsagePage { self.store.refreshQuota(); self.store.refreshCost() }
+            if self.model.showsUsagePage {
+                if self.model.usageProvider == .claude { self.store.claude.refreshUsage() }
+                else { self.store.refreshQuota(); self.store.refreshCost() }
+            }
             else { self.store.refreshSessionActivity() }
         }
         model.onOpenUsage = { [weak self] in
@@ -79,7 +95,7 @@ final class ActivityIslandWindowController: NSObject {
         }
         model.onConsumeReset = { [weak self] fingerprint, credits in
             guard let self else { return }
-            guard self.store.observedAccount?.fingerprint == fingerprint,
+            guard self.model.usageProvider == .codex, self.store.observedAccount?.fingerprint == fingerprint,
                   self.store.quotaResetCredits == credits,
                   IslandResetActionPolicy.canRequest(credits: credits, quota: self.store.quotaState,
                       busy: self.store.isConsumingQuotaResetCredit, privacy: self.model.privacyMode, fingerprint: fingerprint) else {
@@ -100,6 +116,13 @@ final class ActivityIslandWindowController: NSObject {
             self.model.usagePageHeight = height
             if self.model.showsUsagePage { self.refresh(animated: true) }
         }
+        store.claude.$enabled.removeDuplicates().sink { [weak self] in self?.model.updateClaudeEnabled($0) }.store(in: &cancellables)
+        store.claude.$statusLineEnabled.removeDuplicates().sink { [weak self] in self?.model.claudeStatusLineEnabled = $0 }.store(in: &cancellables)
+        store.claude.$usage.removeDuplicates { lhs, rhs in
+            lhs?.days == rhs?.days && lhs?.lifetimeTokens == rhs?.lifetimeTokens &&
+                lhs?.complete == rhs?.complete && lhs?.fileCount == rhs?.fileCount
+        }.sink { [weak self] in self?.model.claudeUsage = $0 }.store(in: &cancellables)
+        store.claude.$limits.removeDuplicates().sink { [weak self] in self?.model.claudeLimits = $0 }.store(in: &cancellables)
         store.$costSnapshot.sink { [weak self] in self?.model.usageCost = $0 }.store(in: &cancellables)
         store.$accountUsage.sink { [weak self] in self?.model.accountUsage = $0 }.store(in: &cancellables)
         store.$quotaResetCredits.sink { [weak self] in self?.model.resetCredits = $0 }.store(in: &cancellables)
@@ -123,11 +146,19 @@ final class ActivityIslandWindowController: NSObject {
                          NotificationCenter.default.publisher(for: .activityIslandPreferencesDidChange))
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.reloadPreferences() }
             .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: CountStyle.didChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.model.objectWillChange.send() }
+            .store(in: &cancellables)
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh(animated: false) }
+            })
         applyAppearance()
     }
     deinit {
         compactReceiptClose?.cancel(); compactStatisticTick?.cancel()
-        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.forEach { NotificationCenter.default.removeObserver($0); NSWorkspace.shared.notificationCenter.removeObserver($0) }
     }
     private func applyAppearance() {
         model.material = preferences.material
@@ -151,16 +182,19 @@ final class ActivityIslandWindowController: NSObject {
         refresh(animated: true)
     }
     private func consume(_ sessions: [ActivitySessionSnapshot]) {
+        focusHandoffTimer.update(deadline: nil, onExpire: {})
         model.finishReplyCues(for: sessions)
         let previous = model.sessions
         let baseline = !hasObservedSessions && !sessions.isEmpty
             && !sessions.contains { $0.startedAt.map { $0 >= startupAt } == true }
         if !sessions.isEmpty { hasObservedSessions = true }
-        let newlyCompleted = sessions.filter({ row in row.phase == .completed && previous.contains {
-            $0.id == row.id && $0.turnID == row.turnID && $0.phase.isActive
-        } }).max(by: { $0.updatedAt < $1.updatedAt })
+        let newlyCompleted = ActivitySessionSnapshot.newlyCompleted(in: sessions, previous: previous)
         if let completed = newlyCompleted {
             model.completionBurstSerial += 1
+            model.mascotContext.noteCompletion(completed, serial: model.completionBurstSerial,
+                playable: model.playbackVisible && !model.showsUsagePage
+                    && (model.presentation == .compact || model.focusedSessionID == completed.id)
+                    && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
             clearCompactReceipt()
             compactStatisticTick?.cancel(); compactStatisticTick = nil
             model.compactReceipt = completed; model.showsCompletedStatistic = true
@@ -171,14 +205,18 @@ final class ActivityIslandWindowController: NSObject {
             clearCompactReceipt()
         }
         let previousAttention = lifecycle.requiresAttention
-        let newAttention = live.first { row in row.phase == .waitingApproval && !previous.contains { $0.id == row.id && $0.turnID == row.turnID && $0.phase == .waitingApproval } }
-        if let focus = newAttention ?? live.first(where: { $0.id == model.focusedSessionID }) ?? live.first(where: { $0.phase == .waitingApproval }) ?? live.first {
+        let newAttention = ActivitySessionSnapshot.newAttention(in: live, previous: previous)
+        // A new request supersedes the old manual choice instead of bouncing back on refresh.
+        if newAttention != nil || !sessions.contains(where: { $0.id == manualFocusID }) {
+            manualFocusID = nil
+        }
+        if let focus = ActivitySessionSnapshot.autoFocus(rows: sessions, previous: previous,
+            currentFocusID: model.focusedSessionID, manualFocusID: manualFocusID) {
             model.sessions = sessions
             model.focusedSessionID = focus.id
             model.snapshot = snapshot(for: focus, rows: sessions)
             terminalIdentity = nil
-            let newApproval = live.contains { row in row.phase == .waitingApproval
-                && !previous.contains { $0.id == row.id && $0.turnID == row.turnID && $0.phase == .waitingApproval } }
+            let newApproval = newAttention != nil
             let attention = live.contains { $0.phase == .waitingApproval }
             if baseline {
                 handle(.baseline(requiresAttention: attention)); rescheduleTransitions()
@@ -188,19 +226,25 @@ final class ActivityIslandWindowController: NSObject {
                 handle(.contentUpdated(requiresAttention: attention))
                 if previousAttention && !attention { rescheduleTransitions() }
             }
-        } else if let ended = sessions.filter({ $0.endReason != nil }).max(by: { $0.updatedAt < $1.updatedAt }) {
+        } else if let ended = sessions.filter({ $0.isFreshReceipt }).max(by: { $0.updatedAt < $1.updatedAt }) {
             if ended.phase != .completed { clearCompactReceipt() }
             model.sessions = sessions
-            model.focusedSessionID = ended.id
-            model.snapshot = snapshot(for: ended, rows: sessions)
+            let focus = sessions.first { $0.id == model.focusedSessionID } ?? ended
+            model.focusedSessionID = focus.id
+            model.snapshot = snapshot(for: focus, rows: sessions)
             let identity = ended.sessionID + "/" + (ended.turnID ?? "")
             if terminalIdentity != identity {
                 terminalIdentity = identity
                 handle(.activityEnded); rescheduleTransitions()
             } else { refresh(animated: true) }
-        } else if terminalIdentity != nil && (lifecycle.isInteracting || model.isPinned) {
-            // Keep the final receipt until its own compact/hide deadline. The
-            // data layer's per-row hold can expire while the pointer is inside.
+        } else if !sessions.isEmpty {
+            model.sessions = sessions
+            let focus = sessions.first { $0.id == model.focusedSessionID } ?? sessions.first!
+            model.focusedSessionID = focus.id
+            model.snapshot = snapshot(for: focus, rows: sessions)
+            clearCompactReceipt()
+            model.showsCompletedStatistic = false
+            // Expired receipts may be browsed, but never start a new lifecycle hold.
             refresh(animated: true)
         } else {
             model.sessions = []; model.snapshot = nil
@@ -227,10 +271,48 @@ final class ActivityIslandWindowController: NSObject {
     }
     private func refresh(animated: Bool) {
         model.presentation = lifecycle.presentation
+        if model.presentation != .expanded, manualFocusID != nil {
+            manualFocusID = nil
+            if let focus = ActivitySessionSnapshot.autoFocus(rows: model.sessions, previous: model.sessions,
+                currentFocusID: model.focusedSessionID, manualFocusID: nil) {
+                model.focusedSessionID = focus.id
+                model.snapshot = snapshot(for: focus, rows: model.sessions)
+            }
+        }
         model.reduceMotionOverride = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        scheduleFocusHandoff()
         guard let screen = targetScreen() else { presenter.hide(animated: false); return }
         presenter.present(screen: screen, preferences: preferences, animated: animated)
+        updateMascotVisibility()
         synchronizeCompactSignals()
+    }
+    private func updateMascotVisibility() {
+        let rect = model.presentation == .expanded ? model.metrics.expandedRect : model.metrics.compactRect
+        let frame = presenter.panel.frame
+        let globalRect = CGRect(x: frame.minX + rect.minX, y: frame.maxY - rect.maxY,
+            width: rect.width, height: rect.height)
+        model.mascotContext.update(visible: model.playbackVisible && model.presentation != .hidden,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || model.reduceMotionOverride,
+            islandRect: globalRect)
+    }
+
+    private func scheduleFocusHandoff() {
+        guard manualFocusID == nil, model.sessions.contains(where: { $0.phase.isActive }),
+              let completed = model.sessions.first(where: { $0.id == model.focusedSessionID }),
+              completed.phase == .completed else {
+            focusHandoffTimer.update(deadline: nil, onExpire: {}); return
+        }
+        let deadline = completed.updatedAt.addingTimeInterval(ActivityIslandFocusHandoff.duration)
+        // New data replaces the pending work but retains the absolute completion deadline.
+        focusHandoffTimer.update(deadline: deadline) { [weak self] in
+            guard let self, self.manualFocusID == nil,
+                  self.model.focusedSessionID == completed.id,
+                  self.model.sessions.contains(where: { $0.id == completed.id && $0.turnID == completed.turnID
+                      && $0.phase == .completed && $0.updatedAt == completed.updatedAt }),
+                  let focus = self.model.handoffFocus(now: Date()) else { return }
+            self.model.snapshot = self.snapshot(for: focus, rows: self.model.sessions)
+            self.refresh(animated: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        }
     }
     private func clearCompactReceipt() {
         compactReceiptClose?.cancel(); compactReceiptClose = nil
@@ -243,7 +325,7 @@ final class ActivityIslandWindowController: NSObject {
         let completed = rows.filter { $0.phase == .completed }.count
         if let receipt = model.compactReceipt,
            rows.contains(where: { $0.phase == .waitingApproval }) ||
-           !rows.contains(where: { $0.id == receipt.id && $0.turnID == receipt.turnID && $0.phase == .completed }) {
+           !rows.contains(where: { $0.id == receipt.id && $0.turnID == receipt.turnID && $0.phase == .completed && !$0.isRetainedReceipt }) {
             clearCompactReceipt()
         }
         guard model.presentation == .compact, model.playbackVisible else {

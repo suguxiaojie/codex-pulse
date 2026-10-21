@@ -19,35 +19,37 @@ enum ActivityIslandSurfaceMotion {
 struct ActivityIslandListLayout: Equatable {
     let sessionIDs: [String]
     var rowHeight: CGFloat = 62
+    var extraHeights: [String: CGFloat] = [:]
     static let rowSpacing: CGFloat = 8
     static let verticalInset: CGFloat = 12
 
     struct Anchor { let sessionID: String; let inset: CGFloat }
     var contentHeight: CGFloat {
         Self.verticalInset * 2 + CGFloat(sessionIDs.count) * rowHeight
-            + CGFloat(max(0, sessionIDs.count - 1)) * Self.rowSpacing
+            + CGFloat(max(0, sessionIDs.count - 1)) * Self.rowSpacing + extraHeights.values.reduce(0, +)
     }
     func anchor(at offset: CGFloat) -> Anchor? {
         var cursor = Self.verticalInset
         for (index, id) in sessionIDs.enumerated() {
-            if offset < cursor + rowHeight + Self.rowSpacing || index == sessionIDs.count - 1 {
+            if offset < cursor + rowHeight + (extraHeights[id] ?? 0) + Self.rowSpacing || index == sessionIDs.count - 1 {
                 return Anchor(sessionID: id, inset: offset - cursor)
             }
-            cursor += rowHeight + Self.rowSpacing
+            cursor += rowHeight + (extraHeights[id] ?? 0) + Self.rowSpacing
         }
         return nil
     }
     func offset(for anchor: Anchor) -> CGFloat? {
         guard let index = sessionIDs.firstIndex(of: anchor.sessionID) else { return nil }
         return Self.verticalInset + CGFloat(index) * (rowHeight + Self.rowSpacing)
-            + min(rowHeight + Self.rowSpacing, anchor.inset)
+            + sessionIDs.prefix(index).reduce(0) { $0 + (extraHeights[$1] ?? 0) }
+            + min(rowHeight + (extraHeights[anchor.sessionID] ?? 0) + Self.rowSpacing, anchor.inset)
     }
     func visibleSessionIDs(offset: CGFloat, viewport: CGFloat) -> Set<String> {
         var result: Set<String> = []
         var cursor = Self.verticalInset
         for id in sessionIDs {
             if cursor < offset + viewport && cursor + rowHeight > offset { result.insert(id) }
-            cursor += rowHeight + Self.rowSpacing
+            cursor += rowHeight + (extraHeights[id] ?? 0) + Self.rowSpacing
         }
         return result
     }
@@ -88,21 +90,32 @@ struct ActivityIslandPanelMetrics: Equatable {
     static let headerHeight: CGFloat = 36
     static let footerHeight: CGFloat = 36
 
+    static func focusHeight(for row: ActivitySessionSnapshot?) -> CGFloat {
+        guard let row else { return 78 }
+        if row.isPrivate { return 78 }
+        return 78 + CGFloat(max(0, row.recentSteps.count - 1)) * 17
+            + (!row.phase.isActive && !row.recentSteps.isEmpty ? 17 : 0)
+    }
+    static let railHeight: CGFloat = 38 // 30 pt capsules plus 8 pt separation.
+    static func stageHeight(rowCount: Int, focusHeight: CGFloat) -> CGFloat {
+        ActivityIslandListLayout.verticalInset * 2 + focusHeight + (rowCount > 1 ? railHeight : 0)
+    }
+
     init(rowCount: Int, availableSize: CGSize, expandedWidth: CGFloat = 680,
          safeAreaTop: CGFloat = 0, hardwareGap: CGFloat = 0, floatingUsage: Bool = false,
-         usagePage: Bool = false, reservesUsagePage: Bool = false, usagePageHeight: CGFloat = 580) {
+         usagePage: Bool = false, reservesUsagePage: Bool = false, usagePageHeight: CGFloat = 580,
+         focusHeight: CGFloat = 112) {
         let inset: CGFloat = 10
         let usageHeight: CGFloat = floatingUsage ? 44 : 0
         let geometry = ActivityIslandWidthGeometry(screenWidth: availableSize.width, cameraWidth: hardwareGap)
         let width = geometry.expandedWidth(preferred: expandedWidth)
-        rowHeight = 62
+        rowHeight = focusHeight
         self.hardwareGap = hardwareGap
         let chrome = Self.headerHeight + Self.footerHeight + ActivityIslandListLayout.verticalInset * 2
-        let capacity = max(1, min(4, Int(floor((max(150, availableSize.height) - usageHeight - inset * 2 - chrome
-            + ActivityIslandListLayout.rowSpacing) / (rowHeight + ActivityIslandListLayout.rowSpacing)))))
-        visibleRowCount = min(max(1, rowCount), capacity)
-        let maxListHeight = ActivityIslandListLayout(sessionIDs: (0..<capacity).map(String.init), rowHeight: rowHeight).contentHeight
-        let listHeight = ActivityIslandListLayout(sessionIDs: (0..<visibleRowCount).map(String.init), rowHeight: rowHeight).contentHeight
+        visibleRowCount = 1 // One focus card; every other session lives in the horizontal rail.
+        let maximumListHeight = max(1, availableSize.height - usageHeight - inset * 2 - Self.headerHeight - Self.footerHeight)
+        let maxListHeight = min(maximumListHeight, Self.stageHeight(rowCount: 2, focusHeight: 129))
+        let listHeight = min(maximumListHeight, Self.stageHeight(rowCount: rowCount, focusHeight: focusHeight))
         maximumUsageHeight = max(120, availableSize.height - inset * 2 - usageHeight)
         let pageHeight = min(maximumUsageHeight, max(120, usagePageHeight))
         let taskCanvasHeight = chrome - ActivityIslandListLayout.verticalInset * 2 + maxListHeight + inset * 2 + usageHeight

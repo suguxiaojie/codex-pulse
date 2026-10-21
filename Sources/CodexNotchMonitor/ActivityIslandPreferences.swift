@@ -138,3 +138,7 @@ struct ActivityIslandPreferences: Equatable {
              glassAppearance: ActivityIslandGlassAppearance(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.glassAppearance) ?? "") ?? .dark)
     }
 }
+
+// List retention is independent of compact receipt and automatic expansion timing.
+enum ActivityIslandSessionRetention { static let duration: TimeInterval = 60 }
+enum ActivityIslandFocusHandoff { static let duration: TimeInterval = 3 }

@@ -2,7 +2,7 @@
 import Foundation
 
 struct IslandDashboardCost {
-    struct Day: Identifiable {
+    struct Day: Identifiable, Equatable {
         let date: Date
         let tokens: Int?
         let cost: Double?
@@ -12,12 +12,21 @@ struct IslandDashboardCost {
     static let usdPerMillionTokens = 0.50
     let days: [Day]
     let official: Bool
+    private var requiresCompletePrices = false
+    private var latestRecordedDate: Date?
     var total: Double? {
+        if requiresCompletePrices && days.contains(where: { $0.cost == nil }) { return nil }
         let known = days.compactMap(\.cost)
         return known.isEmpty ? nil : known.reduce(0, +)
     }
-    var latest: Day? { days.last { $0.tokens != nil } }
+    var latest: Day? {
+        requiresCompletePrices ? days.last { $0.date == latestRecordedDate } : days.last { $0.tokens != nil }
+    }
     var maximum: Double { max(0.001, days.compactMap(\.cost).max() ?? 0) }
+    init(claudeDays: [Day], latestRecordedDate: Date?) {
+        days = claudeDays; official = false; requiresCompletePrices = true
+        self.latestRecordedDate = latestRecordedDate
+    }
     init(account: AccountUsageSnapshot?, local: CostScopeSnapshot, now: Date = Date()) {
         official = account != nil
         if let account {

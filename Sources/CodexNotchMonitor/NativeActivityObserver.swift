@@ -101,6 +101,31 @@ final class NativeActivityObserver {
     private var started = false
     private var followed: Set<String> = []
     private var evidence: [String: NativeActivityEvidence] = [:]
+    private(set) var approvalSnapshots: [String: CodexDesktopConversationSnapshot] = [:]
+    private(set) var submissionMessages: [String: String] = [:]
+    func submit(_ handle: CodexDesktopIPCRequestHandle, result: Data) async -> String {
+        if let message = submissionMessages[handle.identity] { return message }
+        submissionMessages[handle.identity] = "正在提交"
+        let message: String
+        do {
+            _ = try await client.submit(handle: handle, result: result)
+            let current = approvalSnapshots[handle.conversationID]
+            message = Self.submissionMessage(for: current?.supportsUntrustedAppInput == true
+                && current?.requests.contains(handle) == true ? nil : CodexDesktopIPCError.outcomeUnknown)
+        } catch {
+            message = Self.submissionMessage(for: error)
+        }
+        submissionMessages[handle.identity] = message
+        publishChange()
+        return message
+    }
+    static func submissionMessage(for error: Error?) -> String {
+        guard let error else { return "已发送，等待 Codex 确认" }
+        if let error = error as? CodexDesktopIPCError, error == .staleRequest || error == .alreadySubmitted {
+            return "请求已变化，请在 Codex 中查看"
+        }
+        return "结果未知，请在 Codex 中确认"
+    }
     // Like QuotaView's terminal-turn registry, positive stale events cannot
     // reopen a settled identity. Keep only one bounded tombstone per follow.
     private var terminalTurns: [String: NativeActivityEvidence] = [:]
@@ -122,6 +147,7 @@ final class NativeActivityObserver {
         let desired = Set(snapshots.filter { $0.sessionKind == .user || $0.sessionKind == .unknown }.map(\.sessionID))
         let added = desired.subtracting(followed), removed = followed.subtracting(desired)
         followed = desired
+        approvalSnapshots = approvalSnapshots.filter { desired.contains($0.key) }
         evidence = evidence.filter { desired.contains($0.key) }
         terminalTurns = terminalTurns.filter { desired.contains($0.key) }
         excluded.formIntersection(desired)
@@ -150,6 +176,10 @@ final class NativeActivityObserver {
         guard state == .connected, followed.contains(snapshot.conversationID), snapshot.hostID == "local",
               let projection = snapshot.interactionProjection else { return }
         let id = snapshot.conversationID
+        if [.user, .unknown].contains(projection.sourceKind) { approvalSnapshots[id] = snapshot }
+        else { approvalSnapshots.removeValue(forKey: id) }
+        let live = Set(approvalSnapshots.values.flatMap { $0.requests.map(\.identity) })
+        submissionMessages = submissionMessages.filter { live.contains($0.key) }
         let revision = "\(snapshot.connectionEpoch)/\(snapshot.streamGeneration)/\(snapshot.revision)"
         guard revisionKeys[id] != revision else { return }
         revisionKeys[id] = revision
@@ -175,13 +205,24 @@ final class NativeActivityObserver {
     }
     private func connectionChanged(_ value: CodexDesktopIPCConnectionState) {
         state = value
+        if value != .connected { disableSubmissions(for: nil) }
         if value != .connected { evidence.removeAll(); revisionKeys.removeAll(); excluded.removeAll() }
         publishChange()
     }
     private func invalidate(_ id: String?) {
+        disableSubmissions(for: id)
         if let id { evidence.removeValue(forKey: id); revisionKeys.removeValue(forKey: id) }
         else { evidence.removeAll(); revisionKeys.removeAll() }
         publishChange()
+    }
+    private func disableSubmissions(for id: String?) {
+        for key in Array(approvalSnapshots.keys) where id == nil || key == id {
+            guard let snapshot = approvalSnapshots[key] else { continue }
+            approvalSnapshots[key] = snapshot.disablingSubmission()
+            for handle in snapshot.requests where submissionMessages[handle.identity] != nil {
+                submissionMessages[handle.identity] = Self.submissionMessage(for: CodexDesktopIPCError.outcomeUnknown)
+            }
+        }
     }
     func merge(_ snapshots: [LocalSessionSnapshot], names: [String: String])
         -> (snapshots: [LocalSessionSnapshot], names: [String: String]) {
@@ -196,6 +237,7 @@ final class NativeActivityObserver {
         return (result, titles)
     }
     func stop() async {
+        approvalSnapshots.removeAll(); submissionMessages.removeAll()
         publishWork?.cancel(); publishWork = nil
         started = false; followed.removeAll(); evidence.removeAll(); terminalTurns.removeAll(); excluded.removeAll(); revisionKeys.removeAll()
         await client.stop()

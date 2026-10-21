@@ -36,15 +36,15 @@ struct PanelSettingsToggleStyle: ToggleStyle {
         HStack(spacing: 8) {
             Text(configuration.isOn ? onTitle : offTitle)
                 .font(.system(size: 11))
-                .foregroundStyle(PanelSettingsTheme.secondary)
+                .foregroundStyle(configuration.isOn ? MonitorDesktopTheme.secondaryText : MonitorDesktopTheme.faintText)
                 .accessibilityHidden(true)
             Button { configuration.isOn.toggle() } label: {
-                Capsule().fill(configuration.isOn ? PanelSettingsTheme.clay : PanelSettingsTheme.border)
-                    .frame(width: 34, height: 20)
+                Capsule().fill(configuration.isOn ? PanelSettingsTheme.clay : MonitorDesktopTheme.primaryText.opacity(0.14))
+                    .frame(width: 36, height: 21)
                     .overlay {
-                        Circle().fill(.white).frame(width: 16, height: 16)
+                        Circle().fill(.white).frame(width: 17, height: 17)
                             .shadow(color: .black.opacity(0.12), radius: 1, y: 1)
-                            .offset(x: configuration.isOn ? 7 : -7)
+                            .offset(x: configuration.isOn ? 7.5 : -7.5)
                     }
                     .padding(.vertical, 5)
                     .contentShape(Rectangle())
@@ -77,10 +77,11 @@ struct PanelSettingsSegments: View {
                     Text(option)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(selection == option ? PanelSettingsTheme.primary : PanelSettingsTheme.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 32)
+                        .frame(maxWidth: .infinity, minHeight: 24)
                         .background {
                             if selection == option {
                                 Capsule().fill(PanelSettingsTheme.thumb)
+                                    .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
                                     .matchedGeometryEffect(id: "panel-selection", in: namespace)
                             }
                         }
@@ -161,14 +162,163 @@ struct PanelSettingsGroup<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(PanelSettingsTheme.primary)
-                .accessibilityAddTraits(.isHeader)
+        SettingsSection(title: title) { content }
+    }
+}
+
+struct SettingsGlyph: View {
+    let symbol: String
+    var tint: Color = MonitorDesktopTheme.accent
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(tint)
+            .frame(width: 28, height: 28)
+            .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+struct SettingsSection<Content: View>: View {
+    let title: String
+    var trailing: String? = nil
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(MonitorDesktopTypography.sectionLabel).tracking(0.6)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                if let trailing { Text(trailing).font(MonitorDesktopTypography.metadata) }
+            }
+            .foregroundStyle(MonitorDesktopTheme.tertiaryText).padding(.horizontal, 4)
             VStack(spacing: 0) { content }
                 .padding(.horizontal, 14)
-                .modifier(MonitorDesktopCardSurface())
+                .modifier(MonitorDesktopCardSurface(cornerRadius: 14))
         }
+    }
+}
+
+struct SettingsRow<Control: View>: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    @ViewBuilder let control: Control
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(MonitorDesktopTypography.rowTitle)
+                .foregroundStyle(MonitorDesktopTheme.primaryText)
+            if !detail.isEmpty {
+                Text(detail).font(MonitorDesktopTypography.rowDetail)
+                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                SettingsGlyph(symbol: symbol)
+                label.frame(minWidth: detail.isEmpty ? nil : 120, maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 0)
+                control.fixedSize()
+            }
+            HStack(alignment: .top, spacing: 12) {
+                SettingsGlyph(symbol: symbol)
+                VStack(alignment: .leading, spacing: 10) {
+                    label
+                    control.fixedSize(horizontal: false, vertical: true)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 12).frame(minHeight: 58)
+    }
+}
+
+/// The enclosing section already supplies the first 14 points of inset.
+struct SettingsRowDivider: View {
+    var body: some View {
+        Rectangle().fill(MonitorDesktopTheme.hairline).frame(height: 0.5)
+            .padding(.leading, 40).accessibilityHidden(true)
+    }
+}
+
+struct SettingsStageSurface: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        content.background {
+            GeometryReader { geometry in
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(MonitorDesktopTheme.surface)
+                    .overlay {
+                        RadialGradient(colors: [MonitorDesktopTheme.stageHighlight, .clear],
+                                       center: .top, startRadius: 0, endRadius: geometry.size.width * 0.7)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.16 : 0.07), radius: 10, y: 3)
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(contrast == .increased ? MonitorDesktopTheme.contrastOutline : MonitorDesktopTheme.border.opacity(0.5), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+struct SettingsStage<Accessory: View, Content: View>: View {
+    let title: String
+    let status: String
+    let caption: String
+    @ViewBuilder var accessory: () -> Accessory
+    @ViewBuilder var content: () -> Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathes = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Circle().fill(MonitorDesktopTheme.accent).frame(width: 6, height: 6)
+                    .opacity(reduceMotion || breathes ? 1 : 0.55)
+                    .accessibilityHidden(true)
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 4)
+                Text(status).font(MonitorDesktopTypography.metadata)
+                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(MonitorDesktopTheme.primaryText.opacity(0.05), in: Capsule())
+                    .fixedSize()
+            }
+            content()
+            ViewThatFits(in: .horizontal) {
+                HStack { captionLabel; Spacer(minLength: 8); accessory() }
+                VStack(alignment: .leading, spacing: 8) { captionLabel; accessory() }
+            }
+        }
+        .padding(14).modifier(SettingsStageSurface())
+        .task(id: reduceMotion) {
+            breathes = false
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { breathes = true }
+        }
+        .onDisappear { breathes = false }
+    }
+
+    private var captionLabel: some View {
+        Text(caption).font(MonitorDesktopTypography.metadata)
+            .foregroundStyle(MonitorDesktopTheme.secondaryText).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+extension SettingsStage where Accessory == EmptyView {
+    init(title: String, status: String, caption: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title; self.status = status; self.caption = caption
+        self.accessory = { EmptyView() }; self.content = content
     }
 }

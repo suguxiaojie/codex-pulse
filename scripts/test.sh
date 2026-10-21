@@ -19,6 +19,21 @@ cd "$project_dir"
 mkdir -p .tmp/test-runtime
 zstd_object="$project_dir/.tmp/test-runtime/zstddeclib.o"
 clang -O2 -mmacosx-version-min=13.0 -c Vendor/Zstd/zstddeclib.c -o "$zstd_object"
+swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CountFormatter.swift Tests/CountFormatterTests.swift -o "$test_binary"
+"$test_binary"
+
+swiftc Sources/CodexNotchMonitor/CountFormatter.swift -swift-version 5 -parse-as-library \
+  Sources/CodexNotchMonitor/Models.swift \
+  Sources/CodexNotchMonitor/ActivityIslandPreferences.swift \
+  Sources/CodexNotchMonitor/GlanceLayout.swift \
+  Sources/CodexNotchMonitor/GlanceContentPreferences.swift \
+  Sources/CodexNotchMonitor/GlanceForecast.swift \
+  Sources/CodexNotchMonitor/ClaudeCodePricing.swift \
+  Sources/CodexNotchMonitor/ClaudeCodeTranscript.swift \
+  Sources/CodexNotchMonitor/ClaudeCodeUsage.swift \
+  Tests/GlanceForecastTests.swift -o "$test_binary"
+"$test_binary"
+
 swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/RolloutReader.swift Tests/RolloutReaderTests.swift -o "$test_binary"
 "$test_binary"
 swiftc -swift-version 5 -parse-as-library \
@@ -28,7 +43,7 @@ swiftc -swift-version 5 -parse-as-library \
   -o "$test_binary"
 "$test_binary"
 
-swiftc -I Vendor/Zstd/include "$zstd_object" \
+swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" \
   -swift-version 5 \
   -parse-as-library \
   Sources/CodexNotchMonitor/CoverAILinks.swift \
@@ -47,7 +62,7 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   -o "$test_binary"
 "$test_binary"
 
-swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
+swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
   Sources/CodexNotchMonitor/CoverAILinks.swift \
   Sources/CodexNotchMonitor/CodexProjectCatalog.swift \
   Sources/CodexNotchMonitor/Models.swift \
@@ -60,7 +75,7 @@ swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library 
   -o "$activity_island_test_binary"
 "$activity_island_test_binary"
 
-swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CoverAILinks.swift Sources/CodexNotchMonitor/CodexProjectCatalog.swift Sources/CodexNotchMonitor/Models.swift Sources/CodexNotchMonitor/ActivityIslandPreferences.swift Sources/CodexNotchMonitor/TurnTokenState.swift Sources/CodexNotchMonitor/SessionActivityService.swift Sources/CodexNotchMonitor/CodexNativeActivityTypes.swift Sources/CodexNotchMonitor/CodexDesktopIPCClient.swift Sources/CodexNotchMonitor/CodexDesktopRequestProjection.swift Sources/CodexNotchMonitor/NativeActivityObserver.swift Sources/CodexNotchMonitor/ActivitySessionState.swift Tests/NativeActivityFixture.swift Tests/NativeActivityTests.swift -o "$activity_island_test_binary"
+swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CoverAILinks.swift Sources/CodexNotchMonitor/CodexProjectCatalog.swift Sources/CodexNotchMonitor/Models.swift Sources/CodexNotchMonitor/ActivityIslandPreferences.swift Sources/CodexNotchMonitor/TurnTokenState.swift Sources/CodexNotchMonitor/SessionActivityService.swift Sources/CodexNotchMonitor/CodexNativeActivityTypes.swift Sources/CodexNotchMonitor/CodexDesktopIPCClient.swift Sources/CodexNotchMonitor/CodexDesktopRequestProjection.swift Sources/CodexNotchMonitor/NativeActivityObserver.swift Sources/CodexNotchMonitor/ActivitySessionState.swift Tests/NativeActivityFixture.swift Tests/NativeActivityTests.swift -o "$activity_island_test_binary"
 "$activity_island_test_binary"
 
 swiftc -I Vendor/Zstd/include "$zstd_object" \
@@ -73,7 +88,7 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   -o "$ripple_test_binary"
 "$ripple_test_binary"
 
-swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
+swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
   Sources/CodexNotchMonitor/CoverAILinks.swift \
   Sources/CodexNotchMonitor/CodexProjectCatalog.swift \
   Sources/CodexNotchMonitor/Models.swift \
@@ -85,17 +100,28 @@ swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library 
   Sources/CodexNotchMonitor/ActivityIslandLifecycle.swift \
   Sources/CodexNotchMonitor/RippleGlowOrb.swift \
   Sources/CodexNotchMonitor/ActivityIslandMotion.swift \
+  Sources/CodexNotchMonitor/MonitorDesktopStyle.swift \
   Sources/CodexNotchMonitor/ActivityIslandGlass.swift \
   Sources/CodexNotchMonitor/ActivityIslandUsageCapsule.swift \
   Sources/CodexNotchMonitor/ActivityIslandTaskEffectHost.swift \
   Sources/CodexNotchMonitor/ActivityIslandEffects.swift \
   Sources/CodexNotchMonitor/ActivityIslandStateSmoke.swift \
   Sources/CodexNotchMonitor/ActivityIslandScrollingText.swift \
+  Sources/CodexNotchMonitor/ActivityIslandApprovalCard.swift \
   Sources/CodexNotchMonitor/ActivityIslandView.swift \
+  Sources/CodexNotchMonitor/ActivityIslandDesktopPreview.swift \
+  Sources/CodexNotchMonitor/ActivityIslandMascot.swift \
+  Sources/CodexNotchMonitor/ActivityIslandFocusCard.swift \
   Sources/CodexNotchMonitor/ActivityIslandUsageDashboard.swift \
   Sources/CodexNotchMonitor/IslandDashboardChartScroll.swift \
   Sources/CodexNotchMonitor/IslandDashboardPageLayout.swift \
   Sources/CodexNotchMonitor/IslandDashboardCost.swift \
+  Sources/CodexNotchMonitor/IslandClaudeUsage.swift \
+  Sources/CodexNotchMonitor/IslandUsagePresentation.swift \
+  Sources/CodexNotchMonitor/IslandUsageSections.swift \
+  Sources/CodexNotchMonitor/ClaudeCodePricing.swift \
+  Sources/CodexNotchMonitor/ClaudeCodeTranscript.swift \
+  Sources/CodexNotchMonitor/ClaudeCodeUsage.swift \
   Sources/CodexNotchMonitor/IslandDashboardTicket.swift \
   Sources/CodexNotchMonitor/IslandDashboardResetPage.swift \
   Sources/CodexNotchMonitor/IslandDashboardResetActionStyle.swift \
@@ -111,6 +137,9 @@ swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library 
   Sources/CodexNotchMonitor/ActivityIslandTaskScroll.swift \
   Sources/CodexNotchMonitor/ActivityIslandPanel.swift \
   Sources/CodexNotchMonitor/ActivityIslandCompletionConfetti.swift \
+  Tests/IslandMascotTests.swift \
+  Tests/IslandHardwareBlackTests.swift \
+  Tests/IslandDesktopPreviewTests.swift \
   Tests/ActivityIslandPanelTests.swift \
   -o "$activity_island_test_binary"
 "$activity_island_test_binary"
@@ -124,12 +153,13 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
 "$activity_island_test_binary"
 
 swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
+  Sources/CodexNotchMonitor/CountFormatter.swift \
   Sources/CodexNotchMonitor/StatusItemLayout.swift \
   Tests/StatusItemLayoutTests.swift \
   -o "$activity_island_test_binary"
 "$activity_island_test_binary"
 
-swiftc -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
+swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
   Sources/CodexNotchMonitor/TurnTokenState.swift \
   Tests/TurnTokenStateTests.swift \
   -o "$activity_island_test_binary"
@@ -229,3 +259,5 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   Tests/ContinuityTests.swift \
   -o "$continuity_test_binary"
 "$continuity_test_binary"
+
+zsh scripts/test-claude.sh

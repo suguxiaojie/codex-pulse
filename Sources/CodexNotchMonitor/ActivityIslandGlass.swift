@@ -101,7 +101,12 @@ private struct IslandGlassActiveKey: EnvironmentKey {
 private struct IslandLiquidGlassEnabledKey: EnvironmentKey {
     static let defaultValue = true
 }
+private struct IslandHardwareBlackKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
+    var islandHardwareBlack: Bool {
+        get { self[IslandHardwareBlackKey.self] }
+        set { self[IslandHardwareBlackKey.self] = newValue }
+    }
     var islandLiquidGlassEnabled: Bool {
         get { self[IslandLiquidGlassEnabledKey.self] }
         set { self[IslandLiquidGlassEnabledKey.self] = newValue }
@@ -142,18 +147,20 @@ struct IslandGlassAppearanceContext: ViewModifier {
     var material: ActivityIslandMaterial
     @ObservedObject private var system = IslandSystemAppearance.shared
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.islandHardwareBlack) private var hardwareBlack
     func body(content: Content) -> some View {
         content.environment(\.islandGlassColorScheme,
-            appearance.colorScheme(system: system.colorScheme, material: material, reduceTransparency: reduceTransparency))
+            hardwareBlack ? .dark : appearance.colorScheme(system: system.colorScheme, material: material, reduceTransparency: reduceTransparency))
     }
 }
 
 // Apply to exposed chrome only. Cards and the black header retain their dark environment.
 struct IslandGlassChrome: ViewModifier {
     @Environment(\.islandGlassColorScheme) private var scheme
+    @Environment(\.islandHardwareBlack) private var hardwareBlack
     func body(content: Content) -> some View {
-        content.environment(\.colorScheme, scheme)
-            .foregroundStyle(FloatingSurfaceTheme.primary(scheme).opacity(0.90))
+        content.environment(\.colorScheme, hardwareBlack ? .dark : scheme)
+            .foregroundStyle(FloatingSurfaceTheme.primary(hardwareBlack ? .dark : scheme).opacity(0.90))
     }
 }
 
@@ -175,6 +182,8 @@ struct IslandGlassSurface<Outline: InsettableShape>: ViewModifier {
     var tint: Color = .black.opacity(0.28)
     var solidTint: Color = Color(white: 0.14)
     var clearSurface = false
+    var hardwareTint: Color? = nil
+    @Environment(\.islandHardwareBlack) private var hardwareBlack
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.islandGlassActive) private var active
     @Environment(\.islandLiquidGlassEnabled) private var liquidGlassEnabled
@@ -196,7 +205,20 @@ struct IslandGlassSurface<Outline: InsettableShape>: ViewModifier {
         return separatesDarkTint ? .clear : glass.tint(tint)
     }
     @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
+        if hardwareBlack {
+            content.background {
+                if active { outline.fill(hardwareTint ?? IslandHardwareBlack.surface) }
+            }
+            .overlay {
+                if active {
+                    outline.strokeBorder(.white.opacity(0.05), lineWidth: 0.5)
+                        .allowsHitTesting(false)
+                    outline.strokeBorder(.white.opacity(0.07), lineWidth: 0.5)
+                        .mask(alignment: .top) { Rectangle().frame(height: 1) }
+                        .allowsHitTesting(false)
+                }
+            }
+        } else if #available(macOS 26.0, *) {
             // Keep the content/anchor identity when a page becomes hidden.
             // Identity disables the material without replacing the card subtree.
             content
@@ -231,8 +253,8 @@ struct IslandGlassSurface<Outline: InsettableShape>: ViewModifier {
 }
 
 extension View {
-    func islandGlass<Outline: InsettableShape>(_ outline: Outline, tint: Color = .black.opacity(0.28), solidTint: Color = Color(white: 0.14), clearSurface: Bool = false) -> some View {
-        modifier(IslandGlassSurface(outline: outline, tint: tint, solidTint: solidTint, clearSurface: clearSurface))
+    func islandGlass<Outline: InsettableShape>(_ outline: Outline, tint: Color = .black.opacity(0.28), solidTint: Color = Color(white: 0.14), clearSurface: Bool = false, hardwareTint: Color? = nil) -> some View {
+        modifier(IslandGlassSurface(outline: outline, tint: tint, solidTint: solidTint, clearSurface: clearSurface, hardwareTint: hardwareTint))
     }
 }
 
@@ -317,36 +339,83 @@ final class IslandGlassGeometry: ObservableObject {
 }
 
 
+enum IslandHardwareBlack {
+    static let surface = Color(red: 0x12 / 255.0, green: 0x12 / 255.0, blue: 0x15 / 255.0)
+    static let completedSurface = Color(red: 0x0F / 255.0, green: 0x1A / 255.0, blue: 0x13 / 255.0)
+    static let shadowBottomInset: CGFloat = 72
+    static let shadowHorizontalInset: CGFloat = 64
+    static func sliderValue(_ stored: Double) -> Double { ActivityIslandGlassDegree.normalized(stored) }
+    static func coreOpacity(degree: Double, compact: Bool, idle: Bool) -> Double {
+        min(1, max(0.25, sliderValue(degree) * 1.25)) * (compact ? 0.6 : 1) * (idle ? 0.5 : 1)
+    }
+    static func mood(rows: [ActivitySessionSnapshot], focusedID: String?, compact: Bool,
+                     showsCompactQuota: Bool, receipt: ActivitySessionSnapshot?) -> IslandMascotMood {
+        if rows.isEmpty || (compact && showsCompactQuota) { return .idle }
+        let row = compact ? ActivitySessionSnapshot.compactFocus(rows: rows, selectedID: focusedID, receipt: receipt)
+            : rows.first(where: { $0.id == focusedID }) ?? ActivitySessionSnapshot.compactFocus(rows: rows, selectedID: nil, receipt: nil)
+        return .mood(for: row)
+    }
+}
+
+struct IslandHardwareBackdrop: View {
+    var radius: CGFloat
+    var compact: Bool
+    var degree: Double
+    var mood: IslandMascotMood
+    var reduceMotion: Bool
+    var body: some View {
+        let shape = IslandNotchShape(bottomRadius: radius)
+        let opacity = IslandHardwareBlack.coreOpacity(degree: degree, compact: compact, idle: mood == .idle)
+        shape.fill(.black)
+            .shadow(color: .black.opacity(compact ? 0.35 : 0.5), radius: compact ? 14 : 40, x: 0, y: compact ? 6 : 18)
+            .overlay {
+                GeometryReader { proxy in
+                    // Animate only the color, leaving mask geometry on the original surface transaction.
+                    mood.middleColor
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: mood)
+                        .frame(width: proxy.size.width + 16, height: proxy.size.height + 16)
+                        .mask {
+                            ZStack {
+                                shape.stroke(.white.opacity(opacity * 0.5), lineWidth: 6).blur(radius: 4)
+                                shape.stroke(.white.opacity(opacity), lineWidth: 1)
+                            }.padding(8)
+                            .mask {
+                                VStack(spacing: 0) {
+                                    Color.clear.frame(height: 8)
+                                    LinearGradient(colors: [.clear, .white], startPoint: .top, endPoint: .bottom).frame(height: 30)
+                                    Color.white
+                                }
+                            }
+                        }
+                        .offset(x: -8, y: -8)
+                }
+            }
+            .allowsHitTesting(false)
+    }
+}
+
 struct IslandExpandedGlassBackdrop: View {
     @ObservedObject var model: ActivityIslandViewModel
     @ObservedObject var geometry: IslandGlassGeometry
-
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         let value = geometry.value
-        let shape = IslandNotchShape(bottomRadius: value.radius)
-        let stops = ActivityIslandGlassDegree.gradientStops(geometry.degree)
+        let mood = IslandHardwareBlack.mood(rows: model.sessions, focusedID: model.focusedSessionID,
+            compact: value.compact, showsCompactQuota: model.showsCompactQuota, receipt: model.compactReceipt)
         ZStack(alignment: .topLeading) {
             Color.clear
-            Color.clear
+            IslandHardwareBackdrop(radius: value.radius, compact: value.compact, degree: geometry.degree,
+                mood: mood, reduceMotion: reduceMotion || model.reduceMotionOverride)
                 .frame(width: value.rect.width, height: value.rect.height)
-                .modifier(IslandNativeBackdropMaterial(shape: shape))
-                .overlay {
-                    // Only the shade is clipped. Native glass owns its contour.
-                    LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
-                    .clipShape(shape)
-                }
-                .overlay { shape.fill(.black).opacity(value.compact ? 1 : 0) }
                 .position(x: value.rect.midX, y: value.rect.midY)
         }
         .id(geometry.generation)
-        .modifier(IslandGlassChrome())
-        .modifier(IslandGlassAppearanceContext(appearance: model.glassAppearance, material: model.material))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }
 
-// Island and floating capsule share this untinted native material.
+// Untinted native material retained for the island-external floating capsule.
 struct IslandNativeBackdropMaterial<Outline: Shape>: ViewModifier {
     var shape: Outline
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
