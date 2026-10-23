@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-GitHub 仓库为 suguxiaojie/codex-pulse。正在准备 v1.10.0（Build 32）：包含灵动岛提醒卡、文字回答、中文输入与异步提问修复、完成礼花／提示音、系统通知和设置改进。完整测试（含成本、连续性与 Claude 接入）及 arm64／x86_64 Release 构建、镜像和签名验证全部通过，发布结果待核对。
+GitHub 仓库为 suguxiaojie/codex-pulse。v1.10.0（Build 32）已正式发布为 Latest，源码提交 f8b05822aedc2a590a0c2c8a5f9f4c473580db67 与附注标签 v1.10.0 已推送。完整测试、双架构 Release、镜像／签名／包内文件比对通过，公开下载的两份 DMG 与 SHA256SUMS-v1.10.0.txt 哈希和 GitHub digest 均与本地一致。
 
 当前本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
@@ -14,7 +14,7 @@ GitHub 仓库为 suguxiaojie/codex-pulse。正在准备 v1.10.0（Build 32）：
 
 ## 进行中与待办
 
-- 2026-10-24 03:18：v1.10.0 自动化验证已完成，公开发布进行中。新增功能的桌面视觉、真实中文输入法／焦点、通知端到端与 Intel 真机运行仍待人工验收；自动化验证结果以本次发布记录为准。相关实现说明见 docs/system-notifications.md、docs/island-alert-card.md、docs/island-text-answer.md、docs/island-completion-celebration.md、docs/island-async-question-fix.md。
+- 2026-10-24 03:18：v1.10.0 已发布。新增功能的桌面视觉、真实中文输入法／焦点、通知端到端与 Intel 真机运行仍待人工验收；自动化验证结果以本次发布记录为准。相关实现说明见 docs/system-notifications.md、docs/island-alert-card.md、docs/island-text-answer.md、docs/island-completion-celebration.md、docs/island-async-question-fix.md。
 
 - 2026-10-22 补充核对：重新下载 Release 三个附件，SHA-256 与本地 build/ 产物一致，SHA256SUMS 校验 OK；线上 README 与 HEAD 逐字节一致，10 张截图与 3 个 Release 链接均返回 200。遗留：docs/images/pulse-setup.png（v1.8.0 起沿用）仍显示 v1.7.0 Build 25、部分遮挡邮箱 b***@163.com 及旧审批文案，与其他截图的“本机账号”口径不一致，待用户决定是否替换。
 
@@ -120,6 +120,8 @@ GitHub 仓库为 suguxiaojie/codex-pulse。正在准备 v1.10.0（Build 32）：
 
 ## 最近完成
 
+- 2026-10-24 03:23：v1.10.0 正式发布为 Latest。46 个相关文件已提交，main 与附注标签已推送，Apple Silicon／Intel DMG 和校验清单已上传；发布后重新下载三个附件，哈希与 GitHub digest 均一致，线上 README 与本地一致，发布标签的 133 个构建输入与打包快照一致。未安装。Release：https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0 。
+
 - 2026-10-24 03:23：v1.10.0（Build 32）发行准备完成。纳入当前灵动岛提醒、文字回答／中文组字、跨轮次请求保留、三档礼花／提示音、通知与设置改进；中英文 README、版本和下载链接同步。双架构 DMG 与 SHA256SUMS-v1.10.0.txt 已生成。
 
 - 2026-10-22 04:11：v1.9.0（Build 31）发行准备完成：英文 README 与中文定稿结构、链接、图片、数据边界对应，中文 README 哈希保持不变；完整测试、Claude 专项及双架构 DMG 验证通过，SHA256SUMS-v1.9.0.txt 已生成。公开发布结果待核对。
@@ -157,8 +159,6 @@ GitHub 仓库为 suguxiaojie/codex-pulse。正在准备 v1.10.0（Build 32）：
 - 2026-10-16 21:41：复用 QuotaView 0.8.3 scoped 浅／深／自动外观、公开 AppKit KVO、前景对比和共用 clear 玻璃；底栏／胶囊／预览统一，顶部与内容卡片仍深色，重置主卡纯黑保留。旧胶囊配色值保留但不读取，经典／减少透明度回退深色实体。记录类型／停留时间换为统一细描边选择入口及焦点可见的弹出选项；权限页三个轻量文字按钮，通知／更新状态提亮并增加状态图标。完整测试与 arm64 Release 后备份覆盖；Hook 保持屏蔽，未提交或发布。
 
 - 2026-10-16 20:40：v1.7.0（Build 25）正式发布：中英文 README、必要源码／测试／依赖许可已提交并推送 main，标签指向 0f84eff；两个独立架构 DMG 与 SHA-256 清单已上传正式 Release。轻量按钮圆角同步为用户选择的 14 pt。本地交接笔记、验收日志、缓存和发布物料未上传。发布：https://github.com/suguxiaojie/codex-notch-monitor/releases/tag/v1.7.0 。
-
-- 2026-10-16 20:17：按用户选定“轻量文字”统一四个监控页标题栏的刷新／重新检查：默认无底色、悬停轻底色、按压轻收缩；加载跟随真实服务状态，旋转图标＋状态文字替代额外进度圈，固定文案占位避免宽度跳动，禁用重复点击，减少动态效果下停止旋转。未改刷新与会话检查逻辑，Hook 继续屏蔽。完整测试／arm64 Release／签名通过并备份覆盖安装。
 
 ## 最近验证
 
