@@ -20,6 +20,11 @@ enum IslandUsageProvider: String, CaseIterable { case codex = "Codex", claude = 
 final class ActivityIslandViewModel: ObservableObject {
     let mascotContext = IslandMascotContext()
     var approvalContent: ((ActivitySessionSnapshot) -> IslandApprovalContent?)?
+    var answerDrafts: [String: IslandAnswerDraft] = [:]
+    var isAnswerInteracting: Bool { answerDrafts.values.contains { $0.isInteracting } }
+    func discardAnswerDrafts(except identities: Set<String>) {
+        answerDrafts = answerDrafts.filter { identities.contains($0.key) }
+    }
     private(set) var approvalMeasurement: IslandApprovalMeasurement?
     var onApprovalMeasurementChange: (() -> Void)?
     var approvalRow: ActivitySessionSnapshot? {
@@ -38,6 +43,10 @@ final class ActivityIslandViewModel: ObservableObject {
               measured.identity == content.guardIdentity + (privacyMode || row.isPrivate ? "-private" : "") else { return 0 }
         return measured.height + ActivityIslandListLayout.rowSpacing
     }
+    @Published var alert: IslandAlert?
+    @Published var alertRemaining: TimeInterval = 8
+    var onDismissAlert: (() -> Void)?
+    var onAlertAction: ((SystemNotificationAction, IslandAlert) -> Void)?
     @Published var snapshot: ActivityIslandSnapshot?
     @Published var sessions: [ActivitySessionSnapshot] = []
     @Published var presentation: ActivityIslandPresentation = .hidden
@@ -70,7 +79,7 @@ final class ActivityIslandViewModel: ObservableObject {
     @Published var usageCost: CostSnapshot = .empty
     @Published var accountUsage: AccountUsageSnapshot?
     @Published var resetCredits: QuotaResetCreditSummary?
-    var showsFloatingUsage: Bool { floatingUsageEnabled && !privacyMode && !showsUsagePage }
+    var showsFloatingUsage: Bool { floatingUsageEnabled && !privacyMode && !showsUsagePage && alert == nil }
     @Published var focusedSessionID: String?
     /// Timer-only focus update: receipt, celebration and lifecycle signals are untouched.
     func handoffFocus(now: Date) -> ActivitySessionSnapshot? {
@@ -161,7 +170,9 @@ struct ActivityIslandView: View {
 
     var body: some View {
         Group {
-            if compact && model.showsCompactQuota {
+            if !compact, let alert = model.alert {
+                IslandAlertCard(model: model, alert: alert, reduceMotion: motionIsReduced)
+            } else if compact && model.showsCompactQuota {
                 IslandMascotCompactQuotaContent(model: model).id("compact-quota")
             } else if compact, let row = ActivitySessionSnapshot.compactFocus(rows: model.sessions,
                 selectedID: model.focusedSessionID, receipt: model.compactReceipt) {

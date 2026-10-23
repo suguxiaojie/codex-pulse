@@ -6,6 +6,8 @@ struct SetupPermissionsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var onboardingStep = 0
     @State private var showsConnectionInfo = false
+    @State private var testNotificationSending = false
+    @State private var testNotificationFeedback: String?
 
     var body: some View {
         ScrollView {
@@ -35,7 +37,23 @@ struct SetupPermissionsView: View {
                             Label(notificationTitle, systemImage: store.quotaNotificationStatus == .enabled ? "checkmark.circle.fill" : "bell.slash")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(store.quotaNotificationStatus == .enabled ? MonitorDesktopTheme.positive : MonitorDesktopTheme.caution)
-                            if store.quotaNotificationStatus == .unknown {
+                            if store.quotaNotificationStatus == .enabled {
+                                Button(testNotificationFeedback ?? "发送测试通知") {
+                                    testNotificationSending = true
+                                    store.sendTestNotification { sent in
+                                        testNotificationSending = false
+                                        testNotificationFeedback = sent ? "已发送" : "发送失败"
+                                    }
+                                }
+                                .disabled(testNotificationSending || testNotificationFeedback != nil)
+                                .buttonStyle(PanelSettingsActionStyle())
+                                .task(id: testNotificationFeedback) {
+                                    guard testNotificationFeedback != nil else { return }
+                                    do { try await Task.sleep(nanoseconds: 2_000_000_000) }
+                                    catch { return }
+                                    testNotificationFeedback = nil
+                                }
+                            } else if store.quotaNotificationStatus == .unknown {
                                 Button("允许通知") { store.requestNotificationAuthorizationForSetup() }
                                     .buttonStyle(PanelSettingsActionStyle(prominent: true))
                             } else {
@@ -43,6 +61,14 @@ struct SetupPermissionsView: View {
                                     .buttonStyle(PanelSettingsActionStyle())
                             }
                         }
+                    }
+                    SettingsRowDivider()
+                    SettingsRow(symbol: "antenna.radiowaves.left.and.right", title: "关注信号提醒", detail: "新的待验证信号与重置预告。") {
+                        Toggle("关注信号提醒", isOn: $store.notifyTiboSignals).labelsHidden().toggleStyle(.switch)
+                    }
+                    SettingsRowDivider()
+                    SettingsRow(symbol: "arrow.counterclockwise", title: "额度恢复提醒", detail: "额度恢复立即提醒，原因确认后静音更新。") {
+                        Toggle("额度恢复提醒", isOn: $store.notifyQuotaRecovery).labelsHidden().toggleStyle(.switch)
                     }
                 }.modifier(MonitorDesktopReveal(delay: 0.08))
                 PanelSettingsGroup(title: "应用更新", symbol: "arrow.triangle.2.circlepath") {
@@ -95,6 +121,7 @@ struct SetupPermissionsView: View {
     private var statusOverview: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 12) { statusCards }
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(minWidth: 600)
             VStack(spacing: 12) { statusCards }
         }
@@ -102,9 +129,12 @@ struct SetupPermissionsView: View {
 
     @ViewBuilder private var statusCards: some View {
         statusCard(symbol: "waveform.path.ecg", title: "任务监控", value: store.nativeActivityStatus,
-                   color: MonitorDesktopTheme.faintText)
+                   detail: store.nativeActivityConnectionDetail,
+                   color: store.nativeActivityConnectionDetail == "等待连接" ? MonitorDesktopTheme.faintText : MonitorDesktopTheme.positive)
         statusCard(symbol: "bell", title: "通知", value: notificationTitle,
-                   color: store.quotaNotificationStatus == .enabled ? MonitorDesktopTheme.positive : MonitorDesktopTheme.caution)
+                   detail: SettingsSummaryText.notifications(signals: store.notifyTiboSignals, recovery: store.notifyQuotaRecovery),
+                   color: store.quotaNotificationStatus == .enabled ? MonitorDesktopTheme.positive
+                       : store.quotaNotificationStatus == .denied ? MonitorDesktopTheme.caution : MonitorDesktopTheme.faintText)
         statusCard(symbol: "shippingbox", title: "版本", value: "v\(store.appUpdateStatus.currentVersion)",
                    detail: updateTitle, color: updateStatusColor)
     }
@@ -117,20 +147,22 @@ struct SetupPermissionsView: View {
         }
     }
 
-    private func statusCard(symbol: String, title: String, value: String, detail: String? = nil, color: Color) -> some View {
+    private func statusCard(symbol: String, title: String, value: String, detail: String, color: Color) -> some View {
         HStack(alignment: .top, spacing: 12) {
             SettingsGlyph(symbol: symbol)
             VStack(alignment: .leading, spacing: 5) {
                 Text(title).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.secondaryText)
-                Text(value).font(MonitorDesktopTypography.rowTitle).fixedSize(horizontal: false, vertical: true)
-                if let detail {
-                    Text(detail).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.secondaryText)
+                HStack(spacing: 6) {
+                    Capsule().fill(color).frame(width: 8, height: 6).accessibilityHidden(true)
+                    Text(value).font(MonitorDesktopTypography.rowTitle)
+                        .lineLimit(1).truncationMode(.tail).help(value)
                 }
+                Text(detail).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.secondaryText)
+                    .lineLimit(1).truncationMode(.tail).help(detail)
             }
             Spacer(minLength: 0)
-            Circle().fill(color).frame(width: 7, height: 7).accessibilityHidden(true)
         }
-        .padding(14).frame(maxWidth: .infinity, minHeight: 76, alignment: .topLeading)
+        .padding(14).frame(maxWidth: .infinity, minHeight: 90, maxHeight: .infinity, alignment: .topLeading)
         .modifier(MonitorDesktopCardSurface(cornerRadius: 14))
     }
 

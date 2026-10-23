@@ -664,3 +664,27 @@ private extension NSLock {
         return body()
     }
 }
+
+// nil means no successful network baseline yet; an empty array is an established
+// baseline with no signal. Disabled notifications still consume observed IDs.
+struct TiboSignalNotificationLedger {
+    private(set) var observedIDs: [String]?
+
+    mutating func observe(
+        signal: CodexResetRadarSignal?,
+        resolution: CodexResetPinnedSignalResolution?,
+        enabled: Bool
+    ) -> Bool {
+        let hasBaseline = observedIDs != nil
+        var ids = observedIDs ?? []
+        let isNew = signal.map { !ids.contains($0.tweetId) } ?? false
+        if let signal, isNew {
+            ids.append(signal.tweetId)
+        }
+        observedIDs = Array(ids.suffix(50))
+        guard hasBaseline, enabled, isNew, let signal, let resolution,
+              CodexResetRadarPresentation.shouldPinSignal(signal: signal, resolution: resolution)
+        else { return false }
+        return resolution.state == .pending || resolution.state == .activePreview
+    }
+}

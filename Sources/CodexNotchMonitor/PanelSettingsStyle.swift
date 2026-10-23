@@ -205,6 +205,8 @@ struct SettingsRow<Control: View>: View {
     let symbol: String
     let title: String
     let detail: String
+    var numericDetail = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewBuilder let control: Control
 
     private var label: some View {
@@ -213,6 +215,8 @@ struct SettingsRow<Control: View>: View {
                 .foregroundStyle(MonitorDesktopTheme.primaryText)
             if !detail.isEmpty {
                 Text(detail).font(MonitorDesktopTypography.rowDetail)
+                    .contentTransition(numericDetail && !reduceMotion ? .numericText() : .identity)
+                    .animation(numericDetail && !reduceMotion ? PanelSettingsTheme.selectionMotion : nil, value: detail)
                     .foregroundStyle(MonitorDesktopTheme.secondaryText)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }

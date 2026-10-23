@@ -16,6 +16,12 @@ update_test_binary="$(mktemp /tmp/codex-notch-update-tests.XXXXXX)"
 trap 'rm -f "$test_binary" "$cost_test_binary" "$catalog_test_binary" "$tibo_test_binary" "$reset_test_binary" "$continuity_test_binary" "$ripple_test_binary" "$activity_island_test_binary" "$activity_preferences_test_binary" "$setup_test_binary" "$update_test_binary"' EXIT
 
 cd "$project_dir"
+swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CountFormatter.swift Sources/CodexNotchMonitor/SettingsSummaryText.swift Tests/SettingsSummaryTextTests.swift -o "$test_binary"
+"$test_binary"
+swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/ActivityIslandPreferences.swift Sources/CodexNotchMonitor/NotificationAuthorizationPolicy.swift Tests/CompletionCelebrationTests.swift -o "$test_binary"
+"$test_binary"
+swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/IslandAlert.swift Sources/CodexNotchMonitor/ActivityIslandLifecycle.swift Tests/IslandAlertTests.swift -o "$test_binary"
+"$test_binary"
 mkdir -p .tmp/test-runtime
 zstd_object="$project_dir/.tmp/test-runtime/zstddeclib.o"
 clang -O2 -mmacosx-version-min=13.0 -c Vendor/Zstd/zstddeclib.c -o "$zstd_object"
@@ -108,6 +114,8 @@ swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$z
   Sources/CodexNotchMonitor/ActivityIslandStateSmoke.swift \
   Sources/CodexNotchMonitor/ActivityIslandScrollingText.swift \
   Sources/CodexNotchMonitor/ActivityIslandApprovalCard.swift \
+  Sources/CodexNotchMonitor/IslandAlert.swift \
+  Sources/CodexNotchMonitor/IslandAlertCard.swift \
   Sources/CodexNotchMonitor/ActivityIslandView.swift \
   Sources/CodexNotchMonitor/ActivityIslandDesktopPreview.swift \
   Sources/CodexNotchMonitor/ActivityIslandMascot.swift \
@@ -192,6 +200,7 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   -o "$update_test_binary"
 "$update_test_binary"
 
+if [[ "${SKIP_COST_SMOKE_TESTS:-0}" != "1" ]]; then
 swiftc -I Vendor/Zstd/include "$zstd_object" \
   -swift-version 5 \
   -parse-as-library \
@@ -205,6 +214,9 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   Tests/CostSmokeTests.swift \
   -o "$cost_test_binary"
 "$cost_test_binary"
+else
+  echo "SKIP CostSmokeTests: real usage log access disabled"
+fi
 
 swiftc -I Vendor/Zstd/include "$zstd_object" \
   -swift-version 5 \
@@ -234,6 +246,10 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   Sources/CodexNotchMonitor/TiboFeedService.swift \
   Sources/CodexNotchMonitor/CodexResetRadarService.swift \
   Sources/CodexNotchMonitor/QuotaResetMonitor.swift \
+  Sources/CodexNotchMonitor/ActivityIslandLifecycle.swift \
+  Sources/CodexNotchMonitor/IslandAlert.swift \
+  Sources/CodexNotchMonitor/SystemNotificationContent.swift \
+  Tests/SystemNotificationTests.swift \
   Tests/QuotaResetMonitorTests.swift \
   -o "$reset_test_binary"
 "$reset_test_binary"

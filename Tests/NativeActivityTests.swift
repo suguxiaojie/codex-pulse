@@ -60,7 +60,14 @@ enum NativeActivityTests {
         expect(NativeActivityEvidence.project(try projection(turn: "new"), previous: needsReply, now: now)?.phase == .working, "old async wait cannot block a new turn")
         let ordinary: [String: Any] = ["type": "agentMessage", "id": "ordinary", "text": "你需要选择哪一个？"]
         expect(NativeActivityEvidence.project(try projection(items: [ordinary]), previous: running, now: now)?.phase == .working, "ordinary assistant text never infers user-input attention")
-        expect(NativeActivityEvidence.project(try projection(status: "completed", items: [questionItem]), previous: needsReply, now: now)?.phase == .completed, "terminal evidence supersedes unresolved old questions")
+        let endedProjection = try projection(status: "completed", items: [questionItem])
+        expect(endedProjection.authoritativeAsyncQuestionIDs.count == 2, "completed turn retains authoritative unanswered questions")
+        let endedWaiting = NativeActivityEvidence.project(endedProjection, previous: needsReply, now: now)!
+        expect(endedWaiting.phase == .waitingApproval && endedWaiting.terminal == nil && endedWaiting.suppressCompletion,
+            "completed turn waits without celebration or terminal receipt")
+        expect(endedWaiting.replyRequestIDs == needsReply.replyRequestIDs, "terminal does not replace reply identities")
+        expect(NativeActivityEvidence.project(try projection(status: "completed", requests: [request]), previous: waiting, now: now)?.phase == .waitingApproval,
+            "still pending RPC handle also outlives turn completion")
         for (status, reason) in [("completed", SessionEndReason.completed), ("interrupted", .cancelled), ("failed", .failed)] {
             expect(NativeActivityEvidence.project(try projection(status: status), previous: waiting, now: now)?.terminal == reason, "native terminal preserves \(status) semantics")
         }
@@ -71,6 +78,25 @@ enum NativeActivityTests {
         expect(running.applying(to: local)?.nativePhase == .usingTool, "running native turn preserves local live tool")
         expect(waiting.applying(to: local)?.nativePhase == .waitingApproval, "native wait takes precedence over unfinished tool")
         let inputLocal = needsReply.applying(to: local)!
+        var endedLifecycle = ActivitySessionState()
+        let endedLocal = endedWaiting.applying(to: local)!
+        for delay in [0.0, 61.0, 601.0] {
+            let time = now.addingTimeInterval(delay)
+            endedLifecycle.update(projects: ProjectActivityAggregator.projects(snapshots: [endedLocal], now: time, catalog: .empty),
+                snapshots: [endedLocal], usages: [:], now: time, completionHold: 8)
+            expect(endedLifecycle.rows.first?.phase == .waitingApproval, "unanswered completed turn survives retention and freshness timeout")
+        }
+        let beforeAnswer = endedLifecycle.rows
+        for items in [[questionItem, firstAnswer, lastAnswer], []] {
+            var lifecycle = endedLifecycle
+            let resolved = NativeActivityEvidence.project(try projection(status: "completed", items: items),
+                previous: endedWaiting, now: now.addingTimeInterval(602))!.applying(to: local)!
+            lifecycle.update(projects: [], snapshots: [resolved], usages: [:], now: now.addingTimeInterval(602), completionHold: 8)
+            expect(lifecycle.rows.first?.phase == .completed, "answer or disappearance returns to completed receipt")
+            expect(ActivitySessionSnapshot.newlyCompleted(in: lifecycle.rows, previous: beforeAnswer) == nil,
+                "late answer never replays completion celebration")
+            expect(lifecycle.rows.first?.hidingDetails().suppressCompletion == true, "privacy preserves suppression")
+        }
         expect(inputLocal.nativeWaitReason == .userInput, "native input reason reaches the local session")
         var inputLifecycle = ActivitySessionState()
         inputLifecycle.update(projects: ProjectActivityAggregator.projects(snapshots: [inputLocal], now: now, catalog: .empty),
@@ -154,6 +180,17 @@ enum NativeActivityTests {
         fixture.setState(fixtureState, revision: 9)
         for _ in 0..<100 where monitor.acceptedSnapshots < 3 { try await Task.sleep(nanoseconds: 10_000_000) }
         expect(monitor.merge([local], names: [:]).snapshots.first?.nativePhase == .completed, "later stale active evidence cannot reopen settled turn")
+        var terminalQuestionState = terminalState
+        terminalQuestionState["turns"] = [["turnId": "turn", "status": "completed", "items": [questionItem]]]
+        fixture.setState(terminalQuestionState, revision: 10)
+        for _ in 0..<100 where monitor.acceptedSnapshots < 4 { try await Task.sleep(nanoseconds: 10_000_000) }
+        expect(monitor.merge([local], names: [:]).snapshots.first?.nativePhase == .waitingApproval,
+            "authoritative terminal question supersedes a cached completion tombstone")
+        expect(monitor.approvalSnapshots["thread"]?.requests.count == 2, "completed-turn questions retain submission handles")
+        fixture.setState(terminalState, revision: 11)
+        for _ in 0..<100 where monitor.acceptedSnapshots < 5 { try await Task.sleep(nanoseconds: 10_000_000) }
+        expect(monitor.merge([local], names: [:]).snapshots.first?.nativeSuppressCompletion == true,
+            "observer preserves suppression after question disappears")
         fixture.emitState(version: 99)
         for _ in 0..<100 where monitor.state != .disconnected { try await Task.sleep(nanoseconds: 10_000_000) }
         merged = monitor.merge([local], names: [:])

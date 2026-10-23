@@ -2,7 +2,17 @@ import SwiftUI
 
 struct IslandApprovalContent {
     struct Action: Identifiable { let id: String; let title: String; var destructive = false }
-    struct Question: Identifiable { let id: String; let title: String; let options: [String] }
+    struct Question: Identifiable {
+        let id: String
+        let title: String
+        let options: [String]
+        var allowsText = false
+        func validatedAnswer(_ value: String) -> String? {
+            if options.contains(value) { return value }
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return allowsText && !text.isEmpty && text.count <= 4_000 && text.utf8.count <= 65_536 ? text : nil
+        }
+    }
     let id: String
     let provider: String
     let title: String
@@ -16,10 +26,11 @@ struct IslandApprovalContent {
     var submit: ((String, [String: String]) async -> String)?
     var fallback: (() -> Void)?
     var details: (() -> Void)?
+    var draft: IslandAnswerDraft?
     var hasInlineControls: Bool { submit != nil && (!actions.isEmpty || !questions.isEmpty) }
     var guardIdentity: String {
         id + summary + actions.map(\.id).joined(separator: "|")
-            + questions.map { $0.id + $0.title + $0.options.joined(separator: "|") }.joined(separator: "|")
+            + questions.map { $0.id + $0.title + String($0.allowsText) + $0.options.joined(separator: "|") }.joined(separator: "|")
     }
     func presentation(privacy: Bool) -> Self {
         guard privacy else { return self }
@@ -27,6 +38,22 @@ struct IslandApprovalContent {
         copy.summary = "有待处理请求"; copy.actions = []; copy.questions = []
         copy.submit = nil; copy.details = nil
         return copy
+    }
+}
+
+// Owned by the island model, keyed by the request nonce; never persisted.
+final class IslandAnswerDraft: ObservableObject {
+    @Published private(set) var options: [String: String] = [:]
+    @Published private(set) var texts: [String: String] = [:]
+    @Published var focusedQuestion: String? { didSet { onInteraction?() } }
+    var onInteraction: (() -> Void)?
+    var isInteracting: Bool { focusedQuestion != nil || texts.values.contains { !$0.isEmpty } }
+    var answers: [String: String] { options.merging(texts.filter { !$0.value.isEmpty }) { _, text in text } }
+    func select(_ option: String, for id: String) {
+        texts[id] = nil; options[id] = option; onInteraction?()
+    }
+    func type(_ text: String, for id: String) {
+        options[id] = nil; texts[id] = text; onInteraction?()
     }
 }
 
@@ -116,15 +143,24 @@ struct ActivityIslandApprovalCard: View {
     var privacy = false
     var onHeightChange: ((CGFloat) -> Void)?
     @State private var interaction = IslandApprovalInteraction()
-    @State private var answers: [String: String] = [:]
+    @StateObject private var draft: IslandAnswerDraft
     @State private var result: String?
     @State private var questionHeight: CGFloat = IslandApprovalQuestionViewport.maximumHeight
+    @FocusState private var optionFocus: String?
+    init(content: IslandApprovalContent, privacy: Bool = false, onHeightChange: ((CGFloat) -> Void)? = nil) {
+        self.content = content; self.privacy = privacy; self.onHeightChange = onHeightChange
+        self._draft = StateObject(wrappedValue: content.draft ?? IslandAnswerDraft())
+    }
+    private var allAnswered: Bool {
+        content.questions.allSatisfy { $0.validatedAnswer(draft.answers[$0.id] ?? "") != nil }
+    }
     private var display: IslandApprovalContent { content.presentation(privacy: privacy) }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.2)) { clock in
             let disabled = interaction.disabled(now: clock.date, deadline: content.deadline, message: content.message ?? result)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 7) {
+                    if interaction.submitted && result == nil { ProgressView().controlSize(.small) }
                     if content.provider == "Claude Code" {
                         ClaudeMarkShape().fill(Color(red: 0.851, green: 0.467, blue: 0.341)).frame(width: 15, height: 15)
                     } else if let icon = ActivityIslandPreviewAssets.codexIcon {
@@ -151,6 +187,7 @@ struct ActivityIslandApprovalCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if !content.questions.isEmpty {
+                        ScrollViewReader { scroll in
                         ScrollView {
                             questionList(disabled: disabled)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -161,6 +198,15 @@ struct ActivityIslandApprovalCard: View {
                         .frame(height: IslandApprovalQuestionViewport.height(for: questionHeight)).clipped()
                         .onPreferenceChange(IslandApprovalQuestionHeightKey.self) { height in
                             if height.isFinite, height > 0, abs(questionHeight - height) > 0.5 { questionHeight = height }
+                        }
+                        .onChange(of: draft.focusedQuestion) { id in
+                            if let id { scroll.scrollTo(id, anchor: .top) }
+                        }
+                        .onChange(of: optionFocus) { id in
+                            if let question = content.questions.first(where: { q in q.options.contains { q.id + "/" + $0 == id } }) {
+                                scroll.scrollTo(question.id, anchor: .top)
+                            }
+                        }
                         }
                     }
                     if let message = content.message ?? result {
@@ -174,7 +220,7 @@ struct ActivityIslandApprovalCard: View {
                         }
                         if !content.questions.isEmpty {
                             pill("提交回答", kind: .primary) { send("answers") }
-                                .disabled(disabled || !content.questions.allSatisfy { answers[$0.id] != nil })
+                                .disabled(disabled || !allAnswered)
                                 .accessibilityLabel("提交所有问题的回答")
                         }
                         if content.provider == "Claude Code" || (content.actions.isEmpty && content.questions.isEmpty) {
@@ -183,7 +229,7 @@ struct ActivityIslandApprovalCard: View {
                         }
                         if let details = content.details {
                             Button(action: details) {
-                                HStack(spacing: 4) { Text("查看详情"); Image(systemName: "chevron.right").font(.system(size: 9)) }
+                                HStack(spacing: 4) { Text(content.provider == "Codex" && (result != nil || content.message != nil) ? "在 Codex 中查看" : "查看详情"); Image(systemName: "chevron.right").font(.system(size: 9)) }
                                     .frame(height: 28).fixedSize()
                             }
                             .foregroundStyle(FloatingSurfaceTheme.secondary())
@@ -207,6 +253,7 @@ struct ActivityIslandApprovalCard: View {
             onHeightChange?(ceil(size.height))
         }
         .onAppear { interaction.appearedAt = Date() }
+        .onDisappear { draft.focusedQuestion = nil }
     }
     private func pill(_ title: String, kind: IslandApprovalActionKind, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -221,10 +268,10 @@ struct ActivityIslandApprovalCard: View {
     private func questionList(disabled: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(content.questions) { question in
-                Text(question.title).font(FloatingSurfaceTypography.body).fixedSize(horizontal: false, vertical: true)
+                Text(question.title).font(FloatingSurfaceTypography.body).fixedSize(horizontal: false, vertical: true).id(question.id)
                 ForEach(question.options, id: \.self) { option in
-                    let selected = answers[question.id] == option
-                    Button { answers[question.id] = option } label: {
+                    let selected = draft.options[question.id] == option
+                    Button { draft.select(option, for: question.id) } label: {
                         HStack(spacing: 8) {
                             Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                             Text(option).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
@@ -237,6 +284,26 @@ struct ActivityIslandApprovalCard: View {
                         .contentShape(RoundedRectangle(cornerRadius: 8))
                     }.disabled(disabled).accessibilityLabel(question.title + "，" + option)
                         .accessibilityValue(selected ? "已选择" : "未选择")
+                        .focused($optionFocus, equals: question.id + "/" + option)
+                }
+                if question.allowsText {
+                    IslandAnswerTextField(text: Binding(get: { draft.texts[question.id] ?? "" },
+                        set: { draft.type($0, for: question.id) }),
+                        placeholder: question.options.isEmpty ? "输入回答…" : "其他…",
+                        enabled: !disabled, focused: draft.focusedQuestion == question.id,
+                        onFocus: { focused in
+                            if focused { draft.focusedQuestion = question.id }
+                            else if draft.focusedQuestion == question.id { draft.focusedQuestion = nil }
+                        }, onReturn: {
+                            if allAnswered { send("answers") }
+                            else if let next = content.questions.first(where: {
+                                $0.validatedAnswer(draft.answers[$0.id] ?? "") == nil
+                            }) {
+                                draft.focusedQuestion = next.allowsText ? next.id : nil
+                                if !next.allowsText, let option = next.options.first { optionFocus = next.id + "/" + option }
+                            }
+                        })
+                        .accessibilityLabel(question.title)
                 }
             }
         }
@@ -248,6 +315,155 @@ struct ActivityIslandApprovalCard: View {
     private func send(_ action: String) {
         guard !privacy, !interaction.disabled(now: Date(), deadline: content.deadline, message: content.message ?? result), let submit = display.submit else { return }
         interaction.submitted = true
-        Task { result = await submit(action, answers) }
+        Task { result = await submit(action, draft.answers) }
+    }
+}
+
+// NSTextView supplies marked-text handling and explicit Return/Shift-Return semantics on macOS 13.
+// The SwiftUI wrapper retains the card's typography and a one-to-four-line viewport.
+private struct IslandAnswerTextField: View {
+    @Binding var text: String
+    let placeholder: String
+    let enabled: Bool
+    let focused: Bool
+    let onFocus: (Bool) -> Void
+    let onReturn: () -> Void
+    @State private var height: CGFloat = 24
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if text.isEmpty { Text(placeholder).font(FloatingSurfaceTypography.body)
+                .foregroundStyle(FloatingSurfaceTheme.secondary()).padding(.horizontal, 6).padding(.top, 4)
+                .allowsHitTesting(false) }
+            IslandAnswerEditor(text: $text, height: $height, enabled: enabled, focused: focused,
+                onFocus: onFocus, onReturn: onReturn)
+        }
+        .frame(height: height).padding(4)
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(
+            focused ? FloatingSurfaceTheme.accent() : FloatingSurfaceTheme.outline(), lineWidth: focused ? 1.5 : 0.5))
+    }
+}
+
+struct IslandAnswerEditor: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var height: CGFloat
+    let enabled: Bool
+    let focused: Bool
+    let onFocus: (Bool) -> Void
+    let onReturn: () -> Void
+    static func canSynchronize(markedText: Bool) -> Bool { !markedText }
+    static func shouldActivate(userClick: Bool, enabled: Bool) -> Bool { userClick && enabled }
+    static func shouldRestore(hasFocus: Bool, appIsActive: Bool, previousAppRunning: Bool) -> Bool {
+        !hasFocus && appIsActive && previousAppRunning
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        let editor = Editor()
+        editor.isRichText = false; editor.drawsBackground = false
+        editor.font = .systemFont(ofSize: 12)
+        editor.textColor = NSColor(FloatingSurfaceTheme.primary())
+        editor.insertionPointColor = NSColor(FloatingSurfaceTheme.accent())
+        editor.isVerticallyResizable = true; editor.isHorizontallyResizable = false
+        editor.autoresizingMask = [.width]; editor.textContainer?.widthTracksTextView = true
+        editor.textContainerInset = NSSize(width: 1, height: 4)
+        editor.delegate = context.coordinator
+        scroll.documentView = editor
+        return scroll
+    }
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let editor = scroll.documentView as? Editor else { return }
+        context.coordinator.parent = self
+        editor.onFocus = onFocus; editor.onReturn = onReturn
+        editor.isEditable = enabled; editor.isSelectable = enabled
+        if Self.canSynchronize(markedText: editor.hasMarkedText()) {
+            if editor.string != text { editor.string = text }
+            context.coordinator.measure(editor)
+        }
+        // Only a user click or explicit Return navigation may request keyboard focus.
+        if focused && enabled && editor.window?.firstResponder !== editor { editor.window?.makeFirstResponder(editor) }
+        if !enabled && editor.window?.firstResponder === editor { editor.window?.makeFirstResponder(nil) }
+    }
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        guard let editor = scroll.documentView as? Editor else { return }
+        if editor.window?.firstResponder === editor { editor.window?.makeFirstResponder(nil) }
+        editor.restorePreviousAppWhenUnfocused()
+    }
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: IslandAnswerEditor
+        init(_ parent: IslandAnswerEditor) { self.parent = parent }
+        func textDidChange(_ notification: Notification) {
+            guard let editor = notification.object as? Editor, !editor.hasMarkedText() else { return }
+            parent.text = editor.string; measure(editor)
+        }
+        func measure(_ editor: NSTextView) {
+            guard !editor.hasMarkedText(), let container = editor.textContainer, let layout = editor.layoutManager else { return }
+            layout.ensureLayout(for: container)
+            let lineHeight = layout.defaultLineHeight(for: editor.font ?? .systemFont(ofSize: 12))
+            let height = ceil(min(lineHeight * 4 + 8, max(lineHeight + 8, layout.usedRect(for: container).height + 8)))
+            if parent.height != height { DispatchQueue.main.async { [weak self, weak editor] in
+                guard let editor, !editor.hasMarkedText() else { return }
+                self?.parent.height = height
+            } }
+        }
+    }
+    final class Editor: NSTextView {
+        var onFocus: ((Bool) -> Void)?
+        var onReturn: (() -> Void)?
+        private static var previousApp: NSRunningApplication?
+        private var resignObserver: NSObjectProtocol?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+            resignObserver = nil
+            if let window {
+                resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification,
+                    object: window, queue: .main) { [weak self] _ in
+                        self?.onFocus?(false)
+                        self?.restorePreviousAppWhenUnfocused()
+                    }
+            }
+        }
+        deinit { if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) } }
+        func restorePreviousAppWhenUnfocused() {
+            // Defer so Return navigation between editors keeps the same activation lease.
+            DispatchQueue.main.async {
+                let hasFocus = NSApp.keyWindow?.firstResponder is Editor
+                guard !hasFocus else { return }
+                let previous = Self.previousApp
+                Self.previousApp = nil
+                if IslandAnswerEditor.shouldRestore(hasFocus: hasFocus, appIsActive: NSApp.isActive,
+                    previousAppRunning: previous.map { !$0.isTerminated } ?? false) {
+                    previous?.activate(options: [.activateIgnoringOtherApps])
+                }
+            }
+        }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        static func submitsReturn(keyCode: UInt16, shift: Bool, markedText: Bool) -> Bool {
+            (keyCode == 36 || keyCode == 76) && !shift && !markedText
+        }
+        override func mouseDown(with event: NSEvent) {
+            if IslandAnswerEditor.shouldActivate(userClick: true, enabled: isEditable) {
+                if let front = NSWorkspace.shared.frontmostApplication,
+                   front.processIdentifier != ProcessInfo.processInfo.processIdentifier { Self.previousApp = front }
+                NSApp.activate(ignoringOtherApps: true)
+                window?.makeKey(); window?.makeFirstResponder(self)
+            }
+            super.mouseDown(with: event)
+        }
+        override func becomeFirstResponder() -> Bool {
+            let accepted = super.becomeFirstResponder()
+            if accepted { onFocus?(true) }; return accepted
+        }
+        override func resignFirstResponder() -> Bool {
+            let accepted = super.resignFirstResponder()
+            if accepted { onFocus?(false); restorePreviousAppWhenUnfocused() }; return accepted
+        }
+        override func keyDown(with event: NSEvent) {
+            if Self.submitsReturn(keyCode: event.keyCode, shift: event.modifierFlags.contains(.shift), markedText: hasMarkedText()) {
+                onReturn?(); return
+            }
+            super.keyDown(with: event)
+        }
     }
 }

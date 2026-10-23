@@ -31,11 +31,12 @@ struct IslandCodexApproval {
         for q in list {
             guard q["isSecret"]?.bool != true, q["multiSelect"]?.bool != true,
                   let id = q["id"]?.string, !id.isEmpty, !result.contains(where: { $0.id == id }),
-                  let title = q["question"]?.string, !title.isEmpty,
-                  let options = q["options"]?.array, !options.isEmpty else { return [] }
+                  let title = q["question"]?.string, !title.isEmpty else { return [] }
+            guard q["options"] == nil || q["options"]?.array != nil else { return [] }
+            let options = q["options"]?.array ?? []
             let labels = options.compactMap { $0["label"]?.string }
             guard labels.count == options.count, labels.allSatisfy({ !$0.isEmpty }), Set(labels).count == labels.count else { return [] }
-            result.append(.init(id: id, title: title, options: labels))
+            result.append(.init(id: id, title: title, options: labels, allowsText: q["isOther"]?.bool == true || labels.isEmpty))
         }
         return result
     }
@@ -62,8 +63,9 @@ struct IslandCodexApproval {
             guard action == "deny" || grant.permissions != .object([:]) else { return nil }
             value = .object(["permissions": action == "deny" ? .object([:]) : grant.permissions, "scope": .string(action == "session" ? "session" : "turn")])
         } else if action == "answers", !questions.isEmpty, Set(answers.keys) == Set(questions.map(\.id)),
-                  questions.allSatisfy({ $0.options.contains(answers[$0.id] ?? "") }) {
-            value = .object(["answers": .object(answers.mapValues { .object(["answers": .array([.string($0)])]) })])
+                  questions.allSatisfy({ $0.validatedAnswer(answers[$0.id] ?? "") != nil }) {
+            let normalized = Dictionary(uniqueKeysWithValues: questions.map { ($0.id, $0.validatedAnswer(answers[$0.id]!)!) })
+            value = .object(["answers": .object(normalized.mapValues { .object(["answers": .array([.string($0)])]) })])
         } else { return nil }
         return try? value.encode()
     }

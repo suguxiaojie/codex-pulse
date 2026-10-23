@@ -3,6 +3,7 @@ import Foundation
 @main
 struct QuotaResetMonitorTests {
     static func main() throws {
+        try SystemNotificationTests.run()
         try firstSnapshotDoesNotNotify()
         try detectsNaturalReset()
         try detectsOfficialReset()
@@ -69,13 +70,14 @@ struct QuotaResetMonitorTests {
             feed: nil,
             now: start.addingTimeInterval(60)
         )
-        expect(result.events.isEmpty, "无证据跳变不应立刻通知")
+        expect(result.pendingNotifications.count == 1, "无证据跳变应立即产生通知")
         expect(result.needsFeedRefresh, "无证据跳变应请求刷新动态")
         let events = monitor.reconcile(
             feed: feed(kind: .resetScheduled, announcedAt: start, effectiveAt: start.addingTimeInterval(60)),
             now: start.addingTimeInterval(120)
         )
         expect(events.first?.reason == .officialScheduled, "延迟动态应补全官方重置事件")
+        expect(events.first?.notificationID == result.pendingNotifications.first?.notificationID, "核对后沿用首次通知 ID")
     }
 
     static func mergesMultipleWindows() throws {

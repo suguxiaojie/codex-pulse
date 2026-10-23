@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import UniformTypeIdentifiers
 
@@ -79,6 +80,17 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var tiboFeedError: String?
     @Published private(set) var isTiboFeedLoading = false
     @Published private(set) var quotaResetEvents: [QuotaResetEvent] = []
+    @Published var notifyTiboSignals = UserDefaults.standard.object(forKey: "notifyTiboSignals") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notifyTiboSignals, forKey: "notifyTiboSignals") }
+    }
+    @Published var notifyQuotaRecovery = UserDefaults.standard.object(forKey: "notifyQuotaRecovery") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notifyQuotaRecovery, forKey: "notifyQuotaRecovery") }
+    }
+    var onOpenNotificationCenter: (() -> Void)?
+    private var signalNotificationLedger = TiboSignalNotificationLedger(
+        observedIDs: UserDefaults.standard.stringArray(forKey: "notifiedTiboSignalIDs")
+    )
+    private var didAttemptAutomaticNotificationAuthorization = false
     @Published private(set) var quotaNotificationStatus: QuotaNotificationStatus = .unknown
     @Published private(set) var codexSetupSnapshot: CodexSetupSnapshot?
     @Published private(set) var isSetupOnboardingComplete = false
@@ -136,6 +148,9 @@ final class MonitorStore: ObservableObject {
     private let sessionActivityService = SessionActivityService()
     @Published private(set) var approvalRevision = 0
     private let nativeActivityObserver = NativeActivityObserver()
+    var islandAnswerRequestIDs: Set<String> {
+        Set(nativeActivityObserver.approvalSnapshots.values.flatMap(\.requests).map(\.identity))
+    }
     func islandApproval(for row: ActivitySessionSnapshot) -> IslandApprovalContent {
         if row.provider == "Claude Code" {
             guard let request = claude.requests.first(where: { $0.sessionID == row.sessionID }) else {
@@ -205,7 +220,21 @@ final class MonitorStore: ObservableObject {
     private let costService = CostService()
     private let tiboRadarService = CodexResetRadarService()
     private let quotaResetMonitor = QuotaResetMonitor()
+    let islandAlerts = PassthroughSubject<IslandAlert, Never>()
     private let quotaResetNotifier = QuotaResetNotifier()
+
+    var nativeActivityConnectionDetail: String {
+        switch nativeActivityObserver.state {
+        case .connected: return "桌面连接"
+        case .connecting, .disconnected:
+            return nativeActivityStatus.contains("本地日志") ? "本地日志" : "等待连接"
+        }
+    }
+
+    func sendTestNotification(completion: @escaping (Bool) -> Void) {
+        guard quotaNotificationStatus == .enabled else { completion(false); return }
+        quotaResetNotifier.sendTestNotification(completion: completion)
+    }
     private let codexSetupService = CodexSetupService()
     private let appUpdateService = AppUpdateService()
     private let accountIdentityService = AccountIdentityService()
@@ -349,6 +378,11 @@ final class MonitorStore: ObservableObject {
     }
 
     func start() {
+        quotaResetNotifier.onOpenCenter = { [weak self] in self?.onOpenNotificationCenter?() }
+        quotaResetNotifier.onConfirmManual = { [weak self] notificationID in
+            guard let self else { return }
+            self.confirmNotificationRecovery(notificationID)
+        }
         claude.onRowsChanged = { [weak self] in self?.publishActivityRows() }
         claude.start()
         do { try AppPaths.prepareDirectories() } catch { }
@@ -361,7 +395,13 @@ final class MonitorStore: ObservableObject {
         tiboFeedFetchedAt = tiboRadarService.cachedAt
         quotaResetEvents = quotaResetMonitor.history
         quotaResetNotifier.refreshAuthorizationStatus { [weak self] status in
-            self?.quotaNotificationStatus = status
+            guard let self else { return }
+            self.quotaNotificationStatus = status
+            if !self.didAttemptAutomaticNotificationAuthorization, NotificationAuthorizationPolicy.shouldRequest(status: status,
+                signals: self.notifyTiboSignals, recovery: self.notifyQuotaRecovery) {
+                self.didAttemptAutomaticNotificationAuthorization = true
+                self.requestNotificationAuthorizationForSetup()
+            }
         }
         notificationStatusTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshNotificationStatus() }
@@ -445,6 +485,11 @@ final class MonitorStore: ObservableObject {
                     accountID: UsageAccountSelection.currentAccountID(in: self.usageAccountOptions)
                 )
                 self.handleQuotaResetEvents(evaluation.events)
+                if self.notifyQuotaRecovery {
+                    for event in evaluation.pendingNotifications {
+                        self.sendQuotaNotification(.recovery(event))
+                    }
+                }
                 if evaluation.needsFeedRefresh {
                     self.refreshTiboFeed()
                 }
@@ -2268,6 +2313,18 @@ final class MonitorStore: ObservableObject {
         }
     }
 
+    func pinnedSignalResolution(
+        _ signal: CodexResetRadarSignal, radar: CodexResetRadarSnapshot
+    ) -> CodexResetPinnedSignalResolution {
+        let confirmed = Set(quotaResetEvents.compactMap { event -> String? in
+            guard event.reason == .officialCompleted || event.reason == .mixed else { return nil }
+            return event.sourcePostID
+        })
+        return CodexResetRadarService.resolvePinnedSignal(
+            signal, timelineEvents: radar.timelineEvents, locallyConfirmedPostIDs: confirmed
+        )
+    }
+
     func refreshTiboFeed(ifOlderThan minimumAge: TimeInterval = 0) {
         guard !isTiboFeedLoading else { return }
         if minimumAge > 0, let fetchedAt = tiboFeedFetchedAt,
@@ -2286,7 +2343,15 @@ final class MonitorStore: ObservableObject {
                 self.tiboFeedError = radar.evidenceFeed.monitor.status == "ok"
                     ? nil
                     : "数据源已标记延迟"
-                self.handleQuotaResetEvents(self.quotaResetMonitor.reconcile(feed: radar.associationEvidenceFeed))
+                self.handleQuotaResetEvents(self.quotaResetMonitor.reconcile(feed: radar.associationEvidenceFeed), isUpdate: true)
+                let resolution = radar.signal.map { self.pinnedSignalResolution($0, radar: radar) }
+                let shouldNotify = self.signalNotificationLedger.observe(
+                    signal: radar.signal, resolution: resolution, enabled: self.notifyTiboSignals
+                )
+                UserDefaults.standard.set(self.signalNotificationLedger.observedIDs, forKey: "notifiedTiboSignalIDs")
+                if shouldNotify, let signal = radar.signal, let resolution {
+                    self.sendQuotaNotification(.signal(signal, state: resolution.state))
+                }
             case let .failure(error):
                 // Preserve the last verified feed during transient outages.
                 self.tiboFeedError = error.localizedDescription
@@ -2294,16 +2359,38 @@ final class MonitorStore: ObservableObject {
         }
     }
 
-    private func handleQuotaResetEvents(_ events: [QuotaResetEvent]) {
+    private func sendQuotaNotification(_ content: SystemNotificationContent) {
+        quotaResetNotifier.notify(content)
+        if let alert = content.islandAlert { islandAlerts.send(alert) }
+    }
+
+    func performIslandAlertAction(_ action: SystemNotificationAction, alert: IslandAlert) {
+        switch action {
+        case .openCenter: onOpenNotificationCenter?()
+        case .openSource:
+            if let value = alert.sourceURL, let url = URL(string: value) { NSWorkspace.shared.open(url) }
+        case .confirmManual: confirmNotificationRecovery(alert.id)
+        case .none: break
+        }
+    }
+
+    private func confirmNotificationRecovery(_ notificationID: String) {
+        if let candidate = confirmableQuotaRecoveries.first(where: { $0.notificationID == notificationID }) {
+            confirmUserQuotaReset(candidate)
+        }
+        onOpenNotificationCenter?()
+    }
+
+    private func handleQuotaResetEvents(_ events: [QuotaResetEvent], isUpdate: Bool = false) {
         quotaResetEvents = quotaResetMonitor.history
-        for event in events where event.reason.isNotifiable {
-            quotaResetNotifier.notify(event)
+        for event in events where notifyQuotaRecovery && event.reason.isNotifiable {
+            sendQuotaNotification(.recovery(event, isUpdate: isUpdate))
         }
     }
 
     func confirmUserQuotaReset(_ candidate: QuotaResetConfirmationCandidate) {
         guard let event = quotaResetMonitor.confirmUserReset(candidateID: candidate.id) else { return }
-        handleQuotaResetEvents([event])
+        handleQuotaResetEvents([event], isUpdate: true)
     }
 
     func setQuotaResetDisplayType(

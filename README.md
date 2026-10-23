@@ -6,7 +6,7 @@
 
 **在菜单栏和刘海里，随时看清 Codex 与 Claude Code 的额度、任务和用量。**
 
-[English](README.en.md) · [下载 v1.9.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.9.0) · [MIT License](LICENSE)
+[English](README.en.md) · [下载 v1.10.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0) · [MIT License](LICENSE)
 
 macOS 13+ · 原生 SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -27,8 +27,18 @@ Codex Pulse 是一个原生 macOS 菜单栏应用，有三个入口：
 - **光眼球**：紧凑态左侧是一颗会做表情的小角色。思考时左右张望，执行工具时眯眼，待批准时睁圆眼并亮起琥珀光环，完成时笑着蹦一下，失败时变成叉眼；鼠标靠近刘海时，眼睛会跟着看过来。
 - **硬件黑岛体**：岛体与刘海同色，顶部内凹圆角和菜单栏平滑衔接；边缘有一圈细光，颜色跟随任务状态，强度可在设置里调节。
 - **焦点舞台**：展开后只有一张焦点卡片，显示当前任务最近 3 个步骤和本轮 Token；其他会话排成一行胶囊，点击即可切换。新出现的待批准／待回复请求会自动抢占焦点；任务完成 3 秒后，焦点转到仍在运行的任务。已结束的会话在列表中保留 1 分钟。
-- **岛内审批**：对 Codex 和 Claude Code 当前正在等待的请求，可以在岛内显式批准或回答单选问题；其他请求交回原客户端处理，不会自动批准。
+- **岛内审批**：对 Codex 和 Claude Code 当前正在等待的请求，可以在岛内显式批准、选择选项或输入文字回答；其他请求交回原客户端处理，不会自动批准。
+- **提醒展开卡**：关注信号和额度恢复会同时发送系统通知与岛内提醒，复用通知设置中的两个开关。提醒展示 8 秒，悬停暂停；审批和待回复任务优先，提醒最多排队 3 条。可打开动态中心、原帖或标记手动重置，来源核对后原位更新。
 - **动效**：保留状态烟雾、量子噪点、液态涌浪三种 Metal 进度效果，以及完成彩屑和确认脉冲；"减弱动态效果"打开时全部改为静态显示。
+
+完成反馈支持轻／标准／热烈三档礼花，默认标准；标准与热烈使用屏幕顶部透明覆盖窗口，提醒卡会在庆祝期间暂停排队，结束后恢复剩余时间。完成提示音默认开启，可选择 Glass、Hero、Ping、Purr 或 Submarine，选择时试听；跟随系统音量，连续完成在 2 秒内只响一次。减弱动态效果关闭礼花，不影响提示音。启用关注信号或额度恢复提醒时，应用启动会在系统尚未决定通知权限的情况下请求一次授权，拒绝后不再自动请求。
+
+数字单位设置现在使用标准设置行与自定义分段，预览当前账号的今日和 30 日 Token；无数据时显示示例，减少动态效果开启时禁用数字过渡。安装与权限页提供统一状态卡，通知已授权时可发送带声音的测试通知，点击通知打开动态中心，不触发灵动岛提醒卡。
+
+### 灵动岛中文输入与跨轮次提问
+
+点击回答输入框时，应用会临时切到前台以支持中文输入法组字；离开输入框后，在原应用仍运行且用户未自行切换前台时归还焦点。未回答的权威异步提问在本轮结束后继续显示“待回复”，不触发完成礼花或提示音；问题解决后恢复普通完成回执。跨轮次回答只有在有效回执与后续权威快照共同确认后才显示成功，无法确认时提示到 Codex 查看且不重复发送。
+
 
 ### 菜单栏玻璃面板
 
@@ -93,12 +103,12 @@ Codex Pulse 是一个原生 macOS 菜单栏应用，有三个入口：
 
 ## 下载与安装
 
-当前版本：**v1.9.0**。在 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.9.0) 下载与你的 Mac 对应的安装包：
+当前版本：**v1.10.0**。在 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0) 下载与你的 Mac 对应的安装包：
 
 | Mac 处理器 | 安装包 |
 |---|---|
-| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.9.0/CodexNotchMonitor-v1.9.0-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.9.0/CodexNotchMonitor-v1.9.0-x86_64.dmg) |
+| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.10.0/CodexNotchMonitor-v1.10.0-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.10.0/CodexNotchMonitor-v1.10.0-x86_64.dmg) |
 
 1. 打开 DMG，把 App 拖进"应用程序"。
 2. 启动 App。确保 Codex／ChatGPT Desktop 已安装并登录。
@@ -138,6 +148,7 @@ open build/CodexNotchMonitor.app
 
 ```bash
 ./scripts/test.sh                    # 完整测试（含 Claude 接入专项）
+SKIP_COST_SMOKE_TESTS=1 ./scripts/test.sh # 不允许读取真实用量日志时跳过 CostSmokeTests
 ./scripts/build-dmg.sh arm64         # Apple Silicon 安装包
 ./scripts/build-dmg.sh x86_64        # Intel 安装包
 ```

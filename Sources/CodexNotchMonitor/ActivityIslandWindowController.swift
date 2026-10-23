@@ -14,6 +14,8 @@ final class ActivityIslandWindowController: NSObject {
     private var preferences = ActivityIslandPreferences.load()
     private let collapseTimer = ActivityIslandCollapseTimer()
     private let focusHandoffTimer = ActivityIslandCollapseTimer()
+    private var alertQueue = IslandAlertQueue()
+    private var lastCompletionSoundAt: Date?
     private var hasObservedSessions = false
     private let startupAt = Date()
     private var terminalIdentity: String?
@@ -28,11 +30,17 @@ final class ActivityIslandWindowController: NSObject {
         presenter = ActivityIslandPanelPresenter(model: model)
         presenter.onHoverChanged = { [weak self] inside in
             guard let self else { return }
+            if self.model.alert != nil {
+                self.updateAlerts()
+                return
+            }
             self.handle(inside ? .pointerEntered : .pointerExited)
             self.rescheduleTransitions()
         }
         presenter.onDismissOutside = { [weak self] in
-            guard let self, !self.model.isPinned, !self.model.resetConfirmationPresented, !self.model.resetBusy else { return }
+            guard let self, !self.model.isPinned, !self.model.resetConfirmationPresented, !self.model.resetBusy,
+                  !self.model.isAnswerInteracting else { return }
+            if self.model.alert != nil { self.dismissAlert(); return }
             self.handle(.collapseRequested); self.rescheduleTransitions()
         }
         presenter.onNeedsRefresh = { [weak self] in self?.refresh(animated: false) }
@@ -61,8 +69,26 @@ final class ActivityIslandWindowController: NSObject {
             else { self.presenter.suppressHover(); self.handle(.collapseRequested) }
             self.rescheduleTransitions()
         }
-        model.approvalContent = { [weak store] row in store?.islandApproval(for: row) }
-        store.$approvalRevision.sink { [weak self] _ in self?.model.objectWillChange.send() }.store(in: &cancellables)
+        model.approvalContent = { [weak self] row in
+            guard let self else { return nil }
+            var content = self.store.islandApproval(for: row)
+            if content.provider == "Codex", !content.questions.isEmpty {
+                let draft = self.model.answerDrafts[content.id] ?? IslandAnswerDraft()
+                draft.onInteraction = { [weak self] in self?.rescheduleTransitions() }
+                self.model.answerDrafts[content.id] = draft
+                content.draft = draft
+            }
+            return content
+        }
+        store.$approvalRevision.receive(on: RunLoop.main).sink { [weak self] _ in
+            guard let self else { return }
+            self.model.discardAnswerDrafts(except: self.store.islandAnswerRequestIDs)
+            if !self.model.answerDrafts.values.contains(where: { $0.focusedQuestion != nil }) {
+                self.presenter.panel.makeFirstResponder(nil); self.presenter.panel.resignKey()
+            }
+            self.model.objectWillChange.send()
+            self.rescheduleTransitions()
+        }.store(in: &cancellables)
         store.claude.$requests.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.model.objectWillChange.send()
         }.store(in: &cancellables)
@@ -154,6 +180,23 @@ final class ActivityIslandWindowController: NSObject {
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh(animated: false) }
             })
+        model.onDismissAlert = { [weak self] in self?.dismissAlert() }
+        model.onAlertAction = { [weak self] action, alert in
+            guard let self else { return }
+            self.dismissAlert()
+            self.store.performIslandAlertAction(action, alert: alert)
+        }
+        store.islandAlerts.sink { [weak self] alert in
+            guard let self else { return }
+            self.alertQueue.receive(alert,
+                enabled: alert.isEnabled(signals: self.store.notifyTiboSignals, recovery: self.store.notifyQuotaRecovery),
+                available: self.alertsAvailable)
+            self.refresh(animated: true)
+        }.store(in: &cancellables)
+        Timer.publish(every: 0.05, on: .main, in: .common).autoconnect().sink { [weak self] _ in
+            guard let self, self.model.alert != nil || !self.alertQueue.pending.isEmpty else { return }
+            self.updateAlerts()
+        }.store(in: &cancellables)
         applyAppearance()
     }
     deinit {
@@ -191,6 +234,13 @@ final class ActivityIslandWindowController: NSObject {
         let newlyCompleted = ActivitySessionSnapshot.newlyCompleted(in: sessions, previous: previous)
         if let completed = newlyCompleted {
             model.completionBurstSerial += 1
+            let now = Date()
+            if ActivityIslandCompletionSound.shouldPlay(now: now, lastPlayedAt: lastCompletionSoundAt,
+                baseline: baseline, enabled: preferences.completionSound,
+                islandVisible: lifecycle.presentation != .hidden && presenter.alertsAvailable) {
+                lastCompletionSoundAt = now
+                ActivityIslandCompletionAudio.play(preferences.completionSoundName)
+            }
             model.mascotContext.noteCompletion(completed, serial: model.completionBurstSerial,
                 playable: model.playbackVisible && !model.showsUsagePage
                     && (model.presentation == .compact || model.focusedSessionID == completed.id)
@@ -207,10 +257,13 @@ final class ActivityIslandWindowController: NSObject {
         let previousAttention = lifecycle.requiresAttention
         let newAttention = ActivitySessionSnapshot.newAttention(in: live, previous: previous)
         // A new request supersedes the old manual choice instead of bouncing back on refresh.
-        if newAttention != nil || !sessions.contains(where: { $0.id == manualFocusID }) {
+        if (newAttention != nil && !model.isAnswerInteracting) || !sessions.contains(where: { $0.id == manualFocusID }) {
             manualFocusID = nil
         }
-        if let focus = ActivitySessionSnapshot.autoFocus(rows: sessions, previous: previous,
+        let editingFocus = model.isAnswerInteracting ? sessions.first {
+            $0.id == model.focusedSessionID && $0.phase == .waitingApproval
+        } : nil
+        if let focus = editingFocus ?? ActivitySessionSnapshot.autoFocus(rows: sessions, previous: previous,
             currentFocusID: model.focusedSessionID, manualFocusID: manualFocusID) {
             model.sessions = sessions
             model.focusedSessionID = focus.id
@@ -229,7 +282,7 @@ final class ActivityIslandWindowController: NSObject {
         } else if let ended = sessions.filter({ $0.isFreshReceipt }).max(by: { $0.updatedAt < $1.updatedAt }) {
             if ended.phase != .completed { clearCompactReceipt() }
             model.sessions = sessions
-            let focus = sessions.first { $0.id == model.focusedSessionID } ?? ended
+            let focus = newlyCompleted ?? sessions.first { $0.id == model.focusedSessionID } ?? ended
             model.focusedSessionID = focus.id
             model.snapshot = snapshot(for: focus, rows: sessions)
             let identity = ended.sessionID + "/" + (ended.turnID ?? "")
@@ -261,8 +314,13 @@ final class ActivityIslandWindowController: NSObject {
             sessionID: row.sessionID, turnID: row.turnID, turnTokenUsage: row.tokenUsage)
     }
     private func handle(_ event: ActivityIslandLifecycleEvent) {
+        let wasExpanded = model.presentation == .expanded
         model.presentation = lifecycle.handle(event, automaticPopup: preferences.automaticPopup,
             now: Date(), popupDuration: preferences.expandedHold)
+        // Explicit collapse is allowed; background lifecycle updates cannot interrupt typing.
+        if case .collapseRequested = event {} else if wasExpanded && model.isAnswerInteracting && model.presentation == .compact {
+            model.presentation = lifecycle.handle(.expandRequested)
+        }
         if model.showsUsagePage, case .contentUpdated = event, model.presentation == .compact {
             model.presentation = lifecycle.handle(.expandRequested)
         }
@@ -270,7 +328,11 @@ final class ActivityIslandWindowController: NSObject {
         refresh(animated: true)
     }
     private func refresh(animated: Bool) {
-        model.presentation = lifecycle.presentation
+        synchronizeAlerts()
+        model.presentation = model.alert == nil ? lifecycle.presentation : .expanded
+        if model.presentation != .expanded || model.showsUsagePage || model.privacyMode {
+            presenter.panel.makeFirstResponder(nil); presenter.panel.resignKey()
+        }
         if model.presentation != .expanded, manualFocusID != nil {
             manualFocusID = nil
             if let focus = ActivitySessionSnapshot.autoFocus(rows: model.sessions, previous: model.sessions,
@@ -286,6 +348,42 @@ final class ActivityIslandWindowController: NSObject {
         updateMascotVisibility()
         synchronizeCompactSignals()
     }
+    private var alertsAvailable: Bool {
+        lifecycle.presentation != .hidden && presenter.alertsAvailable
+    }
+    private func synchronizeAlerts() {
+        let now = Date()
+        let celebrating = IslandAlertCompletionGate.blocks(lifecycle: lifecycle,
+            confettiActive: presenter.surface.completionConfetti.isActive,
+            pendingBurst: model.completionBurstSerial != presenter.surface.completionConfetti.lastSerial, now: now)
+        alertQueue.advance(now: now,
+            blocked: celebrating || lifecycle.requiresAttention || model.sessions.contains { $0.phase == .waitingApproval }
+                || model.approvalRow != nil || model.isAnswerInteracting || model.resetConfirmationPresented || model.resetBusy,
+            hovered: presenter.alertPointerInside, available: alertsAvailable,
+            signals: store.notifyTiboSignals, recovery: store.notifyQuotaRecovery)
+        if celebrating, model.alert != nil, alertQueue.current == nil, !lifecycle.requiresAttention,
+           !model.sessions.contains(where: { $0.phase == .waitingApproval }),
+           let completed = model.compactReceipt, model.showsCompletedStatistic {
+            model.showsUsagePage = false
+            model.focusedSessionID = completed.id
+            model.snapshot = snapshot(for: completed, rows: model.sessions)
+        }
+        model.alert = alertQueue.current?.alert
+        model.alertRemaining = alertQueue.current?.remaining ?? 0
+    }
+    private func updateAlerts() {
+        let previous = model.alert
+        synchronizeAlerts()
+        if model.alert != previous {
+            refresh(animated: true)
+        }
+    }
+    private func dismissAlert() {
+        alertQueue.dismiss()
+        presenter.suppressHover()
+        refresh(animated: true)
+    }
+
     private func updateMascotVisibility() {
         let rect = model.presentation == .expanded ? model.metrics.expandedRect : model.metrics.compactRect
         let frame = presenter.panel.frame
@@ -361,8 +459,8 @@ final class ActivityIslandWindowController: NSObject {
         }
     }
     private func rescheduleTransitions() {
-        collapseTimer.update(deadline: model.resetConfirmationPresented || model.resetBusy ? nil : lifecycle.collapseDeadline) { [weak self] in
-            guard let self else { return }
+        collapseTimer.update(deadline: model.resetConfirmationPresented || model.resetBusy || model.isAnswerInteracting ? nil : lifecycle.collapseDeadline) { [weak self] in
+            guard let self, !self.model.isAnswerInteracting else { return }
             self.handle(.expandedHoldElapsed)
             self.consume(self.store.activitySessions)
             self.rescheduleTransitions()

@@ -3118,7 +3118,7 @@ struct NotchView: View {
             }
         } message: {
             if let candidate = quotaResetCandidateToConfirm {
-                Text("这会把 \(quotaResetSummary(candidate)) 记录为“手动重置”。\(store.quotaNotificationStatus == .enabled ? "应用会尝试发送系统通知。" : "当前通知未开启，将仅保存记录。")")
+                Text("这会把 \(quotaResetSummary(candidate)) 记录为“手动重置”。\(store.quotaNotificationStatus == .enabled && store.notifyQuotaRecovery ? "应用会静音更新系统通知。" : "当前通知未开启，将仅保存记录。")")
             }
         }
     }
@@ -3616,19 +3616,7 @@ struct NotchView: View {
         _ signal: CodexResetRadarSignal,
         radar: CodexResetRadarSnapshot
     ) -> CodexResetPinnedSignalResolution {
-        let locallyConfirmedPostIDs: Set<String> = Set(
-            store.quotaResetEvents.compactMap { reset -> String? in
-                guard reset.reason == .officialCompleted || reset.reason == .mixed else {
-                    return nil
-                }
-                return reset.sourcePostID
-            }
-        )
-        return CodexResetRadarService.resolvePinnedSignal(
-            signal,
-            timelineEvents: radar.timelineEvents,
-            locallyConfirmedPostIDs: locallyConfirmedPostIDs
-        )
+        store.pinnedSignalResolution(signal, radar: radar)
     }
 
     private var tiboRadarControls: some View {

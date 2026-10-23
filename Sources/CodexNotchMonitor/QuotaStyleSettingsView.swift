@@ -14,6 +14,9 @@ struct QuotaStyleSettingsView: View {
     @AppStorage(ActivityIslandPreferenceKey.glassAppearance) private var glassAppearance = ActivityIslandGlassAppearance.dark.rawValue
     @AppStorage(ActivityIslandPreferenceKey.automaticPopup) private var automaticPopup = true
     @AppStorage(ActivityIslandPreferenceKey.expandedHold) private var expandedHold = 3.0
+    @AppStorage(ActivityIslandPreferenceKey.confettiIntensity) private var confettiIntensity = ActivityIslandConfettiIntensity.standard.rawValue
+    @AppStorage(ActivityIslandPreferenceKey.completionSound) private var completionSound = true
+    @AppStorage(ActivityIslandPreferenceKey.completionSoundName) private var completionSoundName = ActivityIslandCompletionSound.glass.rawValue
     @State private var previewVisible = true
     @State private var isAdjustingSlider = false
     @State private var showsLargePreview = false
@@ -50,6 +53,12 @@ struct QuotaStyleSettingsView: View {
         .onChange(of: material) { _ in signal() }.onChange(of: glassDegree) { _ in signal() }
         .onChange(of: expandedWidth) { _ in signal() }.onChange(of: effect) { _ in signal() }
         .onChange(of: privacyMode) { _ in signal() }.onChange(of: automaticPopup) { _ in signal() }
+        .onChange(of: confettiIntensity) { _ in signal() }
+        .onChange(of: completionSound) { _ in signal() }
+        .onChange(of: completionSoundName) { value in
+            signal()
+            ActivityIslandCompletionAudio.play(ActivityIslandCompletionSound(rawValue: value) ?? .glass)
+        }
         .onChange(of: expandedHold) { _ in signal() }
         .onChange(of: floatingUsageEnabled) { _ in signal() }.onChange(of: glassAppearance) { _ in signal() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in geometry = .current() }
@@ -138,6 +147,19 @@ struct QuotaStyleSettingsView: View {
                         .accessibilityAddTraits(effect == option.rawValue ? .isSelected : [])
                 }
             }.padding(.vertical, 14)
+            SettingsRowDivider()
+            SettingsRow(symbol: "party.popper", title: "礼花强度", detail: "减弱动态效果开启时不播放。") {
+                Picker("礼花强度", selection: $confettiIntensity) {
+                    ForEach(ActivityIslandConfettiIntensity.allCases) { Text($0.title).tag($0.rawValue) }
+                }.labelsHidden().pickerStyle(.segmented)
+            }
+            SettingsRowDivider()
+            toggle("完成提示音", symbol: "speaker.wave.2", detail: "跟随系统音量。", value: $completionSound)
+            SettingsRow(symbol: "music.note", title: "提示音色", detail: "选择后试听一次。") {
+                Picker("提示音色", selection: $completionSoundName) {
+                    ForEach(ActivityIslandCompletionSound.allCases) { Text($0.rawValue).tag($0.rawValue) }
+                }.labelsHidden().pickerStyle(.menu).disabled(!completionSound)
+            }
         }.modifier(MonitorDesktopReveal(delay: 0.12))
     }
     private var automaticGroup: some View {

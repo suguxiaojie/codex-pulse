@@ -13,6 +13,7 @@ final class CodexDesktopIPCFixture: @unchecked Sendable {
     private var acknowledgeSubmissions = true
     private var acknowledgementOwner = "fixture-owner"
     private var steerResultTurn = "turn"
+    private var stateAfterSteer: [String: Any]?
     private var host = "local"
     private var ownerDiscoveryReady = true
     init(state: [String: Any], supportsInput: Bool = true) { self.state = state; self.supportsInput = supportsInput; conversationID = state["id"] as? String ?? "conversation" }
@@ -29,6 +30,7 @@ final class CodexDesktopIPCFixture: @unchecked Sendable {
     func setAutomaticSnapshots(_ enabled: Bool) { lock.withLock { automaticSnapshots = enabled } }
     func setSubmissionAcknowledgement(_ enabled: Bool, owner: String = "fixture-owner") { lock.withLock { acknowledgeSubmissions = enabled; acknowledgementOwner = owner } }
     func setSteerResultTurn(_ turn: String) { lock.withLock { steerResultTurn = turn } }
+    func setStateAfterSteer(_ state: [String: Any]) { lock.withLock { stateAfterSteer = state } }
     func setState(_ state: [String: Any], revision: Int64, emit: Bool = true) {
         lock.withLock { self.state = state; self.revision = revision; if emit { emitStateLocked() } }
     }
@@ -93,6 +95,9 @@ final class CodexDesktopIPCFixture: @unchecked Sendable {
                             emitLocked(["type": "response", "requestId": id, "resultType": "error", "error": "no-client-found"])
                         } else { response(id: id, method: method!, owner: "fixture-owner", result: ["supportsUntrustedAppInput": supportsInput]) }
                     } else if acknowledgeSubmissions, let method {
+                        if method == "thread-follower-steer-turn", let next = stateAfterSteer {
+                            state = next; revision += 1
+                        }
                         response(id: id, method: method, owner: acknowledgementOwner,
                             result: method == "thread-follower-steer-turn" ? ["result": ["turnId": steerResultTurn]] : ["ok": true])
                     }

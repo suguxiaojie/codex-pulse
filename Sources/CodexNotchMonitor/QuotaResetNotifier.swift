@@ -2,18 +2,24 @@ import AppKit
 import Foundation
 import UserNotifications
 
-enum QuotaNotificationStatus: Equatable {
-    case unknown
-    case enabled
-    case denied
-}
-
 final class QuotaResetNotifier: NSObject, UNUserNotificationCenterDelegate {
+    var onOpenCenter: (() -> Void)?
+    var onConfirmManual: ((String) -> Void)?
+
     private let center = UNUserNotificationCenter.current()
 
     override init() {
         super.init()
         center.delegate = self
+        let openCenter = UNNotificationAction(identifier: "open-center", title: "在动态中心查看", options: [.foreground])
+        let openHistory = UNNotificationAction(identifier: "open-center", title: "查看重置记录", options: [.foreground])
+        let source = UNNotificationAction(identifier: "open-source", title: "打开原帖", options: [.foreground])
+        let manual = UNNotificationAction(identifier: "confirm-manual", title: "标记为手动重置", options: [.foreground])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: "TIBO_SIGNAL", actions: [openCenter, source], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "QUOTA_RECOVERY", actions: [openHistory], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "QUOTA_RECOVERY_UNVERIFIED", actions: [openHistory, manual], intentIdentifiers: [])
+        ])
     }
 
     func requestAuthorization(completion: @escaping (QuotaNotificationStatus) -> Void) {
@@ -53,16 +59,29 @@ final class QuotaResetNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    func notify(_ event: QuotaResetEvent) {
-        guard event.reason.isNotifiable else { return }
+    func notify(_ payload: SystemNotificationContent) {
         let content = UNMutableNotificationContent()
-        content.title = event.reason.title
-        content.body = Self.body(for: event)
+        content.title = payload.title
+        content.subtitle = payload.subtitle
+        content.body = payload.body
+        content.categoryIdentifier = payload.category
+        content.sound = payload.playsSound ? .default : nil
+        if let sourceURL = payload.sourceURL { content.userInfo["sourceURL"] = sourceURL }
+        center.add(UNNotificationRequest(identifier: payload.identifier, content: content, trigger: nil))
+    }
+
+    func sendTestNotification(completion: @escaping (Bool) -> Void) {
+        let content = UNMutableNotificationContent()
+        content.title = "Codex Pulse 测试通知"
+        content.body = "通知已就绪，额度恢复与关注信号会这样提醒你。"
+        content.categoryIdentifier = "QUOTA_RECOVERY"
         content.sound = .default
-        if let sourceURL = event.sourceURL {
-            content.userInfo["sourceURL"] = sourceURL
+        center.add(UNNotificationRequest(
+            identifier: "test-notification-\(Date().timeIntervalSince1970)",
+            content: content, trigger: nil
+        )) { error in
+            DispatchQueue.main.async { completion(error == nil) }
         }
-        center.add(UNNotificationRequest(identifier: event.id, content: content, trigger: nil))
     }
 
     func notifyAccountSwitch(
@@ -105,10 +124,7 @@ final class QuotaResetNotifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     static func body(for event: QuotaResetEvent) -> String {
-        let details = event.changes.map { change in
-            "\(change.bucketName) \(change.windowLabel)：\(change.previousRemainingPercent)% → \(change.currentRemainingPercent)%"
-        }
-        return details.joined(separator: "；")
+        SystemNotificationContent.recoveryDetails(event)
     }
 
     func userNotificationCenter(
@@ -116,7 +132,7 @@ final class QuotaResetNotifier: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler(notification.request.content.sound == nil ? [.banner] : [.banner, .sound])
     }
 
     func userNotificationCenter(
@@ -124,9 +140,21 @@ final class QuotaResetNotifier: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if let value = response.notification.request.content.userInfo["sourceURL"] as? String,
-           let url = URL(string: value) {
-            NSWorkspace.shared.open(url)
+        let request = response.notification.request
+        let action = SystemNotificationAction.resolve(
+            category: request.content.categoryIdentifier,
+            action: response.actionIdentifier,
+            isDefault: response.actionIdentifier == UNNotificationDefaultActionIdentifier
+        )
+        DispatchQueue.main.async { [weak self] in
+            switch action {
+            case .openCenter: self?.onOpenCenter?()
+            case .confirmManual: self?.onConfirmManual?(request.identifier)
+            case .openSource:
+                if let value = request.content.userInfo["sourceURL"] as? String,
+                   let url = URL(string: value) { NSWorkspace.shared.open(url) }
+            case .none: break
+            }
         }
         completionHandler()
     }

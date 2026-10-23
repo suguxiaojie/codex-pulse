@@ -85,6 +85,9 @@ struct MenuBarPreferences: Equatable {
 }
 
 enum ActivityIslandPreferenceKey {
+    static let confettiIntensity = "activityIsland.confettiIntensity"
+    static let completionSound = "activityIsland.completionSound"
+    static let completionSoundName = "activityIsland.completionSoundName"
     static let floatingUsageEnabled = "activityIsland.floatingUsageEnabled"
     static let glassAppearance = "activityIsland.glassAppearance"
     static let usageCapsuleTone = "activityIsland.usageCapsuleTone"
@@ -114,6 +117,9 @@ enum ActivityIslandGlassAppearance: String, CaseIterable, Identifiable {
 }
 
 struct ActivityIslandPreferences: Equatable {
+    var confettiIntensity: ActivityIslandConfettiIntensity = .standard
+    var completionSound = true
+    var completionSoundName: ActivityIslandCompletionSound = .glass
     var expandedHold: TimeInterval = 3
     var material: ActivityIslandMaterial = .liquidGlass
     var glassDegree: Double = 0.45
@@ -127,7 +133,10 @@ struct ActivityIslandPreferences: Equatable {
     static func normalizedDuration(_ value: Double) -> Double { value.isFinite ? min(10, max(1, value.rounded())) : 3 }
     static func normalizedWidth(_ value: Double) -> Double { value.isFinite ? min(680, max(560, value)) : 680 }
     static func load(from defaults: UserDefaults = .standard) -> Self {
-        Self(expandedHold: normalizedDuration(defaults.object(forKey: ActivityIslandPreferenceKey.expandedHold) as? Double ?? 3),
+        Self(confettiIntensity: ActivityIslandConfettiIntensity(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.confettiIntensity) ?? "") ?? .standard,
+             completionSound: defaults.object(forKey: ActivityIslandPreferenceKey.completionSound) as? Bool ?? true,
+             completionSoundName: ActivityIslandCompletionSound(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.completionSoundName) ?? "") ?? .glass,
+             expandedHold: normalizedDuration(defaults.object(forKey: ActivityIslandPreferenceKey.expandedHold) as? Double ?? 3),
              material: ActivityIslandMaterial(rawValue: defaults.string(forKey: ActivityIslandPreferenceKey.material) ?? "") ?? .liquidGlass,
              glassDegree: ActivityIslandGlassDegree.normalized(defaults.object(forKey: ActivityIslandPreferenceKey.glassDegree) as? Double ?? 0.45),
              expandedWidth: normalizedWidth(defaults.object(forKey: ActivityIslandPreferenceKey.expandedWidth) as? Double ?? 680),
@@ -142,3 +151,35 @@ struct ActivityIslandPreferences: Equatable {
 // List retention is independent of compact receipt and automatic expansion timing.
 enum ActivityIslandSessionRetention { static let duration: TimeInterval = 60 }
 enum ActivityIslandFocusHandoff { static let duration: TimeInterval = 3 }
+
+// Value-only completion policy shared by runtime and isolated tests.
+enum ActivityIslandConfettiIntensity: String, CaseIterable, Identifiable {
+    case light, standard, festive
+    var id: String { rawValue }
+    var title: String { self == .light ? "轻" : self == .standard ? "标准" : "热烈" }
+    var parameters: ActivityIslandConfettiParameters {
+        switch self {
+        case .light: return .init(emissionDuration: 0.16, birthRate: 55, velocity: 155, scale: 0.75, lifetime: 1.6, gravity: 180, spin: 4, alphaSpeed: -0.45, cleanupDelay: 2.2)
+        case .standard: return .init(emissionDuration: 0.5, birthRate: 90, velocity: 320, scale: 1, lifetime: 2.6, gravity: 240, spin: 6, alphaSpeed: -0.25, cleanupDelay: 3.5)
+        case .festive: return .init(emissionDuration: 0.8, birthRate: 140, velocity: 420, scale: 1.2, lifetime: 3.2, gravity: 280, spin: 8, alphaSpeed: -0.2, cleanupDelay: 4.4)
+        }
+    }
+}
+struct ActivityIslandConfettiParameters: Equatable {
+    let emissionDuration: Double
+    let birthRate: Float
+    let velocity: CGFloat
+    let scale: CGFloat
+    let lifetime: Float
+    let gravity: CGFloat
+    let spin: CGFloat
+    let alphaSpeed: Float
+    let cleanupDelay: Double
+}
+enum ActivityIslandCompletionSound: String, CaseIterable, Identifiable {
+    case glass = "Glass", hero = "Hero", ping = "Ping", purr = "Purr", submarine = "Submarine"
+    var id: String { rawValue }
+    static func shouldPlay(now: Date, lastPlayedAt: Date?, baseline: Bool, enabled: Bool, islandVisible: Bool) -> Bool {
+        !baseline && enabled && islandVisible && (lastPlayedAt.map { now.timeIntervalSince($0) >= 2 } ?? true)
+    }
+}

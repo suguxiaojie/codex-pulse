@@ -52,6 +52,7 @@ struct LocalSessionSnapshot: Equatable {
     var sessionKind: CodexActivitySessionKind = .unknown
     var nativeWaitReason: CodexActivityWaitReason? = nil
     var nativeReplyRequestIDs: Set<String> = []
+    var nativeSuppressCompletion = false
 
     func evaluated(at now: Date) -> Self {
         guard let evidence else { return self }

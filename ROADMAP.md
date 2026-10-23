@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-GitHub 仓库为 suguxiaojie/codex-pulse，当前发行候选为 v1.9.0（Build 31）。灵动岛焦点舞台、光眼球、硬件黑材质、气象面板、Claude Code 接入与数字单位已纳入本次发布范围。正常环境完整测试与独立 Claude 专项均通过，arm64／x86_64 DMG 版本、架构、签名与镜像校验通过；提交推送、tag 与 GitHub Latest Release 待完成。未覆盖安装，Intel 未做真机运行验收。
+GitHub 仓库为 suguxiaojie/codex-pulse。正在准备 v1.10.0（Build 32）：包含灵动岛提醒卡、文字回答、中文输入与异步提问修复、完成礼花／提示音、系统通知和设置改进。完整测试（含成本、连续性与 Claude 接入）及 arm64／x86_64 Release 构建、镜像和签名验证全部通过，发布结果待核对。
 
 当前本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
@@ -14,7 +14,9 @@ GitHub 仓库为 suguxiaojie/codex-pulse，当前发行候选为 v1.9.0（Build 
 
 ## 进行中与待办
 
-- 2026-10-22 04:13：v1.9.0 发布继续：仅清理 5 个新增 Swift 文件末尾多余空行，保留单个结尾换行。正常环境完整测试、独立 Claude 专项及双架构 DMG 验证已通过；按用户授权复用已校验产物，不重建。准备完成白名单提交、main 推送、附注 tag 与 Latest Release 及公开附件核对。提交清单：build/qa/release-1.9.0/commit-files.txt。
+- 2026-10-24 03:18：v1.10.0 自动化验证已完成，公开发布进行中。新增功能的桌面视觉、真实中文输入法／焦点、通知端到端与 Intel 真机运行仍待人工验收；自动化验证结果以本次发布记录为准。相关实现说明见 docs/system-notifications.md、docs/island-alert-card.md、docs/island-text-answer.md、docs/island-completion-celebration.md、docs/island-async-question-fix.md。
+
+- 2026-10-22 补充核对：重新下载 Release 三个附件，SHA-256 与本地 build/ 产物一致，SHA256SUMS 校验 OK；线上 README 与 HEAD 逐字节一致，10 张截图与 3 个 Release 链接均返回 200。遗留：docs/images/pulse-setup.png（v1.8.0 起沿用）仍显示 v1.7.0 Build 25、部分遮挡邮箱 b***@163.com 及旧审批文案，与其他截图的“本机账号”口径不一致，待用户决定是否替换。
 
 - 2026-10-22 03:15：灵动岛设置完整／放大预览已复用生产焦点舞台：硬件黑与状态边缘光、投影、光眼球、步骤、本轮 Token、会话胶囊排及底栏；继续使用中性示例数据，设置直接联动。预览测试 48/48、硬件黑 50/50、角色 69/69、会话状态 148/148 与 arm64 Release／严格签名通过，普通／隐私离屏图已检查。完整脚本面板组因 NSScreen 不可用停止；续跑连续性原图断言、Claude socket bindFailed 失败，Claude Runtime 被前置失败阻断，待原生环境验收。8 个受保护文件本轮哈希未变（Motion 与基线的既有差异保留）。未改 Glance，未安装、提交或推送。证据：.tmp/island-settings-preview/。
 
@@ -118,11 +120,13 @@ GitHub 仓库为 suguxiaojie/codex-pulse，当前发行候选为 v1.9.0（Build 
 
 ## 最近完成
 
+- 2026-10-24 03:23：v1.10.0（Build 32）发行准备完成。纳入当前灵动岛提醒、文字回答／中文组字、跨轮次请求保留、三档礼花／提示音、通知与设置改进；中英文 README、版本和下载链接同步。双架构 DMG 与 SHA256SUMS-v1.10.0.txt 已生成。
+
 - 2026-10-22 04:11：v1.9.0（Build 31）发行准备完成：英文 README 与中文定稿结构、链接、图片、数据边界对应，中文 README 哈希保持不变；完整测试、Claude 专项及双架构 DMG 验证通过，SHA256SUMS-v1.9.0.txt 已生成。公开发布结果待核对。
 
-- 2026-10-21 20:00：灵动岛审批第 3 轮完成：操作胶囊 28 pt／水平 12 pt／间距 8 pt，主／次／危险／回退分类和自动换行，详情右置箭头，选项行选中态；移除固定卡片高度，实际测量进入原生列表高度与锚点，问题区 200 pt 内滚动，屏幕限高并裁切页脚边界；按来源区分副标题并同步紧凑与辅助说明。保留第 2 轮单数 targetClientId、权限构造、单次提交、不重试、Claude 120 秒与 settings 字节保留。仅指定 UI 四文件与测试变更，完整合成回归和 arm64 Release／签名通过。未安装、提交、推送或真实审批。报告：[REPORT.md](.tmp/island-approvals/REPORT.md)，第 3 轮差异：[change.diff](.tmp/island-approvals/round3/change.diff)。
-
 - 2026-10-21 20:08：灵动岛内直接审批（用户授权 Codex 可写回答、Claude 等待 2 分钟）已实现并备份安装。方案 .tmp/island-approvals/PLAN.md；Codex 执行 3 轮，Claude 验收退回：①提交请求误带 targetClientIds（方案错误，已对齐上游仅 targetClientId）；②权限授予原样回传请求对象，改为按上游规则只授予已识别项、含未知键不进岛；③按钮像文字（用户反馈）、卡片固定高度挤压页脚、Claude 行文案误写 Codex。Codex 提交路径移植自 QuotaView f779531（MIT）：完整 handle 校验、单次提交、不自动重试、Codex 原生界面并存；AGENTS.md 已按授权改写。Claude route decisionTimeoutSeconds=120 已在本机生效，~/.claude/settings.json 未改。Claude 复跑完整测试（审批 169、面板 173/173、Claude 66、连续性 37/37、Runtime）与 arm64 Release／签名。真实 Claude 端到端：允许一次→执行返回 200；拒绝→DENIED；不操作→约 2 分钟交回；回终端→交回。发现用户环境另有 Agent Guard PreToolUse Hook（服务不可用时仅审计全部放行），会使 Claude 跳过权限请求、岛内卡片在日常会话中不出现；测试使用仅含本插件 Hook 的临时 settings，未改用户配置。Codex 桌面端真实审批待用户在需批准权限模式下触发后验收。未提交／发布。回滚：build/backups/CodexNotchMonitor-before-island-approvals-20261021-073325.app（审批前）；本轮按钮修正前：build/backups/CodexNotchMonitor-before-approval-buttons-20261021-080722.app 。
+
+- 2026-10-21 20:00：灵动岛审批第 3 轮完成：操作胶囊 28 pt／水平 12 pt／间距 8 pt，主／次／危险／回退分类和自动换行，详情右置箭头，选项行选中态；移除固定卡片高度，实际测量进入原生列表高度与锚点，问题区 200 pt 内滚动，屏幕限高并裁切页脚边界；按来源区分副标题并同步紧凑与辅助说明。保留第 2 轮单数 targetClientId、权限构造、单次提交、不重试、Claude 120 秒与 settings 字节保留。仅指定 UI 四文件与测试变更，完整合成回归和 arm64 Release／签名通过。未安装、提交、推送或真实审批。报告：[REPORT.md](.tmp/island-approvals/REPORT.md)，第 3 轮差异：[change.diff](.tmp/island-approvals/round3/change.diff)。
 
 - 2026-10-21 18:40：用户实机反馈来源切换被刘海遮挡（第 1 轮把切换放进页头中部，规格错误）。第 3 轮：页头仅保留左返回／右置顶收起，切换移回内容区首行，改为 240×28 整体分段胶囊（滑动选中，保留禁用与无障碍语义）；窄宽度额度卡三档回退避免文字相撞。第 4 轮按用户要求为两段加 logo：Codex 复用 Island-Codex.svg，Claude 为代码绘制的星芒 Shape（#D97757，无外部资源）。Claude 复跑完整测试（面板 147/147、Claude 59、连续性 37/37、Runtime）与 arm64 Release，备份后覆盖安装；实机 560 宽刘海屏确认切换可见、双向切换、Claude 真实官方额度显示、窄卡无相撞（.tmp/island-usage-refactor/review4-real-*.png）。页脚位于玻璃外为既有表现，未改。未提交／发布。本轮覆盖前备份：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-island-switch-logo-20261021-064009.app ；重构前回滚仍为 CodexNotchMonitor-before-island-usage-refactor-20261021-060904.app 。
 
@@ -156,9 +160,9 @@ GitHub 仓库为 suguxiaojie/codex-pulse，当前发行候选为 v1.9.0（Build 
 
 - 2026-10-16 20:17：按用户选定“轻量文字”统一四个监控页标题栏的刷新／重新检查：默认无底色、悬停轻底色、按压轻收缩；加载跟随真实服务状态，旋转图标＋状态文字替代额外进度圈，固定文案占位避免宽度跳动，禁用重复点击，减少动态效果下停止旋转。未改刷新与会话检查逻辑，Hook 继续屏蔽。完整测试／arm64 Release／签名通过并备份覆盖安装。
 
-- 2026-10-16 20:00：移除菜单栏任务、密度及内容选择入口，运行时固定圆环＋百分比，旧偏好保留但不再生效；透明度复用灵动岛连续拖动／松手回稳滑杆并增加拖动期间滚动互斥；内容／外观复用滑移导航；会话搜索、状态菜单与导入／导出／详情使用统一轻描边控件。未改会话读取、导入导出和归属逻辑，Hook 仍屏蔽。完整测试与 arm64 Release 后备份覆盖安装。
-
 ## 最近验证
+
+- 2026-10-24 03:23：scripts/test.sh 完整执行退出 0，包含成本冒烟、连续性 37/37、面板 284/284、Native Activity 72、岛内审批 242、Claude 核心 90 及 Runtime 回归。arm64／x86_64 DMG 均为 1.10.0 Build 32，主程序／Helper 架构正确，deep／strict ad-hoc 签名与镜像校验通过；只读挂载后 App 与构建快照逐文件 SHA-256 一致，133 个构建输入未变。未安装，Intel 真机、中文输入法与通知端到端交互未实测。证据：.tmp/release-v1.10.0/。
 
 - 2026-10-22 04:11：v1.9.0 正常环境 scripts/test.sh 与独立 zsh scripts/test-claude.sh 均退出 0，连续性 37/37、岛内审批 169 项、Claude 核心 90 项及 Runtime 回归通过。两架构构建退出 0，只读挂载确认 1.9.0／Build 31，主程序与 Helper 架构准确，deep／strict ad-hoc 签名及镜像校验有效。日志与哈希：build/qa/release-1.9.0/。未安装，未做 Intel 真机验收。
 
@@ -197,8 +201,6 @@ GitHub 仓库为 suguxiaojie/codex-pulse，当前发行候选为 v1.9.0（Build 
 - 2026-10-17 12:07：项目行会话摘要 arm64 Release App 构建退出 0；源包、覆盖前 App、完整备份和安装包均为 Codex Pulse／1.7.0 Build 25／arm64，签名有效；备份全包哈希与覆盖前目标一致、安装全包哈希与源包一致，启动进程已确认。现有源码差异限于会话列表表头、项目／会话行及列宽，新增只读展示模型；归属／连续性服务、Store、数据路径与打包配置源码哈希未变，项目操作函数未改。按用户要求未运行测试或截图／交互验收；单／多账号、部分／全部未知、混合异常、搜索与筛选、长名称及键盘由用户自行验收。证据：.tmp/session-project-summary/release-build.log、install.json、scope-review.json、change.diff。
 
 - 2026-10-17 12:00：概览卡精简 arm64 Release App 构建退出 0；源包、覆盖前 App、完整备份与安装包均为 Codex Pulse／1.7.0 Build 25／arm64，签名有效；备份全包哈希与覆盖前目标一致，安装全包哈希与源包一致，启动进程已确认。本轮源码差异仅限 costOverviewCard、usageOverviewCard 与 UsageCountMetric，图表和服务实现不变；受保护源码哈希一致。按用户要求未运行测试、截图或交互验收。证据：.tmp/overview-card-simplify/release-build.log、install.json、scope-review.json、change.diff。
-
-- 2026-10-17 11:55：Codex Pulse 命名迭代 arm64 Release App 构建退出 0；源包／安装包 CFBundleDisplayName 与 CFBundleName 均为 Codex Pulse，Bundle ID／可执行文件与覆盖前一致。源包、旧包与完整备份均为 1.7.0 Build 25／arm64，签名有效；备份全包文件哈希与覆盖前目标一致，安装全包文件哈希与源包一致，启动进程已确认。数据路径／偏好／Store／打包脚本等受保护源码哈希不变。未运行测试或 UI 验收，配置沿用与界面显示由用户自行确认；构建保留既有 Swift 并发警告。证据：.tmp/pulse-name/release-build.log、install.json、change.diff、protected-sha256.json。
 
 ## 验证与产物入口
 

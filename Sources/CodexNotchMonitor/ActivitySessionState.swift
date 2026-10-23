@@ -29,6 +29,7 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     var isPrivate = false
     var waitReason: CodexActivityWaitReason? = nil
     var replyRequestIDs: Set<String> = []
+    var suppressCompletion = false
 
     var recentSteps: [IslandStep] = []
     var isRetainedReceipt = false
@@ -50,7 +51,8 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
         Self(sessionID: sessionID, turnID: turnID, projectID: projectID, projectName: "项目",
              title: provider + " 任务", phase: phase, actionText: "任务内容已隐藏", updatedAt: updatedAt,
              tokenUsage: nil, endReason: endReason, provider: provider, isPrivate: true,
-             waitReason: waitReason, replyRequestIDs: replyRequestIDs, isRetainedReceipt: isRetainedReceipt)
+             waitReason: waitReason, replyRequestIDs: replyRequestIDs,
+             suppressCompletion: suppressCompletion, isRetainedReceipt: isRetainedReceipt)
     }
 
     var statusTitle: String {
@@ -115,7 +117,7 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     }
 
     static func newlyCompleted(in rows: [Self], previous: [Self]) -> Self? {
-        rows.filter { row in row.phase == .completed && !row.isRetainedReceipt && previous.contains {
+        rows.filter { row in row.phase == .completed && !row.suppressCompletion && !row.isRetainedReceipt && previous.contains {
             $0.id == row.id && $0.turnID == row.turnID && $0.phase.isActive
         } }.max { $0.updatedAt < $1.updatedAt }
     }
@@ -186,6 +188,7 @@ struct ActivitySessionState {
                     sessionTotalTokens: [local?.sessionTotalTokens, previous?.sessionTotalTokens].compactMap { $0 }.max(),
                     waitReason: task.phase == .waitingApproval ? local?.nativeWaitReason ?? sameTurn?.waitReason : nil,
                     replyRequestIDs: task.phase == .waitingApproval ? local?.nativeReplyRequestIDs ?? sameTurn?.replyRequestIDs ?? [] : [],
+                    suppressCompletion: local?.nativeSuppressCompletion == true || sameTurn?.suppressCompletion == true,
                     recentSteps: steps
                 ))
             }
@@ -205,6 +208,7 @@ struct ActivitySessionState {
                 let localEnd = local?.turnID == previous.turnID ? local?.evidence?.endReason : nil
                 guard let reason = localEnd else { continue }
                 row.phase = reason.phase
+                row.suppressCompletion = row.suppressCompletion || local?.nativeSuppressCompletion == true
                 row.endReason = reason
                 row.actionText = row.statusTitle
                 row.updatedAt = min(now, local?.evidence?.endedAt ?? local?.updatedAt ?? now)

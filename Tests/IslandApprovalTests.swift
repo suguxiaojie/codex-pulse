@@ -20,6 +20,20 @@ import Foundation
         catch let actual { expect(actual as? CodexDesktopIPCError == error, "expected \(error), got \(actual)") }
     }
     static func run() async throws {
+        expect(!IslandAnswerEditor.canSynchronize(markedText: true), "IME composition blocks binding and measurement writes")
+        expect(IslandAnswerEditor.canSynchronize(markedText: false), "committed text synchronizes")
+        expect(!IslandAnswerEditor.shouldActivate(userClick: false, enabled: true), "refresh and programmatic focus never activate app")
+        expect(!IslandAnswerEditor.shouldActivate(userClick: true, enabled: false), "disabled input never activates")
+        expect(IslandAnswerEditor.shouldActivate(userClick: true, enabled: true), "editable click activates")
+        expect(IslandAnswerEditor.shouldRestore(hasFocus: false, appIsActive: true, previousAppRunning: true), "loss of focus returns live previous app")
+        expect(!IslandAnswerEditor.shouldRestore(hasFocus: true, appIsActive: true, previousAppRunning: true), "editor navigation retains foreground")
+        expect(!IslandAnswerEditor.shouldRestore(hasFocus: false, appIsActive: false, previousAppRunning: true), "user app switch is not stolen back")
+        expect(!IslandAnswerEditor.shouldRestore(hasFocus: false, appIsActive: true, previousAppRunning: false), "terminated app is not relaunched")
+        expect(IslandAnswerEditor.Editor.submitsReturn(keyCode: 36, shift: false, markedText: false), "Return submits")
+        expect(IslandAnswerEditor.Editor.submitsReturn(keyCode: 76, shift: false, markedText: false), "keypad Return submits")
+        expect(!IslandAnswerEditor.Editor.submitsReturn(keyCode: 36, shift: true, markedText: false), "Shift Return stays in editor")
+        expect(!IslandAnswerEditor.Editor.submitsReturn(keyCode: 36, shift: false, markedText: true), "marked text Return never submits")
+        expect(!IslandAnswerEditor.Editor.submitsReturn(keyCode: 0, shift: false, markedText: false), "ordinary typing never submits")
         let methods = ["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "item/tool/requestUserInput", "mcpServer/elicitation/request"]
         let verbs = ["thread-follower-command-approval-decision", "thread-follower-file-approval-decision", "thread-follower-permissions-request-approval-response", "thread-follower-submit-user-input", "thread-follower-submit-mcp-server-elicitation-response"]
         let permissions: [String: Any] = ["network": ["enabled": true], "fileSystem": ["read": ["/fixture"]]]
@@ -103,13 +117,48 @@ import Foundation
         _ = try await disabledClient.submit(handle: disabledWire.handle, result: disabledWire.response("deny", answers: [:])!)
         expect(disabledFixture.submissions.count == 1, "empty recognized grant agrees with explicit denial at IPC boundary")
         await disabledClient.stop()
-        for params: [String: Any] in [["isSecret": true], ["multiSelect": true], ["options": []], ["isOther": true, "options": []]] {
+        for params: [String: Any] in [["isSecret": true], ["multiSelect": true]] {
             let q = question.merging(params) { _, v in v }
             let fixture = CodexDesktopIPCFixture(state: state([request(methods[3], params: ["questions": [q]])]))
             let (client, _, snapshot) = try await fixture.connectedClient()
             expect(IslandCodexApproval(snapshot.requests[0])!.questions.isEmpty, "unsupported question returns to Codex")
             await client.stop()
         }
+        for params: [String: Any] in [["options": []], ["isOther": true], ["isOther": true, "options": []]] {
+            let q = question.merging(params) { _, v in v }
+            let fixture = CodexDesktopIPCFixture(state: state([request(methods[3], params: ["questions": [q]])]))
+            let (client, _, snapshot) = try await fixture.connectedClient()
+            let wire = IslandCodexApproval(snapshot.requests[0])!
+            expect(wire.questions.count == 1 && wire.questions[0].allowsText, "empty options or Other allows text")
+            for invalid in [" \n\t", String(repeating: "a", count: 4_001), "a" + String(repeating: "\u{0301}", count: 32_768)] {
+                expect(wire.response("answers", answers: ["q": invalid]) == nil, "blank, character and UTF8 limits")
+            }
+            let boundary = "a" + String(repeating: "\u{0301}", count: 32_767) + "b"
+            expect(boundary.utf8.count == 65_536 && wire.response("answers", answers: ["q": boundary]) != nil, "UTF8 boundary accepted independently of grapheme count")
+            expect(wire.response("answers", answers: ["q": String(repeating: "字", count: 4_000)]) != nil, "4000 characters accepted")
+            let draft = IslandAnswerDraft()
+            draft.select("A", for: "q"); draft.type(" 自由回答\n第二行 ", for: "q")
+            expect(draft.options.isEmpty && draft.isInteracting, "typing clears choice and blocks interruptions")
+            let response = wire.response("answers", answers: draft.answers)!
+            expect(response == data(["answers": ["q": ["answers": ["自由回答\n第二行"]]]]), "trim outer whitespace only")
+            draft.select("A", for: "q")
+            expect(draft.texts.isEmpty && !draft.isInteracting && draft.answers == ["q": "A"], "choice clears draft")
+            draft.focusedQuestion = "q"
+            expect(draft.isInteracting, "empty focused editor still blocks alerts")
+            let model = ActivityIslandViewModel()
+            model.answerDrafts = [wire.handle.identity: draft]
+            model.discardAnswerDrafts(except: [wire.handle.identity])
+            expect(model.answerDrafts[wire.handle.identity] === draft, "same nonce preserves draft")
+            model.discardAnswerDrafts(except: [])
+            expect(model.answerDrafts.isEmpty && !model.isAnswerInteracting, "request disappearance clears draft and protection")
+            _ = try await client.submit(handle: wire.handle, result: response)
+            expect(fixture.submissions.count == 1, "free text uses existing guarded submit")
+            await client.stop()
+        }
+        let duplicate = CodexDesktopIPCFixture(state: state([request(methods[3], params: ["questions": [question, question]])]))
+        let (duplicateClient, _, duplicateSnapshot) = try await duplicate.connectedClient()
+        expect(IslandCodexApproval(duplicateSnapshot.requests[0])!.questions.isEmpty, "duplicate question ids rejected")
+        await duplicateClient.stop()
         let tooMany = (0..<5).map { question.merging(["id": "q\($0)"]) { _, v in v } }
         let many = CodexDesktopIPCFixture(state: state([request(methods[3], params: ["questions": tooMany])]))
         let (manyClient, _, manySnapshot) = try await many.connectedClient()
@@ -178,12 +227,46 @@ import Foundation
         let (asyncClient, _, asyncSnapshot) = try await asyncFixture.connectedClient()
         let asyncWire = IslandCodexApproval(asyncSnapshot.requests[0])!
         let q = asyncWire.questions[0]
-        _ = try await asyncClient.submit(handle: asyncWire.handle, result: asyncWire.response("answers", answers: [q.id: "B"])!)
+        let freeResponse = asyncWire.response("answers", answers: [q.id: "自己的答案"])!
+        let decodedFreeResponse = try DesktopIPCJSON.decode(freeResponse, limit: 1_048_576)
+        expect(q.allowsText && CodexDesktopIPCClient.validResponse(decodedFreeResponse, method: "item/tool/requestUserInput"), "async text passes wire response validator")
+        _ = try await asyncClient.submit(handle: asyncWire.handle, result: freeResponse)
         expect(asyncFixture.followingCount == 2, "async refreshes before steering")
         expect(asyncFixture.submissions[0]["method"] as? String == "thread-follower-steer-turn", "async uses native steering")
         expect(asyncFixture.submissions[0]["targetClientId"] as? String == "fixture-owner"
             && asyncFixture.submissions[0]["targetClientIds"] == nil, "steer request also uses singular target only")
         await asyncClient.stop()
+        for mode in ["resolved", "gone", "pending", "empty", "running"] {
+            var initial = state([], items: [item])
+            if mode != "running" { initial["turns"] = [["turnId": "turn", "status": "completed", "items": [item]]] }
+            let fixture = CodexDesktopIPCFixture(state: initial)
+            fixture.setSteerResultTurn(mode == "empty" ? "" : "new-turn")
+            let (client, _, snapshot) = try await fixture.connectedClient()
+            expect(snapshot.requests.count == 1, "ended turn still offers one exact question handle")
+            let wire = IslandCodexApproval(snapshot.requests[0])!
+            let question = wire.questions[0]
+            let response = wire.response("answers", answers: [question.id: "回答"])!
+            if mode == "resolved" {
+                let reply = CodexDesktopRequestProjector.asyncReplyOpeningTag
+                    + String(decoding: data([["questionItemId": question.id, "question": question.title, "answer": "回答"]]), as: UTF8.self)
+                    + CodexDesktopRequestProjector.asyncReplyClosingTag
+                var next = initial
+                next["turns"] = [["turnId": "turn", "status": "completed", "items": [item,
+                    ["type": "steeringUserMessage", "status": "accepted", "input": [["type": "text", "text": reply]]]]]]
+                fixture.setStateAfterSteer(next)
+            } else if mode == "gone" { fixture.setStateAfterSteer(state([], items: [])) }
+            else if mode == "pending" { fixture.setStateAfterSteer(initial) }
+            if mode == "resolved" || mode == "gone" {
+                let outcome = try await client.submit(handle: wire.handle, result: response)
+                expect(outcome == .confirmedResolved, "resolved post-turn answer reports confirmed success")
+                expect(fixture.followingCount == 3, "ended answer confirms a post-dispatch snapshot")
+            } else {
+                await fails(client, wire.handle, response, .outcomeUnknown)
+                await fails(client, wire.handle, response, .alreadySubmitted)
+            }
+            expect(fixture.submissions.count == 1, "ended and uncertain answers never dispatch twice")
+            await client.stop()
+        }
         let observedFixture = CodexDesktopIPCFixture(state: state([request()]))
         let observedClient = observedFixture.client(timeout: 0.05)
         let observer = NativeActivityObserver(client: observedClient)
@@ -218,7 +301,7 @@ import Foundation
         expect(!CodexDesktopIPCClient.permitsSubmissionMessage(.object(["type": .string("request"), "method": .string("turn/start"), "targetClientId": .string("owner")]), owner: "owner"), "unknown method blocked")
         expect(NativeActivityObserver.submissionMessage(for: nil) == "已发送，等待 Codex 确认", "accepted result copy")
         for error in [CodexDesktopIPCError.staleRequest, .alreadySubmitted] {
-            expect(NativeActivityObserver.submissionMessage(for: error) == "请求已变化，请在 Codex 中查看", "stale result copy")
+            expect(NativeActivityObserver.submissionMessage(for: error) == "这个提问已在 Codex 中处理或已过期", "stale result copy")
         }
         expect(NativeActivityObserver.submissionMessage(for: CodexDesktopIPCError.outcomeUnknown) == "结果未知，请在 Codex 中确认", "unknown result copy")
         let content = IslandApprovalContent(id: "private", provider: "Codex", title: "执行命令", summary: "secret command",

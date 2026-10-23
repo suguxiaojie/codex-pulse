@@ -12,6 +12,7 @@ struct NativeActivityEvidence {
     var waitReason: CodexActivityWaitReason? = nil
     var pendingAsyncQuestionIDs: Set<String> = []
     var replyRequestIDs: Set<String> = []
+    var suppressCompletion = false
 
     static func project(_ value: CodexDesktopInteractionProjection, previous: Self?, now: Date) -> Self? {
         guard value.sourceKind == .user || value.sourceKind == .unknown,
@@ -19,7 +20,15 @@ struct NativeActivityEvidence {
         let phase: TaskPhase
         let terminal: SessionEndReason?
         var waitReason: CodexActivityWaitReason? = nil
-        switch value.status {
+        let pendingAfterEnd = value.status != "inProgress" && value.status != "unknown"
+            && value.pendingRequestsAreAuthoritative
+            && (!value.authoritativeAsyncQuestionIDs.isEmpty || !value.authoritativePendingIdentities.isEmpty)
+        if pendingAfterEnd {
+            phase = .waitingApproval; terminal = nil
+            waitReason = value.authoritativePendingIdentities.allSatisfy {
+                $0.method == "item/tool/requestUserInput" || $0.method == "mcpServer/elicitation/request"
+            } ? .userInput : .approval
+        } else { switch value.status {
         case "inProgress":
             terminal = nil
             let waiting: Bool
@@ -49,7 +58,7 @@ struct NativeActivityEvidence {
         case "interrupted": phase = .ended; terminal = .cancelled
         case "failed": phase = .failed; terminal = .failed
         default: return nil
-        }
+        } }
         let pendingQuestions = phase == .waitingApproval && waitReason == .userInput
             ? (value.authoritativeAsyncQuestionIDs.isEmpty
                ? (previous?.turnID == turn ? previous?.pendingAsyncQuestionIDs ?? [] : [])
@@ -69,7 +78,8 @@ struct NativeActivityEvidence {
         }
         return Self(turnID: turn, phase: phase, title: value.title, startedAt: value.startedAt,
             receivedAt: now, terminal: terminal, waitReason: waitReason,
-            pendingAsyncQuestionIDs: pendingQuestions, replyRequestIDs: replyRequests)
+            pendingAsyncQuestionIDs: pendingQuestions, replyRequestIDs: replyRequests,
+            suppressCompletion: pendingAfterEnd || (previous?.turnID == turn && previous?.suppressCompletion == true))
     }
 
     func applying(to local: LocalSessionSnapshot) -> LocalSessionSnapshot? {
@@ -91,7 +101,8 @@ struct NativeActivityEvidence {
             startedAt: startedAt ?? (sameTurn ? local.startedAt : nil), sessionTotalTokens: local.sessionTotalTokens,
             latestAssistantSummary: sameTurn ? local.latestAssistantSummary : nil,
             nativePhase: phase == .working && toolRunning ? .usingTool : phase, sessionKind: local.sessionKind,
-            nativeWaitReason: waitReason, nativeReplyRequestIDs: replyRequestIDs)
+            nativeWaitReason: waitReason, nativeReplyRequestIDs: replyRequestIDs,
+            nativeSuppressCompletion: suppressCompletion)
     }
 }
 
@@ -108,9 +119,9 @@ final class NativeActivityObserver {
         submissionMessages[handle.identity] = "正在提交"
         let message: String
         do {
-            _ = try await client.submit(handle: handle, result: result)
+            let outcome = try await client.submit(handle: handle, result: result)
             let current = approvalSnapshots[handle.conversationID]
-            message = Self.submissionMessage(for: current?.supportsUntrustedAppInput == true
+            message = outcome == .confirmedResolved ? "已回答，Codex 已确认" : Self.submissionMessage(for: current?.supportsUntrustedAppInput == true
                 && current?.requests.contains(handle) == true ? nil : CodexDesktopIPCError.outcomeUnknown)
         } catch {
             message = Self.submissionMessage(for: error)
@@ -122,9 +133,10 @@ final class NativeActivityObserver {
     static func submissionMessage(for error: Error?) -> String {
         guard let error else { return "已发送，等待 Codex 确认" }
         if let error = error as? CodexDesktopIPCError, error == .staleRequest || error == .alreadySubmitted {
-            return "请求已变化，请在 Codex 中查看"
+            return "这个提问已在 Codex 中处理或已过期"
         }
-        return "结果未知，请在 Codex 中确认"
+        if error as? CodexDesktopIPCError == .outcomeUnknown { return "结果未知，请在 Codex 中确认" }
+        return error.localizedDescription
     }
     // Like QuotaView's terminal-turn registry, positive stale events cannot
     // reopen a settled identity. Keep only one bounded tombstone per follow.
@@ -189,7 +201,8 @@ final class NativeActivityObserver {
         } else {
             excluded.remove(id)
             if let next = NativeActivityEvidence.project(projection, previous: evidence[id], now: Date()) {
-                if let terminal = terminalTurns[id], terminal.turnID == next.turnID {
+                if let terminal = terminalTurns[id], terminal.turnID == next.turnID,
+                   !(next.phase == .waitingApproval && next.suppressCompletion && projection.status != "inProgress") {
                     evidence[id] = terminal
                 } else {
                     evidence[id] = next

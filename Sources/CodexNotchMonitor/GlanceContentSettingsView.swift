@@ -91,18 +91,11 @@ struct GlanceContentSettingsView: View {
                 )
             }.modifier(MonitorDesktopReveal(delay: 0.04))
             PanelSettingsGroup(title: "用量", symbol: "chart.bar") {
-                VStack(alignment: .leading, spacing: 6) {
-                    Picker("数字单位", selection: Binding(
-                        get: { countStyle },
-                        set: { countStyle = $0; $0.save() }
-                    )) {
-                        Text("万／亿").tag(CountStyle.chinese)
-                        Text("K／M／B").tag(CountStyle.western)
-                    }.pickerStyle(.segmented)
-                    Text(CountFormatter.string(184_000_000, style: countStyle) + " · "
-                         + CountFormatter.string(5_410_000, style: countStyle))
-                        .font(.caption)
-                        .foregroundStyle(PanelSettingsTheme.secondary)
+                SettingsRow(symbol: "textformat.123", title: "数字单位", detail: countPreview, numericDetail: true) {
+                    PanelSettingsSegments(options: ["万／亿", "K／M／B"], selection: Binding(
+                        get: { countStyle == .chinese ? "万／亿" : "K／M／B" },
+                        set: { countStyle = $0 == "万／亿" ? .chinese : .western; countStyle.save() }
+                    ), title: "数字单位")
                 }
                 rowDivider
                 contentRow(
@@ -131,6 +124,15 @@ struct GlanceContentSettingsView: View {
                 )
             }.modifier(MonitorDesktopReveal(delay: 0.12))
         }
+    }
+
+    private var countPreview: String {
+        let accountID = UsageAccountSelection.currentAccountID(in: store.usageAccountOptions)
+        let usage = accountID.map { store.costSnapshot.scope(for: $0).usage }
+        let hasData = usage.map { !$0.activity.isEmpty || $0.day.tokens > 0 || $0.month.tokens > 0 } ?? false
+        return SettingsSummaryText.countPreview(
+            day: hasData ? usage.map { Int64($0.day.tokens) } : nil,
+            month: hasData ? usage.map { Int64($0.month.tokens) } : nil, style: countStyle)
     }
 
     private var appearanceSettings: some View {

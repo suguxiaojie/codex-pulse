@@ -125,6 +125,7 @@ public struct CodexDesktopIPCInvalidation: Equatable, Sendable {
 public enum CodexDesktopIPCSubmissionResult: Equatable, Sendable {
     /// An IPC acknowledgement; settlement must come from a newer state stream.
     case acceptedForDispatch
+    case confirmedResolved
 }
 
 public enum CodexDesktopIPCError: Error, Equatable, LocalizedError {
@@ -355,13 +356,27 @@ public actor CodexDesktopIPCClient {
                 "addedFiles": .array([]), "fileAttachments": .array([]), "imageAttachments": .array([]), "commentAttachments": .array([]),
                 "ideContext": .null, "workspaceRoots": entry.state["cwd"]?.string.map { .array([.string($0)]) } ?? .array([])])
             let restore: DesktopIPCJSON = .object(["id": .string(messageID), "cwd": entry.state["cwd"] ?? .null, "context": context])
+            let before = try CodexDesktopRequestProjector.project(conversationID: handle.conversationID, state: entry.state)
+            let turnEnded = ["completed", "interrupted", "failed"].contains(before.status)
             attempted.insert(AttemptIdentity(handle))
             let data = try await request(method: "thread-follower-steer-turn", version: 1, targetOwner: handle.ownerClientID,
                 params: ["conversationId": .string(handle.conversationID), "clientUserMessageId": .string(messageID),
                     "input": .array([.object(["type": .string("text"), "text": .string(text), "text_elements": .array([])])]),
                     "restoreMessage": restore, "attachments": .array([])], submission: true)
             let acknowledgement = try DesktopIPCJSON.decode(data, limit: configuration.maximumFrameBytes)
-            guard acknowledgement["result"]?["turnId"]?.string == handle.turnID else { throw CodexDesktopIPCError.outcomeUnknown }
+            guard let replyTurn = acknowledgement["result"]?["turnId"]?.string,
+                  !replyTurn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CodexDesktopIPCError.outcomeUnknown }
+            if turnEnded {
+                do { try await refreshSnapshot(key) }
+                catch { throw CodexDesktopIPCError.outcomeUnknown }
+                guard epoch == handle.connectionEpoch, let after = ledger[key],
+                      after.owner.clientID == handle.ownerClientID,
+                      after.streamGeneration == entry.streamGeneration, after.revision > entry.revision,
+                      let projection = try? CodexDesktopRequestProjector.project(conversationID: handle.conversationID, state: after.state),
+                      projection.pendingRequestsAreAuthoritative,
+                      !projection.authoritativeAsyncQuestionIDs.contains(questionID) else { throw CodexDesktopIPCError.outcomeUnknown }
+                return .confirmedResolved
+            } else if replyTurn != handle.turnID { throw CodexDesktopIPCError.outcomeUnknown }
             return .acceptedForDispatch
         }
         let verb: String

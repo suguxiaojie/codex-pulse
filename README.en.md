@@ -6,7 +6,7 @@
 
 **Keep track of Codex and Claude Code quotas, tasks, and usage from your menu bar and notch.**
 
-[简体中文](README.md) · [Download v1.9.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.9.0) · [MIT License](LICENSE)
+[简体中文](README.md) · [Download v1.10.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0) · [MIT License](LICENSE)
 
 macOS 13+ · Native SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -29,6 +29,10 @@ All data comes from your Mac: the Codex App Server, desktop IPC, and local sessi
 - **Focus stage**: the expanded island shows a single focus card with the current task's latest 3 steps and Token usage for this turn. Other sessions appear as a row of capsules; click one to switch. New approval or reply requests automatically take focus. Three seconds after a task finishes, focus moves to a task that is still running. Ended sessions remain in the list for 1 minute.
 - **In-island approval**: explicitly approve or answer single-choice questions for requests currently waiting in Codex or Claude Code. Other requests return to the original client; nothing is approved automatically.
 - **Motion effects**: retain three Metal progress effects (state smoke, quantum noise, and liquid waves), plus completion confetti and confirmation pulses. All become static when Reduce Motion is enabled.
+
+- **Alerts and completion feedback**: Followed signals and quota recovery appear as system notifications and island cards. Alerts pause on hover and yield to approvals and completion celebrations. Choose from three confetti levels and five completion sounds.
+- **Text answers**: Answer Codex questions with free text, including Chinese input methods. Unanswered asynchronous questions remain visible after the turn ends; success requires both a valid response and an authoritative snapshot.
+- **Notification settings**: Request notification permission when needed, send a sound-enabled test notification, and preview number formatting using current-account usage.
 
 ### Glass menu bar panel
 
@@ -93,12 +97,12 @@ Large numbers use Chinese 万 (ten thousand) / 亿 (hundred million) units by de
 
 ## Download and install
 
-Current version: **v1.9.0**. Download the installer for your Mac from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.9.0):
+Current version: **v1.10.0**. Download the installer for your Mac from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0):
 
 | Mac processor | Installer |
 |---|---|
-| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.9.0/CodexNotchMonitor-v1.9.0-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.9.0/CodexNotchMonitor-v1.9.0-x86_64.dmg) |
+| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.10.0/CodexNotchMonitor-v1.10.0-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.10.0/CodexNotchMonitor-v1.10.0-x86_64.dmg) |
 
 1. Open the DMG and drag the app into Applications.
 2. Launch the app. Make sure Codex / ChatGPT Desktop is installed and signed in.

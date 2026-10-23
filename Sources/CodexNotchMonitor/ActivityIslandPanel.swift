@@ -7,6 +7,15 @@ import SwiftUI
 
 // Drawing-only margins; the original metrics and animation curves are unchanged.
 extension ActivityIslandPanelMetrics {
+    init(alertOver base: ActivityIslandPanelMetrics) {
+        hostSize = base.hostSize
+        compactRect = base.compactRect
+        let width: CGFloat = min(base.hostSize.width, 380)
+        expandedRect = CGRect(x: (base.hostSize.width - width) / 2, y: base.expandedRect.minY,
+            width: width, height: 156 + (base.hardwareGap > 0 ? base.compactRect.height : 0))
+        rowHeight = base.rowHeight; visibleRowCount = base.visibleRowCount
+        hardwareGap = base.hardwareGap; maximumUsageHeight = base.maximumUsageHeight
+    }
     init(shadowing base: ActivityIslandPanelMetrics) {
         let side = IslandHardwareBlack.shadowHorizontalInset
         hostSize = CGSize(width: base.hostSize.width + side * 2,
@@ -45,7 +54,7 @@ final class ActivityIslandSurface: NSView {
     private let clipping = CAShapeLayer()
     private let content = NSView()
     private let glassContainer = NSView()
-    private var glassHost: NSHostingView<IslandExpandedGlassBackdrop>?
+    private var glassHost: NSHostingView<IslandAlertBackdrop>?
     private var glassGeometry: IslandGlassGeometry?
     private let compactHost: NSHostingView<ActivityIslandView>
     private let expandedHost: NSHostingView<ActivityIslandView>
@@ -108,7 +117,7 @@ final class ActivityIslandSurface: NSView {
             glassGeometry.update(value: value, degree: degree, animated: animated)
         } else {
             let geometry = IslandGlassGeometry(value: value, degree: degree)
-            let host = NSHostingView(rootView: IslandExpandedGlassBackdrop(model: model, geometry: geometry))
+            let host = NSHostingView(rootView: IslandAlertBackdrop(model: model, geometry: geometry))
             host.sizingOptions = []; host.frame = bounds
             glassGeometry = geometry; glassHost = host; glassContainer.addSubview(host)
         }
@@ -212,6 +221,8 @@ final class ActivityIslandPanelPresenter {
     private var pointerInside = false
     private var suppressHoverUntilExit = false
     private var suspended = false
+    var alertsAvailable: Bool { !suspended && !NSApp.isHidden }
+    var alertPointerInside: Bool { panel.isVisible && containsPointer(at: NSEvent.mouseLocation) }
     private let presentsWindows: Bool
 
     init(model: ActivityIslandViewModel, presentsWindows: Bool = true) {
@@ -302,13 +313,14 @@ final class ActivityIslandPanelPresenter {
         let taskHeight = ActivityIslandPanelMetrics.stageHeight(rowCount: model.sessions.count, focusHeight: focusHeight)
             + approvalHeight + ActivityIslandPanelMetrics.headerHeight + ActivityIslandPanelMetrics.footerHeight
         // Reuse the measured-page height cap for task content; rendering remains the task list.
-        let baseMetrics = ActivityIslandPanelMetrics(rowCount: model.sessions.count,
+        let taskMetrics = ActivityIslandPanelMetrics(rowCount: model.sessions.count,
             availableSize: usable.size,
             expandedWidth: CGFloat(preferences.expandedWidth), safeAreaTop: screen.safeAreaInsets.top,
             hardwareGap: hardwareGap,
             floatingUsage: model.floatingUsageEnabled && !model.privacyMode,
             usagePage: model.showsUsagePage || approvalHeight > 0, reservesUsagePage: true,
             usagePageHeight: model.showsUsagePage ? model.usagePageHeight : taskHeight, focusHeight: focusHeight)
+        let baseMetrics = model.alert == nil ? taskMetrics : ActivityIslandPanelMetrics(alertOver: taskMetrics)
         let metrics = ActivityIslandPanelMetrics(shadowing: baseMetrics)
         if model.metrics != metrics { model.metrics = metrics }
         let x = screen.frame.midX - baseMetrics.hostSize.width / 2
@@ -325,7 +337,9 @@ final class ActivityIslandPanelPresenter {
         surface.setVisible(true, animated: animated && !reduced)
         if let layer = surface.layer {
             surface.completionConfetti.update(serial: model.completionBurstSerial, in: layer,
-                rect: surface.targetRect, reduceMotion: reduced, visible: true)
+                rect: preferences.confettiIntensity == .light ? surface.targetRect : metrics.compactRect,
+                reduceMotion: reduced, visible: presentsWindows && !suspended && !NSApp.isHidden,
+                intensity: preferences.confettiIntensity, islandWindow: panel, screen: screen)
         }
         if !panel.isVisible && presentsWindows {
             panel.orderFrontRegardless()

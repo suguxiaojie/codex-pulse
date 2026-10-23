@@ -19,6 +19,7 @@ enum QuotaResetReason: String, Codable, Equatable {
         }
     }
 
+    /// Classified events can update a recovery notification; expiry alone cannot.
     var isNotifiable: Bool { self != .unverified }
 
     var defaultDisplayType: QuotaResetDisplayType? {
@@ -59,6 +60,7 @@ struct QuotaResetConfirmationCandidate: Identifiable, Equatable {
     let id: String
     let detectedAt: Date
     let changes: [QuotaResetChange]
+    var notificationID: String? = nil
     var isWaiting = true
     var historyEventID: String? = nil
     var communityEvidence: [TiboEvent] = []
@@ -95,6 +97,7 @@ struct QuotaResetEvent: Codable, Identifiable, Equatable {
     let sourceURL: String?
     var userDisplayType: QuotaResetDisplayType?
     var communityAssociation: TiboEvent? = nil
+    var notificationID: String? = nil
 
     init(
         id: String,
@@ -103,7 +106,8 @@ struct QuotaResetEvent: Codable, Identifiable, Equatable {
         changes: [QuotaResetChange],
         sourcePostID: String?,
         sourceURL: String?,
-        userDisplayType: QuotaResetDisplayType? = nil
+        userDisplayType: QuotaResetDisplayType? = nil,
+        notificationID: String? = nil
     ) {
         self.id = id
         self.detectedAt = detectedAt
@@ -112,6 +116,7 @@ struct QuotaResetEvent: Codable, Identifiable, Equatable {
         self.sourcePostID = sourcePostID
         self.sourceURL = sourceURL
         self.userDisplayType = userDisplayType
+        self.notificationID = notificationID
     }
 
     var displayReason: QuotaResetReason {
@@ -122,6 +127,7 @@ struct QuotaResetEvent: Codable, Identifiable, Equatable {
 struct QuotaResetEvaluation {
     let events: [QuotaResetEvent]
     let needsFeedRefresh: Bool
+    var pendingNotifications: [QuotaResetEvent] = []
 }
 
 enum QuotaResetHistoryPresentation {
@@ -145,11 +151,7 @@ enum QuotaResetHistoryPresentation {
     }
 }
 
-/// Detects quota recovery from consecutive server snapshots. A jump to 100%
-/// is only notification-worthy when the old reset deadline or a recent Tibo
-/// post corroborates it. Unverified jumps are retained briefly for a delayed
-/// feed refresh, which prevents account switches and transient API responses
-/// from producing misleading banners.
+/// Reports recovery immediately while retaining pending evidence separately.
 final class QuotaResetMonitor {
     private struct WindowSnapshot: Codable, Equatable {
         let id: String
@@ -171,6 +173,7 @@ final class QuotaResetMonitor {
         let detectedAt: Date
         let changes: [QuotaResetChange]
         var plans: [String]? = nil
+        var notificationID: String? = nil
     }
 
     private struct State: Codable {
@@ -223,10 +226,13 @@ final class QuotaResetMonitor {
     var confirmableRecoveries: [QuotaResetConfirmationCandidate] {
         var seen = Set<String>()
         let candidates = state.pending.map { pending in
-            decorate(Self.confirmationCandidate(detectedAt: pending.detectedAt, changes: pending.changes), plans: pending.plans)
+            var candidate = Self.confirmationCandidate(detectedAt: pending.detectedAt, changes: pending.changes)
+            candidate.notificationID = pending.notificationID
+            return decorate(candidate, plans: pending.plans)
         } + state.history.compactMap { event in
             guard event.reason == .unverified, event.userDisplayType == nil, event.communityAssociation == nil else { return nil }
             var candidate = Self.confirmationCandidate(detectedAt: event.detectedAt, changes: event.changes)
+            candidate.notificationID = event.notificationID
             candidate.isWaiting = false
             candidate.historyEventID = event.id
             return decorate(candidate, plans: nil)
@@ -245,7 +251,8 @@ final class QuotaResetMonitor {
                 changes: pending.changes,
                 reason: .userConfirmed,
                 source: nil,
-                now: pending.detectedAt
+                now: pending.detectedAt,
+                notificationID: pending.notificationID
             )
             persist()
             return event
@@ -260,7 +267,8 @@ final class QuotaResetMonitor {
                 changes: unverified.changes,
                 reason: .userConfirmed,
                 source: nil,
-                now: unverified.detectedAt
+                now: unverified.detectedAt,
+                notificationID: unverified.notificationID
             )
             persist()
             return event
@@ -344,9 +352,11 @@ final class QuotaResetMonitor {
             return QuotaResetEvaluation(events: events, needsFeedRefresh: false)
         }
 
+        let notificationID = "quota-recovery-\(UUID().uuidString)"
+        var pendingNotifications: [QuotaResetEvent] = []
         if hasManualResetEvidence {
             state.manualResetRequestedAt = nil
-            if let event = record(changes: changes, reason: .manualCredit, source: nil, now: now) {
+            if let event = record(changes: changes, reason: .manualCredit, source: nil, now: now, notificationID: notificationID) {
                 events.append(event)
             }
         } else if let official = matchingOfficialEvent(in: feed, detectedAt: now, changes: changes, plans: buckets.compactMap(\.planType), now: now) {
@@ -356,19 +366,20 @@ final class QuotaResetMonitor {
             } else {
                 reason = official.kind == .resetCompleted ? .officialCompleted : .officialScheduled
             }
-            if let event = record(changes: changes, reason: reason, source: official, now: now) {
+            if let event = record(changes: changes, reason: reason, source: official, now: now, notificationID: notificationID) {
                 events.append(event)
             }
         } else if naturalEvidence {
-            if let event = record(changes: changes, reason: .natural, source: nil, now: now) {
+            if let event = record(changes: changes, reason: .natural, source: nil, now: now, notificationID: notificationID) {
                 events.append(event)
             }
         } else {
-            state.pending.append(Pending(detectedAt: now, changes: changes, plans: buckets.compactMap(\.planType)))
+            state.pending.append(Pending(detectedAt: now, changes: changes, plans: buckets.compactMap(\.planType), notificationID: notificationID))
+            pendingNotifications.append(QuotaResetEvent(id: notificationID, detectedAt: now, reason: .unverified, changes: changes, sourcePostID: nil, sourceURL: nil, notificationID: notificationID))
         }
 
         persist()
-        return QuotaResetEvaluation(events: events, needsFeedRefresh: !state.pending.isEmpty)
+        return QuotaResetEvaluation(events: events, needsFeedRefresh: !state.pending.isEmpty, pendingNotifications: pendingNotifications)
     }
 
     func reconcile(feed: TiboFeed, now: Date = Date()) -> [QuotaResetEvent] {
@@ -382,7 +393,8 @@ final class QuotaResetMonitor {
                     changes: pending.changes,
                     reason: official.kind == .resetCompleted ? .officialCompleted : .officialScheduled,
                     source: official,
-                    now: pending.detectedAt
+                    now: pending.detectedAt,
+                    notificationID: pending.notificationID
                ) {
                 events.append(event)
             } else {
@@ -492,7 +504,7 @@ final class QuotaResetMonitor {
         var remaining: [Pending] = []
         for pending in state.pending {
             if now.timeIntervalSince(pending.detectedAt) > 3 * 60 * 60 {
-                if let event = record(changes: pending.changes, reason: .unverified, source: nil, now: pending.detectedAt) {
+                if let event = record(changes: pending.changes, reason: .unverified, source: nil, now: pending.detectedAt, notificationID: pending.notificationID) {
                     expiredEvents.append(event)
                 }
             } else {
@@ -507,14 +519,15 @@ final class QuotaResetMonitor {
         changes: [QuotaResetChange],
         reason: QuotaResetReason,
         source: TiboEvent?,
-        now: Date
+        now: Date,
+        notificationID: String? = nil
     ) -> QuotaResetEvent? {
         let identities = changes
             .map { "\($0.bucketID)-\($0.windowDurationMinutes ?? -1)" }
             .sorted()
             .joined(separator: "+")
         let evidence = source?.source.postId ?? String(Int(now.timeIntervalSince1970 / 60))
-        let id = "\(reason.rawValue)|\(evidence)|\(identities)"
+        let id = notificationID ?? "\(reason.rawValue)|\(evidence)|\(identities)"
         guard !state.history.contains(where: { $0.id == id }) else { return nil }
 
         let event = QuotaResetEvent(
@@ -523,7 +536,8 @@ final class QuotaResetMonitor {
             reason: reason,
             changes: changes,
             sourcePostID: source?.source.postId,
-            sourceURL: source?.source.url
+            sourceURL: source?.source.url,
+            notificationID: notificationID
         )
         state.history.insert(event, at: 0)
         state.history = Array(state.history.prefix(50))

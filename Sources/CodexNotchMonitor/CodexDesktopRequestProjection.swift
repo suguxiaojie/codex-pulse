@@ -142,7 +142,7 @@ public enum CodexDesktopRequestProjector {
         var identities = Set<CodexDesktopPendingRequestIdentity>()
         var requestIDs = Set<CodexDesktopIPCRequestID>()
         let items = current.value?["items"]?.array ?? []
-        if let currentID, status == "inProgress" {
+        if let currentID, status != "unknown" {
             for raw in allRequests {
                 if case .bool(true)? = raw.object?["completed"] { continue }
                 guard let object = raw.object, let method = object["method"]?.nonemptyString,
@@ -182,7 +182,7 @@ public enum CodexDesktopRequestProjector {
         }
         let questions = kind == .memoryConsolidation ? []
             : try currentID.map { try asyncQuestions(items: items, turnID: $0) } ?? []
-        let pendingAsync = status == "inProgress" ? Set(questions.filter { $0.resolvedAnswer == nil }.map(\.questionItemID)) : []
+        let pendingAsync = status != "unknown" ? Set(questions.filter { $0.resolvedAnswer == nil }.map(\.questionItemID)) : []
         return .init(currentTurnID: currentID, status: status, title: state["title"]?.string ?? "", sourceKind: kind,
             startedAt: startedAt, requests: requests, authoritativePendingIdentities: identities,
             pendingRequestsAreAuthoritative: kind != .memoryConsolidation && current.authoritative && currentID != nil && status != "unknown",
