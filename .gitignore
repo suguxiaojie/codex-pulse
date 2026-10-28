@@ -5,3 +5,7 @@ build/
 *.dmg
 
 .finesse/
+.claude/
+__pycache__/
+*.py[cod]
+NEXT_CHAT_HANDOFF.md

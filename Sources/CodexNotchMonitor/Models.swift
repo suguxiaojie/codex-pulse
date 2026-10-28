@@ -182,8 +182,9 @@ enum OpenAIPlanDisplayName {
         case "free": return "Free"
         case "go": return "Go"
         case "plus": return "Plus"
-        case "prolite", "pro_lite", "pro_5x": return "Pro 5x"
-        case "pro", "pro_20x": return "Pro 20x"
+        case "prolite", "pro_lite", "pro_5x", "pro100", "pro_100": return "Pro100"
+        case "pro", "pro_20x", "pro200", "pro_200": return "Pro200"
+        case "promax", "pro_max", "pro500", "pro_500": return "Pro500"
         case "team", "self_serve_business_usage_based", "business": return "Business"
         case "enterprise_cbp_usage_based", "enterprise": return "Enterprise"
         case "edu", "education": return "Edu"
@@ -483,6 +484,7 @@ struct SessionActivityItem: Identifiable, Equatable {
     let title: String
     var isRunning: Bool
     var updatedAt: Date
+    var failed = false
 }
 
 struct ActiveSessionState: Identifiable, Equatable {

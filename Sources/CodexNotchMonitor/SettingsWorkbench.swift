@@ -78,7 +78,7 @@ struct WorkbenchPreviewHeading: View {
 
 /// The actual GlanceView and native glass, sharing current-account state.
 struct GlanceSettingsPreview: View {
-    @ObservedObject var store: MonitorStore
+    let store: MonitorStore
     let preferences: GlanceContentPreferences
     @State private var panelHeight: CGFloat = GlanceLayout.height
     @ObservedObject private var appearance = IslandSystemAppearance.shared

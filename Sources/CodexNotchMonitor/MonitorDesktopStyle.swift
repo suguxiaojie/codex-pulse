@@ -7,8 +7,10 @@ enum MonitorDesktopTypography {
     static let sectionLabel = Font.system(size: 11, weight: .semibold)
     static let rowDetail = Font.system(size: 11.5)
     static let valueBadge = Font.system(size: 12, weight: .semibold).monospacedDigit()
-    static let pageTitle = Font.system(size: 22, weight: .semibold)
-    static let pageSubtitle = Font.system(size: 12)
+    static let pageTitle = Font.system(size: 24, weight: .semibold)
+    static let pageSubtitle = Font.system(size: 12.5)
+    static let navigation = Font.system(size: 13, weight: .medium)
+    static let groupLabel = Font.system(size: 10.5, weight: .semibold)
     static let cardTitle = Font.system(size: 15, weight: .semibold)
     static let rowTitle = Font.system(size: 13, weight: .medium)
     static let body = Font.system(size: 13)
@@ -33,14 +35,16 @@ enum MonitorDesktopTheme {
     }
 
     static let controlCornerRadius: CGFloat = 8
-    static let canvas = adaptive(0xf3f3f0, 0x1b1b19)
-    static let surface = adaptive(0xfcfcfb, 0x21211e)
-    static let elevated = adaptive(0xffffff, 0x282824)
-    static let primaryText = adaptive(0x151515, 0xf5f5f5)
-    static let secondaryText = adaptive(0x525252, 0xa3a3a3)
+    // Graphite & Ember: the dark window shares the island's near-black family; clay reads as light.
+    static let canvas = adaptive(0xf3f3f0, 0x121211)
+    static let surface = adaptive(0xfcfcfb, 0x1a1a18)
+    static let elevated = adaptive(0xffffff, 0x222220)
+    static let primaryText = adaptive(0x151515, 0xf4f3f0)
+    static let secondaryText = adaptive(0x525252, 0xa19e98)
     static let tertiaryText = secondaryText.opacity(0.88)
     static let faintText = secondaryText.opacity(0.72)
-    static let accent = adaptive(0xd97757, 0xe08264)
+    static let accent = adaptive(0xd97757, 0xe8875f)
+    static let accentDeep = adaptive(0xb85f40, 0xc2603d)
     static let glyphFill = accent.opacity(0.10)
     static let stageHighlight = accent.opacity(0.06)
     static let positive = adaptive(0x3f8f6b, 0x7cc4a0)
@@ -49,9 +53,11 @@ enum MonitorDesktopTheme {
     static let usageData = adaptive(0x39786e, 0x86b9ac)
     static let costData = accent
     static let costSecondary = adaptive(0x927044, 0xc6ad80)
-    static let border = adaptive(0xe1e0d9, 0x383835)
-    static let track = adaptive(0xf0efec, 0x1e1e1b)
-    static let thumb = adaptive(0xffffff, 0x32322d)
+    static let border = adaptive(0xe1e0d9, 0x2e2e2b)
+    static let track = adaptive(0xf0efec, 0x141413)
+    static let thumb = adaptive(0xffffff, 0x353531)
+    /// Top-lit rim used on cards and tiles: brighter along the top edge, fading downward.
+    static let rimHighlight = adaptive(0xffffff, 0xffffff)
     static let cardFill = surface
     static let subtleCardFill = adaptive(0xf7f7f5, 0x1e1e1b)
     static let prominentCardFill = elevated
@@ -61,17 +67,20 @@ enum MonitorDesktopTheme {
     static let chartGrid = primaryText.opacity(0.05)
     static let chartGuide = primaryText.opacity(0.12)
     static let contrastOutline = primaryText.opacity(0.45)
-    static let selection = accent.opacity(0.13)
+    static let selection = accent.opacity(0.11)
     static let windowBackground = canvas
-    static let sidebarBackground = adaptive(0xf0efec, 0x171715)
+    static let sidebarBackground = adaptive(0xf0efec, 0x0c0c0b)
 
     // Actual ClaudeMotionPresets.ts exports mapped to SwiftUI physics.
     static let selectionMotion = Animation.interpolatingSpring(mass: 1, stiffness: 320, damping: 28)
     static let pressMotion = Animation.interpolatingSpring(mass: 1, stiffness: 600, damping: 30)
     static let hoverMotion = Animation.timingCurve(0.16, 1, 0.3, 1, duration: 0.15)
+    /// Page changes: a short settle, slightly softer than selection so content never snaps.
+    static let pageMotion = Animation.interpolatingSpring(mass: 1, stiffness: 260, damping: 30)
 }
 
 /// Desktop elevation only; native floating glass keeps its own material stack.
+/// Cards are lit from above: a faint vertical gradient and a rim that is brightest on the top edge.
 struct MonitorDesktopCardSurface: ViewModifier {
     var prominent = false
     var cornerRadius: CGFloat = 12
@@ -79,18 +88,54 @@ struct MonitorDesktopCardSurface: ViewModifier {
     @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let dark = scheme == .dark
         content
             .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(prominent ? MonitorDesktopTheme.prominentCardFill : MonitorDesktopTheme.cardFill)
-                    .shadow(color: .black.opacity(scheme == .dark ? (prominent ? 0.16 : 0.08) : (prominent ? 0.07 : 0.035)),
-                            radius: prominent ? 10 : 3, y: prominent ? 3 : 1)
+                shape.fill(prominent ? MonitorDesktopTheme.prominentCardFill : MonitorDesktopTheme.cardFill)
+                    .overlay {
+                        if dark {
+                            shape.fill(LinearGradient(colors: [MonitorDesktopTheme.rimHighlight.opacity(prominent ? 0.035 : 0.025), .clear],
+                                                      startPoint: .top, endPoint: .center))
+                        }
+                    }
+                    .shadow(color: .black.opacity(dark ? (prominent ? 0.34 : 0.22) : (prominent ? 0.07 : 0.035)),
+                            radius: prominent ? 14 : 6, y: prominent ? 6 : 2)
             }
             .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(contrast == .increased ? MonitorDesktopTheme.contrastOutline : MonitorDesktopTheme.border.opacity(prominent ? 0.70 : 0.45), lineWidth: 0.5)
-                    .allowsHitTesting(false)
+                Group {
+                    if contrast == .increased {
+                        shape.strokeBorder(MonitorDesktopTheme.contrastOutline, lineWidth: 0.5)
+                    } else if dark {
+                        shape.strokeBorder(LinearGradient(colors: [MonitorDesktopTheme.rimHighlight.opacity(prominent ? 0.13 : 0.10),
+                                                                   MonitorDesktopTheme.rimHighlight.opacity(0.035)],
+                                                          startPoint: .top, endPoint: .bottom), lineWidth: 0.75)
+                    } else {
+                        shape.strokeBorder(MonitorDesktopTheme.border.opacity(prominent ? 0.70 : 0.45), lineWidth: 0.5)
+                    }
+                }.allowsHitTesting(false)
             }
+    }
+}
+
+/// Selected segment thumb shared by period pickers and settings segments: lit from above, softly lifted.
+struct MonitorSegmentThumb: View {
+    var body: some View {
+        Capsule()
+            .fill(LinearGradient(colors: [MonitorDesktopTheme.thumb, MonitorDesktopTheme.elevated], startPoint: .top, endPoint: .bottom))
+            .overlay(Capsule().strokeBorder(LinearGradient(colors: [MonitorDesktopTheme.rimHighlight.opacity(0.16),
+                                                                    MonitorDesktopTheme.rimHighlight.opacity(0.03)],
+                                                           startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.28), radius: 3, y: 1.5)
+    }
+}
+
+/// Segment track: recessed, with a hairline so it reads as a groove rather than a flat pill.
+struct MonitorSegmentTrack: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(MonitorDesktopTheme.track, in: Capsule())
+            .overlay(Capsule().strokeBorder(MonitorDesktopTheme.rimHighlight.opacity(0.05), lineWidth: 0.75).allowsHitTesting(false))
     }
 }
 

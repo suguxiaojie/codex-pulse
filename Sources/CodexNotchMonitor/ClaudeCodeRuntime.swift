@@ -34,8 +34,11 @@ final class ClaudeCodeRuntime: ObservableObject {
     private var generation = UUID()
     private var timer: Timer?
     private var usageTask: Task<Void, Never>?
+    private var startupUsageTask: Task<Void, Never>?
+    private var startupUsageDeadline: Date?
     private var lastUsageScan = Date.distantPast
     private var sessions: [String: Session] = [:]
+    private var registryReadInFlight = false
     private var requestWindow: NSWindow?
     private var requestTimeouts: [String: Task<Void, Never>] = [:]
     private struct Session {
@@ -47,8 +50,13 @@ final class ClaudeCodeRuntime: ObservableObject {
         var explicitTitle = false
         var submittedAt: Date?
         var lastHookAt = Date.distantPast
+        var lastTranscriptAt = Date.distantPast
         var hookProcessID: pid_t?
         var completionEvidence = ClaudeTranscriptCompletionEvidence()
+        var registryOwner: ClaudeLiveSessionRegistry.ProcessIdentity?
+        var lastRegistrySeenAt = Date.distantPast
+        var turnStartKnown = true
+        var steps = ClaudeActivitySteps()
     }
 
     init(defaults: UserDefaults = .standard, installer: ClaudeCodeInstaller? = nil,
@@ -70,16 +78,21 @@ final class ClaudeCodeRuntime: ObservableObject {
     func start() {
         guard !running else { return }
         running = true
-        if enabled { configure(enabled: true, approvals: approvalsEnabled, statusLine: statusLineEnabled) }
+        if enabled {
+            startupUsageDeadline = Date().addingTimeInterval(20)
+            configure(enabled: true, approvals: approvalsEnabled, statusLine: statusLineEnabled, startup: true)
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
     }
 
-    func configure(enabled target: Bool, approvals: Bool, statusLine: Bool) {
+    func configure(enabled target: Bool, approvals: Bool, statusLine: Bool, startup: Bool = false) {
         guard !configuring else { return }
+        if !startup { cancelStartupUsage() }
         desiredConfiguration = (target, approvals, statusLine)
         configuring = true; error = nil; status = "配置中"
+        registryReadInFlight = false
         permissionValidAfter = .distantFuture
         // Revoke all old request capabilities before any configuration change.
         generation = UUID(); usageTask?.cancel(); usageTask = nil; scanning = false
@@ -117,12 +130,17 @@ final class ClaudeCodeRuntime: ObservableObject {
                             try startBridge()
                             self.error = nil
                             status = "等待 Claude Code 会话"
-                            refreshUsage()
+                            if let deadline = startupUsageDeadline {
+                                scheduleStartupUsage(deadline: deadline)
+                            } else {
+                                refreshUsage()
+                            }
                         } catch { status = "需要处理"; self.error = error.localizedDescription }
                     } else { status = target ? "等待 Claude Code 会话" : "未启用"; usage = nil }
                     let pending = bufferedHooks; bufferedHooks.removeAll()
                     if enabled {
                         for item in pending { receive(item.message, receivedAt: item.receivedAt) }
+                        refreshLiveRegistry(recoverMissing: true)
                     }
                 }
             }
@@ -158,17 +176,35 @@ final class ClaudeCodeRuntime: ObservableObject {
     }
 
     func stop() {
+        cancelStartupUsage()
         requestTimeouts.values.forEach { $0.cancel() }; requestTimeouts.removeAll()
         running = false; generation = UUID(); timer?.invalidate(); timer = nil
+        registryReadInFlight = false
         configuring = false; desiredConfiguration = nil
         usageTask?.cancel(); usageTask = nil; stopBridge(); bufferedHooks.removeAll(); requests.removeAll()
         sessions.removeAll(); publishRows()
     }
 
-    func refreshUsage() {
+    private func cancelStartupUsage() {
+        startupUsageTask?.cancel()
+        startupUsageTask = nil
+        startupUsageDeadline = nil
+    }
+
+    private func scheduleStartupUsage(deadline: Date) {
+        startupUsageTask = Task { @MainActor [weak self] in
+            let delay = max(0, deadline.timeIntervalSinceNow)
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.running else { return }
+            self.refreshUsage(startup: true)
+        }
+    }
+
+    func refreshUsage(startup: Bool = false) {
+        cancelStartupUsage()
         guard enabled, !configuring, usageTask == nil else { return }
         scanning = true; let epoch = generation; let scanner = scanner
-        usageTask = Task { [weak self] in
+        usageTask = Task(priority: startup ? .background : .utility) { [weak self] in
             let result = await scanner.scan()
             guard let self, !Task.isCancelled, generation == epoch else { return }
             usage = result; scanning = false; usageTask = nil; lastUsageScan = Date()
@@ -183,10 +219,21 @@ final class ClaudeCodeRuntime: ObservableObject {
         if message.kind == "statusLine" {
             guard configuring ? desiredConfiguration?.statusLine == true : statusLineEnabled else { return }
             limits = ClaudeCodeRateLimits.decode(snapshot: message.payload)
+            if let id = object["session_id"] as? String,
+               var session = sessions["claude:" + id],
+               receivedAt >= (session.row.startedAt ?? .distantPast) {
+                // Accept JSON booleans only, not strings or numeric values bridged to Bool.
+                let value = object["fast_mode"] as? NSNumber
+                session.row.fastMode = value.flatMap {
+                    CFGetTypeID($0) == CFBooleanGetTypeID() ? $0.boolValue : nil
+                }
+                sessions["claude:" + id] = session
+                publishRows()
+            }
             return
         }
         if configuring {
-            if object["hook_event_name"] as? String == "PermissionRequest" {
+            if message.awaitsDecision || object["hook_event_name"] as? String == "PermissionRequest" {
                 bridge.resolve(eventID: message.eventID, decision: nil)
                 // No permission capability is retained or replayed during reconfiguration.
                 return
@@ -203,7 +250,7 @@ final class ClaudeCodeRuntime: ObservableObject {
             bridge.resolve(eventID: message.eventID, decision: nil); return
         }
         // A callback accepted before/during configuration may reach MainActor after it finishes.
-        if event == "PermissionRequest", receivedAt <= permissionValidAfter {
+        if message.awaitsDecision || event == "PermissionRequest", receivedAt <= permissionValidAfter {
             bridge.resolve(eventID: message.eventID, decision: nil); return
         }
         let now = receivedAt
@@ -216,7 +263,25 @@ final class ClaudeCodeRuntime: ObservableObject {
             finishRequests(sessionID: key)
             return // A connection closing cannot replace an observed completion/failure receipt.
         }
+        if var terminal = sessions[key], terminal.row.endReason != nil {
+            if Self.midTurnEvents.contains(event) {
+                // Late tool results may refine steps, but cannot reopen a finished turn or its receipt timer.
+                terminal.steps.hook(object, at: now, awaitsDecision: false, pending: false)
+                updateStepPresentation(&terminal); sessions[key] = terminal
+                readTranscript(key, now: now); publishRows()
+                if message.awaitsDecision { bridge.resolve(eventID: message.eventID, decision: nil) }
+                return
+            }
+            if ["PreToolUse", "PermissionRequest"].contains(event),
+               let toolID = object["tool_use_id"] as? String, terminal.steps.knows(toolID) {
+                bridge.resolve(eventID: message.eventID, decision: nil)
+                return
+            }
+        }
         guard sessions[key] != nil || sessions.count < 128 else { bridge.resolve(eventID: message.eventID, decision: nil); return }
+        // Mid-turn events cannot open a turn. After a restart, a late "subagent returned" or tool-finished
+        // event for a session the island never saw would otherwise become an endless "thinking" task.
+        if sessions[key] == nil, Self.midTurnEvents.contains(event) { return }
         var session = sessions[key] ?? Session(row: .init(sessionID: key, turnID: UUID().uuidString,
             projectID: "claude:" + cwd, projectName: project.isEmpty ? "Claude Code" : project,
             title: project.isEmpty ? "Claude Code 任务" : project,
@@ -229,10 +294,15 @@ final class ClaudeCodeRuntime: ObservableObject {
                 phase: .working, actionText: "正在思考", updatedAt: now,
                 modelName: old.modelName, startedAt: now, provider: "Claude Code")
             session.row.endReason = nil; session.turnEntries.removeAll()
+            session.turnStartKnown = true
             session.completionEvidence = .init(); session.hookProcessID = nil
             session.submittedAt = event == "UserPromptSubmit" ? now : nil
+            session.steps.reset(at: session.submittedAt, promptID: object["prompt_id"] as? String)
         }
         session.lastHookAt = now
+        // Fresh hooks take over lifecycle ownership; registry recovery grants no request capability.
+        session.registryOwner = nil
+        session.lastRegistrySeenAt = .distantPast
         // Missing/invalid current evidence disables the fallback rather than retaining a stale owner.
         session.hookProcessID = Self.validatedHookProcessID(object)
         session.row.updatedAt = now
@@ -247,16 +317,18 @@ final class ClaudeCodeRuntime: ObservableObject {
             session.tail = .init(path: path, offset: offset)
         }
         session.row.waitReason = nil
+        session.steps.hook(object, at: now, awaitsDecision: message.awaitsDecision,
+            pending: requests.contains { $0.sessionID == key && $0.toolUseID == (object["tool_use_id"] as? String) })
         switch event {
         case "UserPromptSubmit": session.row.phase = .working; session.row.actionText = "正在思考"
-        case "PreToolUse":
+        case "PreToolUse" where !message.awaitsDecision:
             session.row.phase = .usingTool
             session.row.actionText = object["tool_name"] as? String ?? "执行工具"
         case "PostToolUse", "PostToolUseFailure":
             finishRequests(sessionID: key, toolUseID: object["tool_use_id"] as? String)
             session.row.phase = .working
             session.row.actionText = event == "PostToolUseFailure" ? "工具执行失败，等待后续处理" : "工具完成，继续思考"
-        case "PermissionRequest":
+        case "PermissionRequest", "PreToolUse":
             finishRequests(sessionID: key, toolUseID: object["tool_use_id"] as? String)
             session.row.phase = .waitingApproval; session.row.actionText = "请在 Claude Code 中确认"
             if let request = ClaudePermissionRequest.decode(message, sessionID: key), approvalsEnabled {
@@ -285,10 +357,15 @@ final class ClaudeCodeRuntime: ObservableObject {
             session.row.phase = .waitingApproval; session.row.actionText = "请在 Claude Code 中确认"
         default: return
         }
+        updateStepPresentation(&session)
         sessions[key] = session
         readTranscript(key, now: receivedAt)
         publishRows()
     }
+
+    static let midTurnEvents: Set<String> = ["SubagentStop", "PostToolUse", "PostToolUseFailure", "PostCompact"]
+    /// A thinking turn with no hook and no transcript growth for this long has stopped without a Stop hook.
+    static let quietTurnGrace: TimeInterval = 10 * 60
 
     private func validTranscript(_ path: String) -> Bool {
         let url = URL(fileURLWithPath: path).standardizedFileURL
@@ -298,16 +375,26 @@ final class ClaudeCodeRuntime: ObservableObject {
 
     private func readTranscript(_ key: String, now: Date = Date()) {
         guard var session = sessions[key], var tail = session.tail else { return }
-        for line in tail.readLines(maximumBytes: 1_048_576) {
+        let lines = tail.readLines(maximumBytes: 1_048_576)
+        if !lines.isEmpty { session.lastTranscriptAt = now }
+        for line in lines {
             let records = ClaudeCodeTranscriptDecoder.records(line)
-            session.completionEvidence.consume(records, at: ClaudeCodeTranscriptDecoder.lineTimestamp(line),
+            let timestamp = ClaudeCodeTranscriptDecoder.lineTimestamp(line)
+            session.completionEvidence.consume(records, at: timestamp,
                 since: session.submittedAt ?? session.row.startedAt ?? session.lastHookAt)
             for record in records {
                 switch record {
                 case .customTitle(let title): session.row.title = String(title.prefix(160)); session.explicitTitle = true
                 case .userPrompt(let title):
+                    if let timestamp { session.steps.advanceBoundary(to: timestamp) }
                     if !session.explicitTitle { session.row.title = String(title.prefix(160)) }
                     session.turnEntries.removeAll()
+                    if session.registryOwner != nil || !session.turnStartKnown,
+                       let timestamp,
+                       timestamp > (session.row.startedAt ?? .distantPast) {
+                        session.row.startedAt = timestamp; session.submittedAt = timestamp
+                        session.turnStartKnown = true
+                    }
                 case .usage(let id, let model, let usage, let timestamp):
                     session.entries[id] = max(session.entries[id] ?? 0, usage.total)
                     if session.submittedAt == nil || timestamp.map({ $0 >= session.submittedAt!.addingTimeInterval(-1) }) == true {
@@ -318,6 +405,7 @@ final class ClaudeCodeRuntime: ObservableObject {
                     if !session.row.phase.isActive { session.row.actionText = String(text.prefix(500)) }
                 default: break
                 }
+                if let timestamp { session.steps.transcript(record, at: timestamp) }
             }
         }
         session.tail = tail
@@ -332,20 +420,31 @@ final class ClaudeCodeRuntime: ObservableObject {
             session.row.waitReason = nil; session.row.replyRequestIDs = []
         }
         session.row.sessionTotalTokens = session.completeHistory ? Int(session.entries.values.reduce(0, +)) : nil
-        if let turn = session.row.turnID, !session.turnEntries.isEmpty {
+        if let turn = session.row.turnID, !session.turnEntries.isEmpty, session.turnStartKnown {
             session.row.tokenUsage = .init(sessionID: key, turnID: turn,
                 total: Int(session.turnEntries.values.reduce(0, +)), isCompleted: !session.row.phase.isActive)
         }
+        updateStepPresentation(&session)
         sessions[key] = session
     }
 
     func tick(now: Date = Date()) {
         guard enabled, !configuring else { return }
+        refreshLiveRegistry()
         for request in requests where now >= request.deadline { returnToTerminal(request.id) }
         for key in Array(sessions.keys) {
             readTranscript(key, now: now)
             if var session = sessions[key], session.row.phase.isActive, let pid = session.hookProcessID,
                Self.processHasExited(pid) {
+                finishRequests(sessionID: key)
+                session.row.endReason = .ended; session.row.phase = .ended; session.row.updatedAt = now
+                session.row.actionText = session.row.statusTitle
+                session.row.waitReason = nil; session.row.replyRequestIDs = []
+                sessions[key] = session
+            }
+            // Tools may legitimately run for hours and approvals wait on the user; only plain thinking times out.
+            if var session = sessions[key], [.starting, .working].contains(session.row.phase),
+               now.timeIntervalSince(max(session.lastHookAt, session.lastTranscriptAt, session.lastRegistrySeenAt)) >= Self.quietTurnGrace {
                 finishRequests(sessionID: key)
                 session.row.endReason = .ended; session.row.phase = .ended; session.row.updatedAt = now
                 session.row.actionText = session.row.statusTitle
@@ -363,7 +462,72 @@ final class ClaudeCodeRuntime: ObservableObject {
             sessions[key] = session
         }
         publishRows()
-        if now.timeIntervalSince(lastUsageScan) > (usage?.complete == false ? 5 : 60) { refreshUsage() }
+        if startupUsageDeadline == nil,
+           now.timeIntervalSince(lastUsageScan) > (usage?.complete == false ? 5 : 60) { refreshUsage() }
+    }
+
+    private func refreshLiveRegistry(recoverMissing: Bool = false) {
+        guard running, enabled, !configuring, !registryReadInFlight else { return }
+        let tracked = sessions.compactMapValues { $0.row.phase.isActive ? $0.registryOwner : nil }
+        guard recoverMissing || !tracked.isEmpty else { return }
+        registryReadInFlight = true
+        let epoch = generation
+        let registry = ClaudeLiveSessionRegistry(configurationDirectory: installer.configurationDirectory)
+        configurationQueue.async { [weak self] in
+            let records = registry.read(includeTranscripts: recoverMissing)
+            let liveOwners = Set(tracked.filter { ClaudeLiveSessionRegistry.isCurrent($0.value) }.keys)
+            Task { @MainActor [weak self] in
+                guard let self, self.generation == epoch, self.running, self.enabled, !self.configuring else { return }
+                self.registryReadInFlight = false
+                self.applyLiveRegistry(records, liveOwners: liveOwners, recoverMissing: recoverMissing)
+            }
+        }
+    }
+
+    private func applyLiveRegistry(_ records: [ClaudeLiveSessionRegistry.Record], liveOwners: Set<String>,
+                                   recoverMissing: Bool, now: Date = Date()) {
+        let byID = Dictionary(uniqueKeysWithValues: records.map { ("claude:" + $0.sessionID, $0) })
+        for key in Array(sessions.keys) {
+            guard var session = sessions[key], session.row.phase.isActive, let owner = session.registryOwner else { continue }
+            let record = byID[key].flatMap { $0.process == owner ? $0 : nil }
+            if record?.status == "busy" { session.lastRegistrySeenAt = now }
+            let idle = record?.status == "idle" && (record?.statusAt ?? .distantPast) >= session.lastHookAt
+            if !liveOwners.contains(key) || idle {
+                session.row.phase = .ended; session.row.endReason = .ended
+                session.row.updatedAt = now; session.row.actionText = idle ? "Claude Code 已空闲" : "会话已结束"
+                session.registryOwner = nil
+            }
+            sessions[key] = session
+        }
+        if recoverMissing {
+            for record in records where record.status == "busy" {
+                let key = "claude:" + record.sessionID
+                guard sessions[key] == nil, sessions.count < 128,
+                      ClaudeLiveSessionRegistry.isCurrent(record.process) else { continue }
+                let project = URL(fileURLWithPath: record.cwd).lastPathComponent
+                let title = record.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+                var session = Session(row: .init(sessionID: key, turnID: UUID().uuidString,
+                    projectID: "claude:" + record.cwd, projectName: project.isEmpty ? "Claude Code" : project,
+                    title: title?.isEmpty == false ? title! : (project.isEmpty ? "Claude Code 任务" : project),
+                    phase: .working, actionText: "正在继续执行", updatedAt: now,
+                    provider: "Claude Code"))
+                session.submittedAt = record.statusAt; session.lastHookAt = record.statusAt
+                session.hookProcessID = record.process.pid; session.registryOwner = record.process
+                session.lastRegistrySeenAt = now
+                session.turnStartKnown = false
+                session.steps.reset(at: record.statusAt)
+                session.explicitTitle = title?.isEmpty == false
+                if let path = record.transcriptPath, validTranscript(path) {
+                    let size = ClaudeCodeTranscriptTail.fileSize(path) ?? 0
+                    let offset = size > 1_048_576 ? size - 1_048_576 : 0
+                    session.tail = .init(path: path, offset: offset); session.completeHistory = offset == 0
+                }
+                sessions[key] = session
+                readTranscript(key, now: now)
+                status = "已连接"
+            }
+        }
+        publishRows()
     }
 
     static func processHasExited(_ pid: pid_t) -> Bool {
@@ -386,8 +550,39 @@ final class ClaudeCodeRuntime: ObservableObject {
     }
 
     private func publishRows() {
+        for key in Array(sessions.keys) {
+            guard var session = sessions[key] else { continue }
+            updateStepPresentation(&session)
+            sessions[key] = session
+        }
         let value = sessions.values.map(\.row).sorted { $0.updatedAt > $1.updatedAt }
         if value != rows { rows = value; onRowsChanged?() }
+    }
+
+    private func updateStepPresentation(_ session: inout Session) {
+        if !session.row.phase.isActive { session.steps.endUnfinished() }
+        session.row.recentSteps = session.steps.visible
+        guard session.row.phase.isActive else { return }
+        if let pending = requests.first(where: { $0.sessionID == session.row.sessionID }) {
+            session.row.phase = .waitingApproval
+            session.row.waitReason = pending.questions.isEmpty ? nil : .userInput
+            session.row.actionText = "点击任务查看 Claude 请求"
+        } else if session.row.phase == .working || session.row.phase == .usingTool, let title = session.steps.runningTitle {
+            session.row.phase = .usingTool; session.row.actionText = title
+        } else if session.registryOwner != nil, session.row.phase == .usingTool,
+                  session.steps.runningTitle == nil, !session.row.recentSteps.isEmpty {
+            session.row.phase = .working; session.row.actionText = "正在继续执行"
+        }
+        // The transcript evidence already excludes prior turns and private thinking blocks.
+        // Keep the public progress line separate from tool-node titles and approval prompts.
+        if session.row.phase == .working || session.row.phase == .usingTool,
+           let text = session.completionEvidence.assistantText,
+           let line = text.replacingOccurrences(of: "`", with: "")
+            .split(whereSeparator: \.isNewline)
+            .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .first(where: { !$0.isEmpty }) {
+            session.row.actionText = line
+        }
     }
 
     private func finishRequests(sessionID: String, toolUseID: String? = nil) {

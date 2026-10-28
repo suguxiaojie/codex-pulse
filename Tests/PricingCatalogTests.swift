@@ -167,6 +167,27 @@ enum PricingCatalogTests {
     }
 
     private static func testOfficialPricing() async {
+        let currentDocument = try! String(contentsOfFile: "Tests/Fixtures/official-standard-pricing-2026-10.md", encoding: .utf8)
+        let current = OfficialPricingCatalog.parse(currentDocument)
+        check(current?.rates.count == 8, "accept current official table including GPT-6.1 Terra")
+        check(current?.rates["gpt-6.1-sol"]?.inputPerMillion == 2
+            && current?.rates["gpt-6.1-sol"]?.outputPerMillion == 10
+            && current?.rates["gpt-6.1-sol"]?.cacheReadPerMillion == 0.1
+            && current?.rates["gpt-6.1-sol"]?.cacheCreationPerMillion == 2.5,
+            "new column order maps correctly and preserves 30m cache-write pricing")
+        check(current?.rates["gpt-6.1-terra"]?.outputPerMillion == 5, "new official model has current rates")
+        check(current?.multipliers["gpt-6.1-terra"] == .init(inputAndCache: 2, output: 1.5), "new model has documented long-context ratios")
+        let reordered = currentDocument.components(separatedBy: "\n").map { line -> String in
+            let cells = line.split(separator: "|", omittingEmptySubsequences: false)
+            guard line.hasPrefix("|"), cells.count == 13 else { return line }
+            let values = Array(cells.dropFirst().dropLast())
+            return "|" + ([values[0]] + values.dropFirst().reversed()).joined(separator: "|") + "|"
+        }.joined(separator: "\n")
+        check(OfficialPricingCatalog.parse(reordered) == current, "column names rather than offsets determine prices")
+        check(OfficialPricingCatalog.parse(currentDocument.replacingOccurrences(of: "12h write", with: "30m write")) == nil,
+            "ambiguous duplicate headers are rejected")
+        check(OfficialPricingCatalog.parse(currentDocument.replacingOccurrences(of: "| $25.00 | $20.00 |", with: "| $NaN | $20.00 |")) == nil,
+            "invalid unused 12h prices still reject the document")
         let document = try! String(contentsOfFile: "Tests/Fixtures/official-standard-pricing.md", encoding: .utf8)
         let parsed = OfficialPricingCatalog.parse(document)
         check(parsed?.rates.count == 7, "parse all supported official Standard models")

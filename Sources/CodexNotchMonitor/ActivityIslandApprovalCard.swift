@@ -7,6 +7,8 @@ struct IslandApprovalContent {
         let title: String
         let options: [String]
         var allowsText = false
+        var multiSelect = false
+        var descriptions: [String: String] = [:]
         func validatedAnswer(_ value: String) -> String? {
             if options.contains(value) { return value }
             let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -30,7 +32,10 @@ struct IslandApprovalContent {
     var hasInlineControls: Bool { submit != nil && (!actions.isEmpty || !questions.isEmpty) }
     var guardIdentity: String {
         id + summary + actions.map(\.id).joined(separator: "|")
-            + questions.map { $0.id + $0.title + String($0.allowsText) + $0.options.joined(separator: "|") }.joined(separator: "|")
+            + questions.map { question in
+                question.id + question.title + String(question.allowsText) + String(question.multiSelect)
+                    + question.options.map { $0 + (question.descriptions[$0] ?? "") }.joined(separator: "|")
+            }.joined(separator: "|")
     }
     func presentation(privacy: Bool) -> Self {
         guard privacy else { return self }
@@ -45,15 +50,31 @@ struct IslandApprovalContent {
 final class IslandAnswerDraft: ObservableObject {
     @Published private(set) var options: [String: String] = [:]
     @Published private(set) var texts: [String: String] = [:]
+    @Published private(set) var selections: [String: [String]] = [:]
     @Published var focusedQuestion: String? { didSet { onInteraction?() } }
     var onInteraction: (() -> Void)?
-    var isInteracting: Bool { focusedQuestion != nil || texts.values.contains { !$0.isEmpty } }
-    var answers: [String: String] { options.merging(texts.filter { !$0.value.isEmpty }) { _, text in text } }
+    var isInteracting: Bool {
+        focusedQuestion != nil || texts.values.contains { !$0.isEmpty } || selections.values.contains { !$0.isEmpty }
+    }
+    var answers: [String: String] {
+        options.merging(selections.mapValues { $0.joined(separator: ", ") }) { _, multiple in multiple }
+            .merging(texts.filter { !$0.value.isEmpty }) { _, text in text }
+    }
+    func toggle(_ option: String, for id: String, orderedOptions: [String]) {
+        texts[id] = nil; options[id] = nil
+        var selected = Set(selections[id] ?? [])
+        if !selected.insert(option).inserted { selected.remove(option) }
+        selections[id] = orderedOptions.filter { selected.contains($0) }
+        onInteraction?()
+    }
+    func isSelected(_ option: String, for id: String) -> Bool {
+        options[id] == option || selections[id]?.contains(option) == true
+    }
     func select(_ option: String, for id: String) {
-        texts[id] = nil; options[id] = option; onInteraction?()
+        selections[id] = nil; texts[id] = nil; options[id] = option; onInteraction?()
     }
     func type(_ text: String, for id: String) {
-        options[id] = nil; texts[id] = text; onInteraction?()
+        selections[id] = nil; options[id] = nil; texts[id] = text; onInteraction?()
     }
 }
 
@@ -269,12 +290,21 @@ struct ActivityIslandApprovalCard: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(content.questions) { question in
                 Text(question.title).font(FloatingSurfaceTypography.body).fixedSize(horizontal: false, vertical: true).id(question.id)
+                if question.multiSelect { Text("可多选").font(FloatingSurfaceTypography.captionMedium).foregroundStyle(FloatingSurfaceTheme.secondary()) }
                 ForEach(question.options, id: \.self) { option in
-                    let selected = draft.options[question.id] == option
-                    Button { draft.select(option, for: question.id) } label: {
+                    let selected = draft.isSelected(option, for: question.id)
+                    Button {
+                        if question.multiSelect { draft.toggle(option, for: question.id, orderedOptions: question.options) }
+                        else { draft.select(option, for: question.id) }
+                    } label: {
                         HStack(spacing: 8) {
-                            Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                            Text(option).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                            Image(systemName: question.multiSelect ? (selected ? "checkmark.square.fill" : "square") : (selected ? "largecircle.fill.circle" : "circle"))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(option)
+                                if let detail = question.descriptions[option], !detail.isEmpty {
+                                    Text(detail).font(FloatingSurfaceTypography.captionMedium).foregroundStyle(FloatingSurfaceTheme.secondary())
+                                }
+                            }.multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
                         .font(FloatingSurfaceTypography.body).frame(maxWidth: .infinity, minHeight: 14, alignment: .leading)

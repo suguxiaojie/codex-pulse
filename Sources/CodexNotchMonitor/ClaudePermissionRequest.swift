@@ -6,6 +6,8 @@ struct ClaudePermissionRequest: Identifiable {
         var id: String { text }
         let text: String
         let options: [String]
+        var multiSelect = false
+        var descriptions: [String: String] = [:]
     }
     enum Choice { case once, session, always, deny, cancel }
     let id: String
@@ -25,20 +27,26 @@ struct ClaudePermissionRequest: Identifiable {
     static func decode(_ message: ClaudeCodeBridgeMessage, sessionID: String) -> Self? {
         guard message.awaitsDecision,
               let object = (try? JSONSerialization.jsonObject(with: message.payload)) as? [String: Any],
-              object["hook_event_name"] as? String == "PermissionRequest",
+              let event = object["hook_event_name"] as? String,
               let tool = object["tool_name"] as? String, !tool.isEmpty,
               let input = object["tool_input"] as? [String: Any], input["_quotaViewTruncated"] == nil else { return nil }
+        guard event == "PermissionRequest" || (event == "PreToolUse" && tool == "AskUserQuestion") else { return nil }
         var questions: [Question] = []
         if tool == "AskUserQuestion" {
             guard let list = input["questions"] as? [[String: Any]], !list.isEmpty, list.count <= 4 else { return nil }
             for question in list {
-                guard question["multiSelect"] as? Bool != true,
-                      let text = question["question"] as? String, !text.isEmpty,
+                guard let text = question["question"] as? String, !text.isEmpty,
                       !questions.contains(where: { $0.text == text }),
                       let options = question["options"] as? [[String: Any]], !options.isEmpty else { return nil }
                 let labels = options.compactMap { $0["label"] as? String }
-                guard labels.count == options.count, labels.allSatisfy({ !$0.isEmpty }) else { return nil }
-                questions.append(.init(text: text, options: labels))
+                guard labels.count == options.count, labels.allSatisfy({ !$0.isEmpty }),
+                      Set(labels).count == labels.count else { return nil }
+                let descriptions = Dictionary(uniqueKeysWithValues: options.compactMap { option -> (String, String)? in
+                    guard let label = option["label"] as? String, let detail = option["description"] as? String else { return nil }
+                    return (label, detail)
+                })
+                questions.append(.init(text: text, options: labels, multiSelect: question["multiSelect"] as? Bool == true,
+                    descriptions: descriptions))
             }
         }
         // Broad mode/directory updates are handled in the original client only.
@@ -54,8 +62,8 @@ struct ClaudePermissionRequest: Identifiable {
         if choice == .deny { return ["behavior": "deny", "message": "The user declined this request in Codex Pulse."] }
         if choice == .cancel { return ["behavior": "deny", "message": "The user cancelled this request in Codex Pulse.", "interrupt": true] }
         if !questions.isEmpty {
-            guard choice == .once, questions.allSatisfy({ !(answers[$0.text] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
-            var updated = input; updated["answers"] = answers
+            guard choice == .once, permitsIslandAnswers(answers) else { return nil }
+            var updated = input; updated["answers"] = answers.mapValues { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             return ["behavior": "allow", "updatedInput": updated]
         }
         switch choice {
@@ -70,6 +78,9 @@ struct ClaudePermissionRequest: Identifiable {
     }
     func permitsIslandAnswers(_ answers: [String: String]) -> Bool {
         Set(answers.keys) == Set(questions.map(\.text))
-            && questions.allSatisfy { $0.options.contains(answers[$0.text] ?? "") }
+            && questions.allSatisfy {
+                let value = (answers[$0.text] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return !value.isEmpty && value.count <= 4_000 && value.utf8.count <= 65_536
+            }
     }
 }

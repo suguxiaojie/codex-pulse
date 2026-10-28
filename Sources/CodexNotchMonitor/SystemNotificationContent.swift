@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Value-only payloads keep presentation and action routing testable without
 /// requesting system permission or accessing the notification center.
@@ -12,6 +13,10 @@ struct SystemNotificationContent: Equatable {
     var playsSound = true
 
     var islandAlert: IslandAlert? {
+        if category == "CREDIT_EXPIRY" {
+            return IslandAlert(id: identifier, kind: .creditExpiry, title: title, subtitle: subtitle,
+                body: body, isPendingSource: false, actions: [], sourceURL: nil)
+        }
         let signal = category == "TIBO_SIGNAL"
         let pending = category == "QUOTA_RECOVERY_UNVERIFIED"
         guard signal || pending || category == "QUOTA_RECOVERY" else { return nil }
@@ -53,5 +58,46 @@ struct SystemNotificationContent: Equatable {
             category: "TIBO_SIGNAL",
             sourceURL: signal.url
         )
+    }
+}
+
+/// Thresholds are evaluated only against a successful, account-matched quota read.
+/// Persist the most urgent announced stage so restarts cannot replay older stages.
+struct CreditExpiryReminderLedger {
+    private struct Entry: Codable {
+        let expiry: Date
+        let hours: Int
+    }
+    private var entries: [String: Entry]
+    init(data: Data? = nil) {
+        entries = data.flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) } ?? [:]
+    }
+    var data: Data? { try? JSONEncoder().encode(entries) }
+
+    mutating func observe(_ summary: QuotaResetCreditSummary?, accountID: String?, now: Date) -> [SystemNotificationContent] {
+        entries = entries.filter { $0.value.expiry > now }
+        guard let accountID, !accountID.isEmpty, let summary, summary.availableCount > 0 else { return [] }
+        var result: [SystemNotificationContent] = []
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        for credit in summary.credits {
+            guard credit.status.lowercased() == "available", !credit.id.isEmpty,
+                  !credit.id.hasPrefix("reset-credit-"),
+                  let expiry = credit.expiresAt, expiry.timeIntervalSince1970.isFinite,
+                  expiry > now,
+                  let hours = [6, 12, 24].first(where: { expiry.timeIntervalSince(now) <= Double($0) * 3600 }) else { continue }
+            let identity = [accountID, credit.id, String(expiry.timeIntervalSince1970)]
+            guard let bytes = try? JSONEncoder().encode(identity) else { continue }
+            let key = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            if let previous = entries[key], previous.hours <= hours { continue }
+            entries[key] = Entry(expiry: expiry, hours: hours)
+            let name = credit.title?.split(whereSeparator: \.isWhitespace).joined(separator: " ") ?? ""
+            result.append(SystemNotificationContent(identifier: "credit-expiry-\(key)-\(hours)",
+                title: "重置卡即将过期", subtitle: "\(hours) 小时内到期",
+                body: "\(name.isEmpty ? "额度重置卡" : String(name.prefix(80)))将于 \(formatter.string(from: expiry)) 到期，请及时使用。",
+                category: "CREDIT_EXPIRY"))
+        }
+        return result
     }
 }

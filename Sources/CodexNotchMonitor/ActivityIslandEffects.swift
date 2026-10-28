@@ -1,10 +1,17 @@
 // QuotaView v0.8.2 adapters. Copyright (c) 2026 Duoasa, MIT.
 import AppKit
 import SwiftUI
+import ImageIO
 
 struct CodexActivityTaskIdentity: Equatable { let sessionID: String; let turnID: String? }
 
 enum ActivityIslandPreviewAssets {
+    private static let imageCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 4
+        cache.totalCostLimit = 32 * 1_024 * 1_024
+        return cache
+    }()
     static let codexIcon: NSImage? = {
         let bundle = Bundle.main.url(forResource: "Island-Codex", withExtension: "svg")
         let local = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
@@ -12,11 +19,22 @@ enum ActivityIslandPreviewAssets {
         return NSImage(contentsOf: bundle ?? local)
     }()
     static func image(_ name: String) -> NSImage? {
+        if let cached = imageCache.object(forKey: name as NSString) { return cached }
         let file = "IslandPreview-" + name
         let bundled = Bundle.main.url(forResource: file, withExtension: "png")
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Resources/\(file).png")
-        return (bundled ?? checkout).path.isEmpty ? nil : NSImage(contentsOf: bundled ?? checkout)
+        guard let source = CGImageSourceCreateWithURL((bundled ?? checkout) as CFURL,
+            [kCGImageSourceShouldCache: false] as CFDictionary),
+              let bitmap = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 2_560,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else { return nil }
+        let image = NSImage(cgImage: bitmap, size: NSSize(width: bitmap.width, height: bitmap.height))
+        imageCache.setObject(image, forKey: name as NSString, cost: bitmap.bytesPerRow * bitmap.height)
+        return image
     }
 }
 

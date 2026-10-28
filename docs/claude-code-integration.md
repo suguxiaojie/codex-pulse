@@ -22,7 +22,15 @@
 
 尊重 `CLAUDE_CONFIG_DIR`，默认 `~/.claude/settings.json`。首次写入前保存同目录 `settings.json.codex-pulse-backup`，仅识别本通道 helper 路径、Claude 模式和 route 路径匹配的命令。原 statusLine 单独保存，输出继续转发；停用恢复原配置项。并发修订检查失败或 JSON 结构不可保真时不覆盖文件。
 
-自有 helper 与 route 位于应用支持目录的 Claude 专属通道下。route／socket 为私有权限，身份标识仅用于本机 IPC，不是账号凭据。审批等待上限为 120 秒，route 使用该期限，既有 PermissionRequest Hook 的 3600 秒 timeout 保持不变；启用状态重新配置时更新 route，相同 route 不重复写入，相同设置保留原字节。运行时到期撤销岛内按钮并交回终端。应用退出、请求超时、输入截断、关闭请求处理或停用接入时，未决定的请求交回 Claude Code。权限不会自动批准。
+自有 helper 与 route 位于应用支持目录的 Claude 专属通道下。route／socket 为私有权限，身份标识仅用于本机 IPC，不是账号凭据。审批等待上限为 120 秒，route 使用该期限，既有 PermissionRequest Hook 的 3600 秒 timeout 保持不变；启用状态重新配置时更新 route，相同 route 不重复写入，相同设置保留原字节。运行时到期撤销岛内按钮并交回终端。应用退出、请求超时、输入截断、关闭请求处理或停用接入时，未决定的请求交回 Claude Code。权限不会自动批准。AskUserQuestion 通过 PreToolUse 或 PermissionRequest 接收，支持单选、多选及自定义回答；PreToolUse 的自有 Hook timeout 为 125 秒，普通工具仍立即转发。多选答案按选项原序用逗号分隔，并保留完整原输入；超时或交回原客户端时不输出决定。
+
+## 重启后的活动恢复
+
+`ClaudeLiveSessionRegistry.swift` 只读当前 `CLAUDE_CONFIG_DIR` 下的 `sessions/<pid>.json`。仅恢复 `kind=interactive`、`pidDomain=darwin`、状态为 `busy` 的会话；核对文件所属用户、PID、进程所属用户、Claude 可执行身份和进程启动时间，拒绝 PID 复用、子 Agent、重复归属与异常记录。原生 Claude 的版本号可执行名通过本机 `.local/share/claude/versions/` 下的实际进程路径识别。
+
+启动／重新启用时发现既有忙碌会话，不要求重新发送 UserPromptSubmit 或重开 Claude。仅对恢复出的会话沿用现有 tick 检查本地登记：idle 或已确认进程退出会结束活动；新 Hook 到来后交回既有生命周期处理并停止该会话的登记跟踪。不从登记生成审批、提问或回答能力。
+
+每条登记限制 64 KiB，最多检查 256 条；启动时按精确 session ID 查找唯一且受限于 projects 目录的日志，沿用最多 1 MiB 的增量尾部读取，不全量重扫历史。busy 状态变化时间不能作为整轮开始时间；只在尾部找到用户输入记录时填入开始时间和本轮用量，否则保留未知。关闭 Claude 接入时不读取登记。未来未提供此格式的客户端仍沿用 Hook 接入。
 
 ## 任务结束证据
 
@@ -43,3 +51,21 @@ Helper 沿父进程链最多检查 8 层，通过 `sysctl KERN_PROC_PID` 读取�
 `zsh scripts/test-claude.sh` 在隔离目录测试解码、统计、安装往返、原状态栏转发、helper／socket 通信及实际运行态；该脚本由完整 `scripts/test.sh` 调用。所有权限应答使用合成请求，不处理用户真实请求。当前进度与真实会话验收限制统一记录在 `ROADMAP.md`。
 
 灵动岛双端审批支持范围与安全边界见 [灵动岛审批](island-approvals.md)。
+
+### 灵动岛 Fast 状态
+
+Helper 的状态栏白名单保留官方 `fast_mode` 字段。Runtime 只按完全匹配的 `session_id` 更新已存在的会话，不由状态栏创建活动任务；仅接受 JSON 布尔值，缺失、字符串及数字保持未知。新一轮重置为未知，等待该轮状态栏更新。仅明确开启时，展开卡片和辅助功能显示「Fast」；关闭、未知和隐私模式均不显示。不使用计费用的 `usage.speed` 推断开关，避免把实际请求速度与会话设置混为一谈。
+
+### 操作步骤时间线
+
+`ClaudeActivitySteps.swift` 将现有 PreToolUse／PermissionRequest／PostToolUse／PostToolUseFailure 与增量日志 tool_use／tool_result 合并到同一会话的步骤记录，按 tool_use_id 去重；字段语义见[官方 Hook 文档](https://code.claude.com/docs/en/hooks)。带 agent_id 的子 Agent 工具事件以及日志 sidechain 不加入主会话步骤，父会话自己的 Agent 工具调用仍正常记录。
+
+最多显示三个节点，运行／等待优先，剩余位置补最近结束的步骤。成功需要明确结果；失败保留红色标记，取消／结束时没有成功证据的调用显示中性结束。只有结果、没有工具名称与开始证据时不补造节点；后续匹配到真实开始可合并。名称来自工具类型，不读取命令参数构造虚假计划，也不显示整体完成百分比。
+
+新一轮清空旧节点，已知旧调用 ID 与 prompt_id、日志时间边界阻止旧记录回流；已由实时 Hook 证明的当前调用可接收稍早时间戳的匹配日志结果。终态后的工具结束只补步骤结果，不重新激活任务或延长回执；已知调用的重复开始／审批不重开终态。重启恢复沿用已确认的 busy 活动边界及有界日志尾部，不从日志生成审批能力。
+
+每会话最多保留 128 条工具记录与 256 个已退出轮次的 ID，不保存工具输入／输出；没有新增轮询或动画时钟。已有原生脉动和隐私隐藏继续生效。
+
+### 运行中的公开进展摘要
+
+运行态动作行复用当前轮次转录证据中的最新公开 assistant text，取首个非空行并沿用 500 字符上限；工具节点继续单独展示操作名；Bash 节点附带 `tool_input.description`／转录 `tool_use.input.description` 的命令摘要，缺少描述时不展示原始命令参数。重复的无描述事件不会抹去已有摘要，终态保留描述，换轮清空；长标题悬停可查看完整内容。工具开始／结束不会覆盖已有摘要，待批准／待回复提示优先，新轮次清空旧文字，缺少摘要时保留现有动作兜底。不解析 thinking 块或 sidechain 文本，不增加轮询或外部模型调用。

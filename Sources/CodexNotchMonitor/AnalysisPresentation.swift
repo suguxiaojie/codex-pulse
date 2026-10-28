@@ -41,8 +41,7 @@ struct AnalysisPeriodPicker: View {
                         .frame(maxWidth: .infinity, minHeight: 30)
                         .background {
                             if selection == option {
-                                Capsule()
-                                    .fill(MonitorDesktopTheme.thumb)
+                                MonitorSegmentThumb()
                                     .matchedGeometryEffect(id: "selection", in: namespace)
                             }
                         }
@@ -56,7 +55,7 @@ struct AnalysisPeriodPicker: View {
             }
         }
         .padding(3)
-        .background(MonitorDesktopTheme.track, in: Capsule())
+        .modifier(MonitorSegmentTrack())
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityTitle)
         .onMoveCommand { direction in

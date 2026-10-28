@@ -6,6 +6,7 @@ import SQLite3
 enum ModelSmokeTests {
     private static var checks = 0
     static func main() {
+        verifyDenseIncrementalTail()
         check(CreditBalanceFormatter.string("62500.000000000") == "62,500", "credits drop trailing zeroes and group digits")
         check(CreditBalanceFormatter.string("1234.012300") == "1,234.0123", "credits preserve meaningful fractional digits")
         check(CreditBalanceFormatter.string("12345678901234567890.123456789") == "12,345,678,901,234,567,890.123456789", "credits never pass through binary floating point")
@@ -162,8 +163,12 @@ enum ModelSmokeTests {
         check(buckets.first?.hasCredits == true, "Credits availability")
         check(buckets.first?.creditBalance == "12.5", "Credits balance")
         check(OpenAIPlanDisplayName.resolve("plus") == "Plus", "Plus display name")
-        check(OpenAIPlanDisplayName.resolve("prolite") == "Pro 5x", "Pro 5x display name")
-        check(OpenAIPlanDisplayName.resolve("pro") == "Pro 20x", "Pro 20x display name")
+        for (raw, title) in [("go", "Go"), ("prolite", "Pro100"), ("pro_5x", "Pro100"),
+                             ("Pro 100", "Pro100"), ("pro", "Pro200"), ("pro_20x", "Pro200"),
+                             ("pro200", "Pro200"), ("promax", "Pro500"), ("PRO-500", "Pro500"),
+                             ("pro500", "Pro500")] {
+            check(OpenAIPlanDisplayName.resolve(raw) == title, "current plan name for \(raw)")
+        }
         check(OpenAIPlanDisplayName.resolve("future_plan") == nil, "unknown plan remains undisclosed")
         check(buckets.count == 2, "multi-bucket payload")
         let resetCredits = QuotaService.parseResetCredits(from: payload)
@@ -695,6 +700,36 @@ enum ModelSmokeTests {
         try? FileManager.default.removeItem(at: fixtureURL)
 
         print("Model smoke tests passed (\(checks) checks).")
+    }
+
+    private static func verifyDenseIncrementalTail() {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".tmp/dense-tail-tests/\(UUID().uuidString)")
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("dense.jsonl")
+        let header = """
+        {"timestamp":"2026-10-26T01:00:00.000Z","type":"event_msg","payload":{"type":"task_started"}}
+        {"timestamp":"2026-10-26T01:00:00.100Z","type":"turn_context","payload":{"turn_id":"dense-turn","cwd":"/fixture","model":"gpt-test"}}
+        {"timestamp":"2026-10-26T01:00:00.200Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1234},"last_token_usage":{"total_tokens":1234}}}}
+
+        """
+        let filler = "{\"timestamp\":\"2026-10-26T01:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"ignored\",\"padding\":\"" + String(repeating: "x", count: 256) + "\"}}\n"
+        let progress = "{\"timestamp\":\"2026-10-26T01:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"phase\":\"commentary\",\"message\":\"处理密集日志\"}}\n"
+        try! Data((header + String(repeating: filler, count: 6000) + progress).utf8).write(to: url)
+        let service = SessionActivityService()
+        let first = service.readSnapshot(from: url)
+        check(first?.isActive == true && first?.turnTokenUsage?.total == 1234, "dense tail preserves exact turn and token projection")
+        check(first?.latestAssistantSummary == "处理密集日志", "dense tail reaches its final complete record")
+        func append(_ text: String) {
+            let handle = try! FileHandle(forWritingTo: url)
+            try! handle.seekToEnd(); try! handle.write(contentsOf: Data(text.utf8)); try! handle.close()
+        }
+        append("{\"timestamp\":\"2026-10-26T01:00:03Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"")
+        check(service.readSnapshot(from: url)?.isActive == true, "partial completion remains buffered after dense scan")
+        append(",\"turn_id\":\"dense-turn\"}}\n")
+        check(service.readSnapshot(from: url)?.isActive == false, "partial completion joins the next append correctly")
+        check(service.readSnapshot(from: url)?.turnTokenUsage?.total == 1234, "unchanged reread retains token projection")
     }
 
     private static func check(_ condition: @autoclosure () -> Bool, _ label: String) {

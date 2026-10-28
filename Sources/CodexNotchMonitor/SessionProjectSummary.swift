@@ -75,3 +75,47 @@ struct SessionProjectSummary {
         ownershipDetail = details.joined(separator: "\n")
     }
 }
+
+/// Immutable derived data for one inventory/filter combination. No conversation body is copied.
+final class SessionLibraryViewData {
+    let allProjects: [ContinuityProjectGroup]
+    let projects: [ContinuityProjectGroup]
+    let completeProjectsByID: [String: ContinuityProjectGroup]
+    let summariesByID: [String: SessionProjectSummary]
+    let visibleThreadIDs: [String]
+
+    init(allProjects: [ContinuityProjectGroup], completeProjectsByID: [String: ContinuityProjectGroup],
+         projects: [ContinuityProjectGroup]) {
+        self.allProjects = allProjects; self.projects = projects
+        self.completeProjectsByID = completeProjectsByID
+        summariesByID = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, SessionProjectSummary(threads: $0.threads)) })
+        visibleThreadIDs = projects.flatMap { $0.threads.map(\.id) }
+    }
+}
+
+/// A single-view cache: inventory changes regroup; search/filter changes only refilter.
+final class SessionLibraryViewCache {
+    private var snapshot: SessionContinuitySnapshot?
+    private var allProjects: [ContinuityProjectGroup] = []
+    private var completeProjectsByID: [String: ContinuityProjectGroup] = [:]
+    private var query = ""
+    private var filter = SessionLibraryFilter.all
+    private var locale = ""
+    private var value: SessionLibraryViewData?
+
+    func resolve(snapshot: SessionContinuitySnapshot, query: String, filter: SessionLibraryFilter) -> SessionLibraryViewData {
+        if self.snapshot != snapshot {
+            self.snapshot = snapshot
+            allProjects = snapshot.projectGroups
+            completeProjectsByID = Dictionary(uniqueKeysWithValues: allProjects.map { ($0.id, $0) })
+            value = nil
+        }
+        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentLocale = Locale.current.identifier
+        if let value, self.query == search, self.filter == filter, locale == currentLocale { return value }
+        let projects = SessionLibraryPresentation.groups(projects: allProjects, query: search, filter: filter)
+        let result = SessionLibraryViewData(allProjects: allProjects, completeProjectsByID: completeProjectsByID, projects: projects)
+        self.query = search; self.filter = filter; locale = currentLocale; value = result
+        return result
+    }
+}

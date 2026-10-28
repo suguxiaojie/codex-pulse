@@ -27,11 +27,119 @@ enum ActivityIslandPanelTests {
         let deadline = Date().addingTimeInterval(3)
         while !condition() && Date() < deadline { settle(0.01) }
     }
+    static func contentHost(_ view: NSView, compact: Bool) -> NSHostingView<ActivityIslandView>? {
+        if let host = view as? NSHostingView<ActivityIslandView>, host.rootView.compact == compact { return host }
+        return view.subviews.lazy.compactMap { contentHost($0, compact: compact) }.first
+    }
+    static func pulseLifecycleRegression() {
+        let pulse = IslandPulseDotView()
+        pulse.frame = CGRect(x: 16, y: 16, width: 28, height: 28)
+        pulse.update(color: .systemGreen, style: .step, playing: true, reduceMotion: false)
+        expect(!pulse.isPulsing, "detached pulse does not animate")
+        let window = NSPanel(contentRect: CGRect(x: 20, y: 20, width: 60, height: 60),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let parent = NSView(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
+        parent.addSubview(pulse); window.contentView = parent
+        window.orderFrontRegardless(); settle()
+        waitUntil { pulse.isPulsing }
+        expect(pulse.isPulsing, "visible running cue uses a native animation")
+        let pulseLayer = pulse.layer?.sublayers?.first
+        let haloBounds = (pulseLayer?.sublayers?.first as? CAShapeLayer)?.path?.boundingBoxOfPath ?? .zero
+        let peakHalo = haloBounds.insetBy(dx: -haloBounds.width * 0.075, dy: -haloBounds.height * 0.075)
+        expect(haloBounds.width == 22 && pulse.bounds.contains(peakHalo),
+            "circular step halo fits its drawing surface even at peak breathing scale")
+        expect(pulse.layer?.sublayers?.first?.shadowOpacity == 0,
+            "step cue has no outer shadow that can reveal a rectangular compositing edge")
+        let animation = pulse.layer?.sublayers?.first?.animation(forKey: "pulse") as? CABasicAnimation
+        expect(animation?.keyPath == "transform.scale" && animation?.duration == 1.2
+            && animation?.autoreverses == true, "step cue retains scale, cadence and autoreverse")
+        parent.isHidden = true; settle()
+        expect(!pulse.isPulsing, "hidden ancestor removes native pulse")
+        parent.isHidden = false; settle(); waitUntil { pulse.isPulsing }
+        expect(pulse.isPulsing, "showing parent resumes native pulse")
+        pulse.update(color: .systemGreen, style: .status, playing: true, reduceMotion: false)
+        expect(pulse.layer?.sublayers?.first?.shadowOpacity == 0.8,
+            "step shadow removal leaves the header status glow intact")
+        let status = pulse.layer?.sublayers?.first?.animation(forKey: "pulse") as? CABasicAnimation
+        expect(status?.keyPath == "opacity" && (status?.toValue as? NSNumber)?.doubleValue == 0.35,
+            "status cue retains its opacity range")
+        pulse.update(color: .systemGreen, style: .status, playing: true, reduceMotion: true)
+        expect(!pulse.isPulsing, "reduce motion removes pulse")
+        pulse.update(color: .systemGreen, style: .status, playing: false, reduceMotion: false)
+        expect(!pulse.isPulsing, "inactive or completed cue has no pulse")
+        pulse.update(color: .systemGreen, style: .status, playing: true, reduceMotion: false)
+        window.orderOut(nil); waitUntil { !pulse.isPulsing }
+        expect(!pulse.isPulsing, "invisible window stops pulse")
+        pulse.stop(); window.close()
+    }
+    static func alertLayoutRegression() throws {
+        let model = ActivityIslandViewModel()
+        model.reduceMotionOverride = true
+        model.floatingUsageEnabled = false
+        model.presentation = .expanded
+        let recovery = IslandAlert(id: "layout-recovery", kind: .quotaRecovery, title: "额度已恢复至 100%",
+            subtitle: "", body: "Codex 每周额度：89% → 100%\n来源确认中…", isPendingSource: true,
+            actions: [.init(title: "查看重置记录", route: .openCenter), .init(title: "标记为手动重置", route: .confirmManual)], sourceURL: nil)
+        let long = IslandAlert(id: "layout-long", kind: .tiboSignal,
+            title: "新的关注信号提醒：这里是一段需要换行展示的较长标题，用于检查提醒卡片的实际高度",
+            subtitle: "社区动态 · 刚刚", body: "这里是一段较长的正文，用来检查两行文字在窄宽度下仍然有完整留白，并且不会挤压下方的操作按钮。",
+            isPendingSource: false,
+            actions: [.init(title: "在动态中心查看完整提醒", route: .openCenter), .init(title: "打开原帖查看详细内容", route: .openSource)], sourceURL: nil)
+        for width: CGFloat in [320, 420, 680] {
+            let base = ActivityIslandPanelMetrics(rowCount: 1, availableSize: CGSize(width: 1200, height: 800), expandedWidth: width)
+            let height = IslandAlertCard.fittingHeight(model: model, alert: recovery, width: base.expandedRect.width, topInset: 0)
+            print("Alert natural height at \(width) pt: \(height)")
+            let alertMetrics = ActivityIslandPanelMetrics(alertOver: base, contentHeight: height)
+            expect(alertMetrics.expandedRect.width == base.expandedRect.width, "alert preserves configured expansion width")
+            expect(alertMetrics.expandedRect.minX == base.expandedRect.minX, "alert and task share horizontal alignment")
+            expect(abs(alertMetrics.expandedRect.height - height) < 1, "alert height follows actual card content")
+            expect(height > 100 && height < 250, "short recovery card has compact natural height")
+            let withNotch = IslandAlertCard.fittingHeight(model: model, alert: recovery, width: base.expandedRect.width, topInset: 32)
+            expect(abs(withNotch - height - 32) < 1, "notch avoidance is counted exactly once")
+            let longHeight = IslandAlertCard.fittingHeight(model: model, alert: long, width: base.expandedRect.width, topInset: 0)
+            expect(longHeight >= height, "long text and wrapped buttons receive sufficient height")
+        }
+        let wrappedButtons = IslandAlertCard.fittingHeight(model: model, alert: long, width: 240, topInset: 0)
+        let inlineButtons = IslandAlertCard.fittingHeight(model: model, alert: long, width: 680, topInset: 0)
+        expect(wrappedButtons > inlineButtons, "button wrapping increases measured height instead of clipping")
+        guard let screen = NSScreen.main else { throw NSError(domain: "AlertLayout", code: 1) }
+        let presenter = ActivityIslandPanelPresenter(model: model, presentsWindows: false)
+        for (name, alert, width) in [("recovery-wide", recovery, 680.0), ("recovery-narrow", recovery, 320.0), ("signal-long", long, 320.0)] {
+            var preferences = ActivityIslandPreferences.defaults
+            preferences.expandedWidth = width
+            model.alert = alert
+            presenter.present(screen: screen, preferences: preferences, animated: false)
+            presenter.surface.layoutSubtreeIfNeeded(); settle(0.3)
+            let expectedWidth = ActivityIslandWidthGeometry(screenWidth: screen.visibleFrame.width,
+                cameraWidth: model.metrics.hardwareGap).expandedWidth(preferred: width)
+            expect(model.metrics.expandedRect.width == expectedWidth, "presenter uses configured width for alerts")
+            if let directory = ProcessInfo.processInfo.environment["ISLAND_ALERT_QA_DIR"] {
+                let bounds = CGRect(x: 0, y: 0, width: presenter.surface.bounds.width,
+                    height: min(presenter.surface.bounds.height, model.metrics.expandedRect.maxY + 24))
+                if let bitmap = presenter.surface.bitmapImageRepForCachingDisplay(in: bounds) {
+                    presenter.surface.cacheDisplay(in: bounds, to: bitmap)
+                    try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: directory).appendingPathComponent(name + ".png"))
+                }
+            }
+        }
+        model.alert = nil
+        presenter.present(screen: screen, preferences: .defaults, animated: false)
+        expect(model.metrics.expandedRect.width > 380, "dismissal restores ordinary expansion geometry")
+        let shortScreen = ActivityIslandPanelMetrics(rowCount: 1, availableSize: CGSize(width: 600, height: 250))
+        let capped = ActivityIslandPanelMetrics(alertOver: shortScreen, contentHeight: 1000)
+        expect(capped.expandedRect.height <= shortScreen.maximumUsageHeight, "alert respects available screen height")
+        presenter.hide(animated: false)
+    }
+
     static func main() throws {
         _ = NSApplication.shared
+        pulseLifecycleRegression()
         NSApp.setActivationPolicy(.accessory)
         NSApp.finishLaunching()
+        try alertLayoutRegression()
         IslandMascotTests.run()
+        EffectQualityTests.run()
         IslandHardwareBlackTests.run()
         IslandDesktopPreviewTests.run()
         let screenSize = CGSize(width: 1200, height: 800)
@@ -284,7 +392,8 @@ enum ActivityIslandPanelTests {
         scroll.stop()
         let smoke = ActivityStateSmokeMetalView(frame: CGRect(x: 0, y: 0, width: 400, height: 62))
         expect(smoke.isRendererAvailable, "imported QuotaView Metal pipeline compiles")
-        expect(!smoke.fullSurfacePresentation, "task effects retain upstream state-driven progress front")
+        expect(!smoke.fullSurfacePresentation && smoke.ambientBasePresentation,
+               "task effects follow progress over a faint full-card field")
         for effect in ActivityIslandProgressEffect.allCases {
             smoke.setEffect(effect); smoke.setState(.working, taskIdentity: .init(sessionID: "sample", turnID: effect.rawValue))
             smoke.setPlaybackEnabled(true); smoke.setReduceMotion(true)
@@ -339,8 +448,20 @@ enum ActivityIslandPanelTests {
         // Compact results must render static text independently of the running marquee host.
         let resultModel = ActivityIslandViewModel()
         resultModel.presentation = .compact
+        resultModel.clawdEnabled = false // Classic layout keeps the marquee; Clawd shows a static title.
         var resultRow = ActivitySessionSnapshot(sessionID: "result-fixture", turnID: "turn", projectID: "p",
             projectName: "P", title: "验收任务", phase: .working, actionText: "运行中", updatedAt: Date(), tokenUsage: nil)
+        for phase: TaskPhase in [.starting, .working, .usingTool, .waitingApproval, .completed, .ended, .failed] {
+            var codex = resultRow
+            codex.phase = phase; codex.provider = "Codex"
+            var claude = codex
+            claude.provider = "Claude Code"
+            let lhs = IslandSessionPresentation(row: codex)
+            let rhs = IslandSessionPresentation(row: claude)
+            expect(lhs.title == rhs.title && lhs.symbol == rhs.symbol && lhs.color == rhs.color
+                   && codex.statusTitle == claude.statusTitle,
+                   "providers share header title, symbol and color for \(phase)")
+        }
         func resultMarquees(_ view: NSView) -> [IslandScrollingTextHost] {
             (view as? IslandScrollingTextHost).map { [$0] } ?? view.subviews.flatMap(resultMarquees)
         }
@@ -410,6 +531,7 @@ enum ActivityIslandPanelTests {
         expect(handoffCount == 1, "new data or explicit selection can cancel pending handoff")
         let idleModel = ActivityIslandViewModel()
         idleModel.presentation = .compact
+        idleModel.clawdEnabled = false
         func marquees(_ view: NSView) -> [IslandScrollingTextHost] {
             (view as? IslandScrollingTextHost).map { [$0] } ?? view.subviews.flatMap(marquees)
         }
@@ -420,6 +542,10 @@ enum ActivityIslandPanelTests {
             host.frame = CGRect(origin: .zero, size: idleModel.metrics.compactRect.size)
             host.layoutSubtreeIfNeeded(); settle()
             expect(!marquees(host).isEmpty, "active task mounts scrolling text")
+            idleModel.clawdEnabled = true
+            host.layoutSubtreeIfNeeded(); settle()
+            expect(marquees(host).isEmpty, "Clawd compact right wing shows the static task title")
+            idleModel.clawdEnabled = false
             idleModel.sessions = []
             host.layoutSubtreeIfNeeded(); settle()
             expect(marquees(host).isEmpty, "empty quota branch removes all task marquee hosts")
@@ -556,6 +682,15 @@ enum ActivityIslandPanelTests {
         }
         let overflowingHeight = measureApproval(questionContent, name: "approval-overflow")
         expect(questionHeight <= 320 && overflowingHeight == questionHeight, "large question sets scroll within a bounded viewport")
+        questionContent.questions = [.init(id: "components", title: "需要启用哪些组件？", options: ["菜单栏", "灵动岛", "通知"],
+            allowsText: true, multiSelect: true, descriptions: ["菜单栏": "显示额度与用量", "灵动岛": "处理任务、选择与勾选", "通知": "任务完成后提醒"])]
+        let checkboxDraft = IslandAnswerDraft()
+        checkboxDraft.toggle("菜单栏", for: "components", orderedOptions: questionContent.questions[0].options)
+        checkboxDraft.toggle("灵动岛", for: "components", orderedOptions: questionContent.questions[0].options)
+        questionContent.draft = checkboxDraft
+        let checkboxHeight = measureApproval(questionContent, name: "approval-claude-multiselect")
+        expect(checkboxHeight > 0 && checkboxHeight <= 320, "checkbox descriptions and custom input stay within viewport")
+        expect(checkboxDraft.isInteracting, "unfinished checkbox answer protects focus")
         print("Approval measured heights: short=\(shortHeight), narrow=\(narrowHeight), questions=\(questionHeight), overflow=\(overflowingHeight)")
         presenter.present(screen: screen, preferences: preferences, animated: false); settle()
         let extra = model.approvalHeight(width: model.metrics.expandedRect.width - 56)
@@ -563,7 +698,7 @@ enum ActivityIslandPanelTests {
         let focusRow = model.sessions.first { $0.id == model.focusedSessionID }
         let baseStage = ActivityIslandPanelMetrics.stageHeight(rowCount: model.sessions.count,
             focusHeight: ActivityIslandPanelMetrics.focusHeight(for: focusRow))
-        expect(abs(model.metrics.expandedRect.height - (baseStage + extra + 72)) < 1,
+        expect(abs(model.metrics.expandedRect.height - (baseStage + extra + ActivityIslandPanelMetrics.headerHeight + ActivityIslandPanelMetrics.footerHeight)) < 1,
             "focused approval adds its measured height to stage and chrome")
         let stage = stageScrolls(presenter.surface).first
         expect(stage?.contentView.layer?.masksToBounds == true, "stage scroll clips overflow before footer")
@@ -600,18 +735,27 @@ enum ActivityIslandPanelTests {
         let classicLayer = presenter.surface.layer?.sublayers?.compactMap { $0 as? CAShapeLayer }.first
         expect(classicLayer?.fillColor?.alpha == 1, "classic material is truly opaque and ignores legacy opacity")
         let expandedRect = model.metrics.expandedRect
+        let retainedExpandedHost = contentHost(presenter.surface, compact: false)
         presenter.surface.update(metrics: model.metrics, compact: true, animated: true)
+        expect(retainedExpandedHost?.isHidden == false, "outgoing expanded content survives the fade")
         expect(presenter.surface.hasActiveAnimations, "collapse installs shared native path and content transitions")
         let transitions = presenter.surface.transitionCount
         presenter.surface.update(metrics: model.metrics, compact: true, animated: true)
         expect(presenter.surface.transitionCount == transitions, "identical geometry cannot restart its transition")
         presenter.surface.update(metrics: model.metrics, compact: false, animated: true)
         expect(presenter.surface.targetRect == expandedRect, "fast reversal targets expanded geometry")
+        settle(ActivityIslandSurfaceMotion.duration + 0.05)
+        expect(retainedExpandedHost?.isHidden == false, "stale collapse callback cannot hide reversed expanded content")
+        expect(contentHost(presenter.surface, compact: true)?.isHidden == true, "inactive compact host hides after transition")
         presenter.surface.cancelAnimations()
         expect(!presenter.surface.hasActiveAnimations, "explicit stop removes every animation")
         model.presentation = .compact
         presenter.present(screen: screen, preferences: preferences, animated: false)
         CATransaction.flush(); settle()
+        expect(retainedExpandedHost?.isHidden == true && contentHost(presenter.surface, compact: true)?.isHidden == false,
+            "compact state truly hides expanded content instead of only setting opacity")
+        expect(contentHost(presenter.surface, compact: false) === retainedExpandedHost,
+            "collapse retains the hosting tree and draft state")
         expect(presenter.panel.frame == nativeFrame, "collapse keeps native window canvas unchanged")
         expect(presenter.surface.containsSurfacePoint(CGPoint(x: nativeFrame.width / 2, y: 30)), "compact body remains hittable")
         expect(!presenter.surface.containsSurfacePoint(CGPoint(x: nativeFrame.width / 2, y: nativeFrame.height - 10)),
@@ -654,20 +798,40 @@ enum ActivityIslandPanelTests {
                 (view as? ActivityStateSmokeMetalView).map { [$0] } ?? view.subviews.flatMap(effects)
             }
             let effectView = effects(visible.surface).first
-            waitUntil { effectView?.displayedProgressPosition != nil }
-            print("Visible QA Metal: frame=\(effectView?.frame ?? .zero), paused=\(effectView?.isPaused ?? true), progress=\(effectView?.displayedProgressPosition ?? -1)")
+            let initialClock = effectView?.playbackClockReference ?? 0
+            waitUntil { (effectView?.playbackClockReference ?? 0) > initialClock }
+            print("Visible QA Metal: frame=\(effectView?.frame ?? .zero), paused=\(effectView?.isPaused ?? true), fullSurface=\(effectView?.fullSurfacePresentation ?? false)")
             expect(effectView?.frame.height == ActivityIslandPanelMetrics.focusHeight(for: model.sessions.first) && (effectView?.frame.width ?? 0) > 500,
                    "selected task renderer fills the complete card canvas")
-            expect(effectView?.isPaused == false && (effectView?.displayedProgressPosition ?? 0) > 0,
-                   "visible task renderer draws and advances the upstream state front")
+            expect(effectView?.isPaused == false && effectView?.ambientBasePresentation == true
+                && (effectView?.playbackClockReference ?? 0) > initialClock,
+                   "visible full-card renderer submits frames and advances its clock")
             for update in 0..<50 {
                 model.sessions[0].actionText = "Action \(update)"
                 settle(0.1)
             }
             let updatedEffect = effects(visible.surface).first
-            print("Visible QA Metal updates: retained=\(effectView === updatedEffect), progress=\(updatedEffect?.displayedProgressPosition ?? -1)")
-            expect(effectView === updatedEffect && (updatedEffect?.displayedProgressPosition ?? 0) > 0.1,
-                   "frequent state updates preserve the renderer and advance beyond plan discovery")
+            print("Visible QA Metal updates: retained=\(effectView === updatedEffect)")
+            expect(effectView === updatedEffect && (updatedEffect?.playbackClockReference ?? 0) > initialClock,
+                   "frequent state updates preserve the full-card renderer and advancing clock")
+            func pulses(_ view: NSView) -> [IslandPulseDotView] {
+                (view as? IslandPulseDotView).map { [$0] } ?? view.subviews.flatMap(pulses)
+            }
+            expect(pulses(visible.surface).contains { $0.isPulsing }, "visible running card has native pulse cues")
+            model.presentation = .compact
+            visible.present(screen: screen, preferences: preferences, animated: true)
+            settle(ActivityIslandSurfaceMotion.duration + 0.1)
+            let stoppedClock = updatedEffect?.playbackClockReference
+            settle(0.15)
+            expect(contentHost(visible.surface, compact: false)?.isHidden == true
+                && pulses(visible.surface).allSatisfy { !$0.isPulsing }, "collapsed card hides and stops every pulse")
+            expect(updatedEffect?.isPaused == true && updatedEffect?.playbackClockReference == stoppedClock,
+                "visible compact island does not keep drawing hidden task Metal")
+            model.presentation = .expanded
+            visible.present(screen: screen, preferences: preferences, animated: true)
+            waitUntil { pulses(visible.surface).contains { $0.isPulsing } }
+            expect(effects(visible.surface).first === effectView && pulses(visible.surface).contains { $0.isPulsing },
+                "re-expansion resumes existing renderer and native cues")
             model.sessions[0].phase = .waitingApproval
             waitUntil { updatedEffect?.isHidden == true }
             expect(updatedEffect?.isHidden == true && updatedEffect?.isPaused == true,

@@ -16,6 +16,12 @@ update_test_binary="$(mktemp /tmp/codex-notch-update-tests.XXXXXX)"
 trap 'rm -f "$test_binary" "$cost_test_binary" "$catalog_test_binary" "$tibo_test_binary" "$reset_test_binary" "$continuity_test_binary" "$ripple_test_binary" "$activity_island_test_binary" "$activity_preferences_test_binary" "$setup_test_binary" "$update_test_binary"' EXIT
 
 cd "$project_dir"
+swiftc -O -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/FastTimestamp.swift Tests/FastTimestampTests.swift -o "$test_binary"
+"$test_binary"
+swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CountFormatter.swift Sources/CodexNotchMonitor/AnalysisBarPresentation.swift Tests/AnalysisBarPresentationTests.swift -o "$test_binary"
+"$test_binary"
+swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CodexProjectCatalog.swift Tests/ProjectCatalogCacheTests.swift -o "$test_binary"
+"$test_binary"
 swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CountFormatter.swift Sources/CodexNotchMonitor/SettingsSummaryText.swift Tests/SettingsSummaryTextTests.swift -o "$test_binary"
 "$test_binary"
 swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/ActivityIslandPreferences.swift Sources/CodexNotchMonitor/NotificationAuthorizationPolicy.swift Tests/CompletionCelebrationTests.swift -o "$test_binary"
@@ -28,7 +34,7 @@ clang -O2 -mmacosx-version-min=13.0 -c Vendor/Zstd/zstddeclib.c -o "$zstd_object
 swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CountFormatter.swift Tests/CountFormatterTests.swift -o "$test_binary"
 "$test_binary"
 
-swiftc Sources/CodexNotchMonitor/CountFormatter.swift -swift-version 5 -parse-as-library \
+swiftc Sources/CodexNotchMonitor/FastTimestamp.swift Sources/CodexNotchMonitor/CountFormatter.swift -swift-version 5 -parse-as-library \
   Sources/CodexNotchMonitor/Models.swift \
   Sources/CodexNotchMonitor/ActivityIslandPreferences.swift \
   Sources/CodexNotchMonitor/GlanceLayout.swift \
@@ -49,7 +55,7 @@ swiftc -swift-version 5 -parse-as-library \
   -o "$test_binary"
 "$test_binary"
 
-swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" \
+swiftc Sources/CodexNotchMonitor/FastTimestamp.swift Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" \
   -swift-version 5 \
   -parse-as-library \
   Sources/CodexNotchMonitor/CoverAILinks.swift \
@@ -68,7 +74,7 @@ swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$z
   -o "$test_binary"
 "$test_binary"
 
-swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
+swiftc Sources/CodexNotchMonitor/FastTimestamp.swift Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
   Sources/CodexNotchMonitor/CoverAILinks.swift \
   Sources/CodexNotchMonitor/CodexProjectCatalog.swift \
   Sources/CodexNotchMonitor/Models.swift \
@@ -81,7 +87,7 @@ swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$z
   -o "$activity_island_test_binary"
 "$activity_island_test_binary"
 
-swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CoverAILinks.swift Sources/CodexNotchMonitor/CodexProjectCatalog.swift Sources/CodexNotchMonitor/Models.swift Sources/CodexNotchMonitor/ActivityIslandPreferences.swift Sources/CodexNotchMonitor/TurnTokenState.swift Sources/CodexNotchMonitor/SessionActivityService.swift Sources/CodexNotchMonitor/CodexNativeActivityTypes.swift Sources/CodexNotchMonitor/CodexDesktopIPCClient.swift Sources/CodexNotchMonitor/CodexDesktopRequestProjection.swift Sources/CodexNotchMonitor/NativeActivityObserver.swift Sources/CodexNotchMonitor/ActivitySessionState.swift Tests/NativeActivityFixture.swift Tests/NativeActivityTests.swift -o "$activity_island_test_binary"
+swiftc Sources/CodexNotchMonitor/FastTimestamp.swift Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CoverAILinks.swift Sources/CodexNotchMonitor/CodexProjectCatalog.swift Sources/CodexNotchMonitor/Models.swift Sources/CodexNotchMonitor/ActivityIslandPreferences.swift Sources/CodexNotchMonitor/TurnTokenState.swift Sources/CodexNotchMonitor/SessionActivityService.swift Sources/CodexNotchMonitor/CodexNativeActivityTypes.swift Sources/CodexNotchMonitor/CodexDesktopIPCClient.swift Sources/CodexNotchMonitor/CodexDesktopRequestProjection.swift Sources/CodexNotchMonitor/NativeActivityObserver.swift Sources/CodexNotchMonitor/ActivitySessionState.swift Tests/NativeActivityFixture.swift Tests/NativeActivityTests.swift -o "$activity_island_test_binary"
 "$activity_island_test_binary"
 
 swiftc -I Vendor/Zstd/include "$zstd_object" \
@@ -94,7 +100,7 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   -o "$ripple_test_binary"
 "$ripple_test_binary"
 
-swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
+swiftc Sources/CodexNotchMonitor/FastTimestamp.swift Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$zstd_object" -swift-version 5 -parse-as-library \
   Sources/CodexNotchMonitor/CoverAILinks.swift \
   Sources/CodexNotchMonitor/CodexProjectCatalog.swift \
   Sources/CodexNotchMonitor/Models.swift \
@@ -119,6 +125,8 @@ swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$z
   Sources/CodexNotchMonitor/ActivityIslandView.swift \
   Sources/CodexNotchMonitor/ActivityIslandDesktopPreview.swift \
   Sources/CodexNotchMonitor/ActivityIslandMascot.swift \
+  Sources/CodexNotchMonitor/IslandClawd.swift \
+  Sources/CodexNotchMonitor/IslandClawdBadge.swift \
   Sources/CodexNotchMonitor/ActivityIslandFocusCard.swift \
   Sources/CodexNotchMonitor/ActivityIslandUsageDashboard.swift \
   Sources/CodexNotchMonitor/IslandDashboardChartScroll.swift \
@@ -146,6 +154,7 @@ swiftc Sources/CodexNotchMonitor/CountFormatter.swift -I Vendor/Zstd/include "$z
   Sources/CodexNotchMonitor/ActivityIslandPanel.swift \
   Sources/CodexNotchMonitor/ActivityIslandCompletionConfetti.swift \
   Tests/IslandMascotTests.swift \
+  Tests/EffectQualityTests.swift \
   Tests/IslandHardwareBlackTests.swift \
   Tests/IslandDesktopPreviewTests.swift \
   Tests/ActivityIslandPanelTests.swift \
@@ -201,7 +210,7 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
 "$update_test_binary"
 
 if [[ "${SKIP_COST_SMOKE_TESTS:-0}" != "1" ]]; then
-swiftc -I Vendor/Zstd/include "$zstd_object" \
+swiftc Sources/CodexNotchMonitor/FastTimestamp.swift -I Vendor/Zstd/include "$zstd_object" \
   -swift-version 5 \
   -parse-as-library \
   Sources/CodexNotchMonitor/PricingCatalog.swift \
@@ -211,6 +220,9 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   Sources/CodexNotchMonitor/UsageAccountContext.swift \
   Sources/CodexNotchMonitor/RolloutReader.swift \
   Sources/CodexNotchMonitor/CostService.swift \
+  Tests/CostSummaryReference.swift \
+  Tests/CostIncrementalTests.swift \
+  Tests/CostAggregationCacheTests.swift \
   Tests/CostSmokeTests.swift \
   -o "$cost_test_binary"
 "$cost_test_binary"
@@ -254,7 +266,7 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   -o "$reset_test_binary"
 "$reset_test_binary"
 
-swiftc -I Vendor/Zstd/include "$zstd_object" \
+swiftc Sources/CodexNotchMonitor/FastTimestamp.swift -I Vendor/Zstd/include "$zstd_object" \
   -swift-version 5 \
   -parse-as-library \
   Sources/CodexNotchMonitor/AppPaths.swift \
@@ -266,6 +278,7 @@ swiftc -I Vendor/Zstd/include "$zstd_object" \
   Sources/CodexNotchMonitor/AccountContinuity.swift \
   Sources/CodexNotchMonitor/RolloutReader.swift \
   Sources/CodexNotchMonitor/SessionContinuityService.swift \
+  Sources/CodexNotchMonitor/SessionProjectSummary.swift \
   Sources/CodexNotchMonitor/CodexSidebarCleanupService.swift \
   Sources/CodexNotchMonitor/SessionExportService.swift \
   Sources/CodexNotchMonitor/SessionExportImages.swift \

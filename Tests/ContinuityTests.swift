@@ -7,6 +7,9 @@ enum ContinuityTests {
             runLocalInventoryBenchmark()
             return
         }
+        sessionLibraryCachesDerivedData()
+        inventoryProgressCoalescesWithoutLosingCompletion()
+        try inventoryRetainsMetadataWithoutChangingFullReader()
         sessionLibraryCheckStatusDoesNotClaimCompleteness()
         sessionLibraryCheckStatusRespectsEvidenceAndPrecedence()
         sessionLibrarySearchMatchesTitlesProjectsAndPaths()
@@ -47,7 +50,103 @@ enum ContinuityTests {
         try projectTransferP1PreservesGitAndAttachments()
         try projectTransferLargeGitOutputDoesNotDeadlock()
         projectImportDirectoryDefaultsToCodexProjectsContainer()
-        print("Continuity tests: 37/37 passed")
+        print("Continuity tests: 40/40 passed")
+    }
+
+    private static func sessionLibraryCachesDerivedData() {
+        var snapshot = SessionContinuitySnapshot(threads: [
+            record(id: "a", path: "/alpha", title: "Needle"),
+            record(id: "b", path: "/beta", isArchived: true),
+            record(id: "internal", path: "/alpha", kind: .subagent)
+        ], unreadableFileCount: 0, checkedAt: Date())
+        let cache = SessionLibraryViewCache()
+        let original = cache.resolve(snapshot: snapshot, query: "", filter: .all)
+        expect(Set(original.visibleThreadIDs) == ["a", "b"], "缓存不能把内部线程加入用户列表")
+        for _ in 0..<100 {
+            expect(cache.resolve(snapshot: snapshot, query: "  ", filter: .all) === original,
+                "无关刷新必须复用派生结果，不能重复分组与汇总")
+        }
+        let searched = cache.resolve(snapshot: snapshot, query: "needle", filter: .all)
+        expect(searched.visibleThreadIDs == ["a"] && searched.completeProjectsByID.count == 2,
+            "搜索只过滤显示，不缩减完整项目操作的数据")
+        let archived = cache.resolve(snapshot: snapshot, query: "", filter: .archived)
+        expect(archived.visibleThreadIDs == ["b"], "筛选变化立即失效")
+        snapshot.threads[0].ownership = .init(accountFingerprint: "fixture", accountAlias: "账号 7", confidence: .observed)
+        let owned = cache.resolve(snapshot: snapshot, query: "", filter: .all)
+        expect(owned !== original && owned.summariesByID["/alpha"]?.ownershipTitle == "账号 7",
+            "归属变化必须更新账号摘要")
+        expect(original.summariesByID["/alpha"]?.ownershipTitle == "未归属", "缓存不修改旧快照")
+        snapshot.threads[0].visibility = .projectPathMissing
+        let missing = cache.resolve(snapshot: snapshot, query: "", filter: .missingPath)
+        expect(missing.visibleThreadIDs == ["a"] && missing.summariesByID["/alpha"]?.missingPathCount == 1,
+            "路径状态变化必须更新筛选与异常摘要")
+        snapshot.threads.removeAll { $0.id == "b" }
+        expect(cache.resolve(snapshot: snapshot, query: "", filter: .all).completeProjectsByID["/beta"] == nil,
+            "删除后的完整项目不能残留在缓存")
+        expect(cache.resolve(snapshot: .empty, query: "", filter: .all).projects.isEmpty, "空快照清除旧数据")
+    }
+
+    private static func inventoryProgressCoalescesWithoutLosingCompletion() {
+        var throttle = SessionContinuityService.ProgressThrottle()
+        expect(!throttle.shouldPublish(completed: 0, total: 0, now: 0), "空盘点不生成虚假进度")
+        var published: [Int] = []
+        for index in 1...10_000 {
+            if throttle.shouldPublish(completed: index, total: 10_000, now: Double(index) / 10_000) { published.append(index) }
+        }
+        expect(published.first == 1 && published.last == 10_000 && published.count <= 12,
+            "密集盘点进度约每 100 ms 发布一次，并保留首尾")
+        expect(!throttle.shouldPublish(completed: 10_000, total: 10_000, now: 2), "完成进度不重复发布")
+    }
+
+    private static func inventoryRetainsMetadataWithoutChangingFullReader() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".tmp/continuity-inventory-tests/\(UUID().uuidString)")
+        let sessions = root.appendingPathComponent(".codex/sessions")
+        let project = root.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let prompt = String(repeating: "用户正文", count: 10_000)
+        let url = sessions.appendingPathComponent("thread.jsonl")
+        try writeJSONL([
+            ["type": "session_meta", "timestamp": "2026-10-01T00:00:00Z",
+             "payload": ["id": "inventory", "cwd": project.path, "source": "cli", "originator": "codex-tui", "git": ["branch": "main"]]],
+            ["type": "event_msg", "payload": ["type": "user_message", "message": prompt]],
+            ["type": "event_msg", "payload": ["type": "agent_message", "message": "正文仍可用于完整读取"]]
+        ], to: url)
+        let original = try Data(contentsOf: url)
+        let full = SessionContinuityService.parseThreadEnvelope(at: url)!
+        let metadata = SessionContinuityService.parseThreadEnvelope(at: url, includeReadableMessages: false)!
+        expect(full.firstUserMessage == prompt && !full.readableMessages.isEmpty, "完整读取接口保留正文")
+        expect(metadata.readableMessages.isEmpty && metadata.firstUserMessage == String(prompt.prefix(60)),
+            "盘点仅保留短标题，不缓存正文")
+        expect(metadata.id == full.id && metadata.originalPath == full.originalPath && metadata.kind == full.kind
+            && metadata.gitBranch == full.gitBranch && metadata.timestamp == full.timestamp && metadata.bytesRead == full.bytesRead,
+            "裁减缓存不改变会话身份、分类、路径或读取范围")
+        let compressed = URL(fileURLWithPath: "Tests/Fixtures/CompressedRollouts/long.jsonl.zst")
+        let compressedFull = SessionContinuityService.parseThreadEnvelope(at: compressed)!
+        let compressedMetadata = SessionContinuityService.parseThreadEnvelope(at: compressed, includeReadableMessages: false)!
+        expect(compressedFull.id == compressedMetadata.id && compressedFull.kind == compressedMetadata.kind
+            && compressedMetadata.readableMessages.isEmpty, "压缩日志使用相同元数据口径")
+        try Data("invalid".utf8).write(to: sessions.appendingPathComponent("broken.jsonl"))
+        let service = SessionContinuityService(homeDirectory: root, threadService: CodexThreadService { _, _, _, completion in
+            completion(.success(["data": []]))
+        })
+        for _ in 0..<2 {
+            var result: Result<SessionContinuitySnapshot, Error>?
+            var progress: [(Int, Int)] = []
+            service.fetch(progress: { progress.append(($0, $1)) }, completion: { result = $0 })
+            let deadline = Date().addingTimeInterval(10)
+            while result == nil && Date() < deadline { _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01)) }
+            guard let result else { fatalError("Inventory callback timed out") }
+            let snapshot = try result.get()
+            expect(snapshot.userThreads.count == 1 && snapshot.unreadableFileCount == 1, "盘点保留失败文件统计")
+            expect(snapshot.threads.first?.readableMessages.isEmpty == true && snapshot.threads.first?.title == String(prompt.prefix(60)),
+                "首次与缓存盘点都只发布元数据，标题保持原值")
+            expect(progress.first?.0 == 1 && progress.last?.0 == 2 && progress.last?.1 == 2,
+                "失败文件也计入最终进度")
+        }
+        expect(try! Data(contentsOf: url) == original, "性能优化不得改写原始会话")
     }
 
     private static func runLocalInventoryBenchmark() {

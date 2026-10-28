@@ -6,7 +6,7 @@ enum MonitorCenterLayout {
     static let height: CGFloat = 760
     static let minimumWidth: CGFloat = 900
     static let minimumHeight: CGFloat = 640
-    static let sidebarWidth: CGFloat = 220
+    static let sidebarWidth: CGFloat = 228
 }
 
 private final class MonitorCenterGlassCompositionView: NSView {
@@ -160,6 +160,14 @@ final class MonitorCenterWindowController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closed = notification.object as? NSWindow, closed === window else { return }
+        // show(section:) creates a new root every time. Keeping the old root
+        // after closing only keeps its subscriptions and preview animations alive.
+        closed.contentView = nil
+        hostingView = nil
     }
 
     private func route(to section: MonitorCenterSection) {

@@ -5,6 +5,13 @@ import Foundation
 /// original JSONL cwd is immutable history, so a moved thread must be resolved
 /// through `thread-project-assignments` on every refresh.
 enum CodexProjectCatalog {
+    private struct FileSignature: Equatable {
+        let size: UInt64
+        let modified: Date?
+        let inode: UInt64?
+    }
+    private static let cacheLock = NSLock()
+    private static var cached: (path: String, signature: FileSignature, state: State)?
     struct ProjectRemovalResult {
         let data: Data
         let removedProjectIDs: Set<String>
@@ -38,8 +45,25 @@ enum CodexProjectCatalog {
     }
 
     static func loadState(from url: URL) -> State {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = (attributes[.size] as? NSNumber)?.uint64Value else {
+            cacheLock.lock()
+            if cached?.path == url.path { cached = nil }
+            cacheLock.unlock()
+            return .empty
+        }
+        let signature = FileSignature(size: size, modified: attributes[.modificationDate] as? Date,
+            inode: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value)
+        cacheLock.lock()
+        let hit = cached.flatMap { $0.path == url.path && $0.signature == signature ? $0.state : nil }
+        cacheLock.unlock()
+        if let hit { return hit }
         guard let data = try? Data(contentsOf: url) else { return .empty }
-        return state(from: data)
+        let result = state(from: data)
+        cacheLock.lock()
+        cached = (url.path, signature, result)
+        cacheLock.unlock()
+        return result
     }
 
     static func namesByPath(from data: Data) -> [String: String] {

@@ -5,7 +5,7 @@ enum QuotaNotificationStatus: Equatable {
 }
 
 enum NotificationAuthorizationPolicy {
-    static func shouldRequest(status: QuotaNotificationStatus, signals: Bool, recovery: Bool) -> Bool {
-        status == .unknown && (signals || recovery)
+    static func shouldRequest(status: QuotaNotificationStatus, signals: Bool, recovery: Bool, credits: Bool = false) -> Bool {
+        status == .unknown && (signals || recovery || credits)
     }
 }

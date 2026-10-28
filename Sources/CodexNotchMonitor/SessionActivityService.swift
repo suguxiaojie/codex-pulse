@@ -53,6 +53,7 @@ struct LocalSessionSnapshot: Equatable {
     var nativeWaitReason: CodexActivityWaitReason? = nil
     var nativeReplyRequestIDs: Set<String> = []
     var nativeSuppressCompletion = false
+    var fastMode: Bool? = nil
 
     func evaluated(at now: Date) -> Self {
         guard let evidence else { return self }
@@ -146,6 +147,8 @@ final class SessionActivityService {
         var activityIndices: [String: Int] = [:]
         var tokenState: TurnTokenState = TurnTokenState()
         var sessionKind: CodexActivitySessionKind = .unknown
+        var fastMode: Bool? = nil
+        var threadFastMode: Bool? = nil
     }
     private var rolloutCursors: [URL: RolloutCursor] = [:]
 
@@ -155,7 +158,7 @@ final class SessionActivityService {
         let snapshot: LocalSessionSnapshot?
     }
 
-    func fetch(preferredSessionIDs: [String] = [], completion: @escaping ([LocalSessionSnapshot], [String: String]) -> Void) {
+    func fetch(preferredSessionIDs: [String] = [], completion: @escaping ([LocalSessionSnapshot], [String: String], CodexProjectCatalog.State) -> Void) {
         queue.async { [self] in
             var seen = Set<URL>()
             let urls = (Self.preferredSessionFiles(sessionIDs: preferredSessionIDs) + recentSessionFiles())
@@ -166,10 +169,11 @@ final class SessionActivityService {
                 now.timeIntervalSince($0.updatedAt) < activeRecencyInterval
             }
             let threadNames = CodexThreadNameCatalog.loadNames()
+            let catalog = CodexProjectCatalog.loadState()
             let retained = Set(urls)
             cache = cache.filter { retained.contains($0.key) }
             rolloutCursors = rolloutCursors.filter { retained.contains($0.key) }
-            DispatchQueue.main.async { completion(snapshots, threadNames) }
+            DispatchQueue.main.async { completion(snapshots, threadNames, catalog) }
         }
     }
 
@@ -358,6 +362,9 @@ final class SessionActivityService {
             let previousTurn = tokenState.turnID
             let incomingTurn = payload["turn_id"] as? String
             let eventType = payload["type"] as? String
+            // Forked/imported history can contain another thread's checkpoint.
+            if type == "event_msg", eventType == "thread_settings_applied",
+               payload["thread_id"] as? String != sessionID { continue }
             let beginsTurn = type == "turn_context" || (type == "event_msg" && eventType == "task_started")
             if tokenState.pendingStart, type == "event_msg",
                ["task_complete", "turn_aborted"].contains(eventType ?? "") { continue }
@@ -366,6 +373,7 @@ final class SessionActivityService {
             tokenState.consume(type: type, payload: payload)
             if beginsTurn, let incomingTurn, tokenState.turnID != incomingTurn { continue }
             if tokenState.turnID != previousTurn {
+                cursor.fastMode = cursor.threadFastMode
                 turnID = tokenState.turnID
                 isActive = followsLegacyStart ? true : nil
                 endReason = nil
@@ -383,11 +391,27 @@ final class SessionActivityService {
                 sessionID = (payload["id"] as? String) ?? (payload["session_id"] as? String) ?? sessionID
                 if let value = payload["cwd"] as? String { cwd = value }
             case "turn_context":
+                // A missing per-turn field does not clear an owned session setting.
+                if payload.keys.contains("service_tier") {
+                    switch payload["service_tier"] as? String {
+                    case "fast", "priority": cursor.fastMode = true
+                    case "default", "standard", "flex": cursor.fastMode = false
+                    default: cursor.fastMode = nil
+                    }
+                }
                 if let value = payload["cwd"] as? String { cwd = value }
                 if let value = payload["model"] as? String { model = value }
                 reasoningEffort = (payload["effort"] as? String) ?? (payload["reasoning_effort"] as? String)
             case "event_msg":
                 switch payload["type"] as? String {
+                case "thread_settings_applied":
+                    let settings = payload["thread_settings"] as? [String: Any]
+                    switch settings?["service_tier"] as? String {
+                    case "fast", "priority": cursor.threadFastMode = true
+                    case "default", "standard", "flex": cursor.threadFastMode = false
+                    default: cursor.threadFastMode = settings?["service_tier"] is NSNull ? false : nil
+                    }
+                    cursor.fastMode = cursor.threadFastMode
                 case "task_started":
                     if !tokenState.isTerminated {
                         isActive = true
@@ -433,6 +457,7 @@ final class SessionActivityService {
                     if let summary = Self.progressSummary(text) { latestAssistantSummary = summary }
                 case "custom_tool_call", "function_call":
                     let callID = (payload["call_id"] as? String) ?? "tool-\(eventTimestamp.timeIntervalSince1970)"
+                    if payload["call_id"] as? String != nil, activityIndices[callID] != nil { break }
                     let name = payload["name"] as? String ?? "tool"
                     let input = (payload["input"] as? String) ?? (payload["arguments"] as? String) ?? ""
                     if let last = activities.indices.last, activities[last].kind == .progress {
@@ -452,6 +477,7 @@ final class SessionActivityService {
                           activities.indices.contains(index)
                     else { break }
                     activities[index].isRunning = false
+                    activities[index].failed = activities[index].failed || Self.toolOutputFailed(payload)
                     activities[index].updatedAt = eventTimestamp
                 default:
                     break
@@ -513,18 +539,64 @@ final class SessionActivityService {
                 lifecycleState: isActive, hasRunningTool: hasRunningTool,
                 fileModifiedAt: fileModifiedAt, endReason: endReason, endedAt: endedAt
             ), reasoningEffort: reasoningEffort, startedAt: startedAt,
-            sessionTotalTokens: sessionTotalTokens, latestAssistantSummary: latestAssistantSummary, sessionKind: sessionKind
+            sessionTotalTokens: sessionTotalTokens, latestAssistantSummary: latestAssistantSummary, sessionKind: sessionKind,
+            fastMode: cursor.fastMode
         )
     }
 
-    private func consumeCompleteLines(from data: inout Data, discarding: inout Bool, body: (Data) -> Void) {
-        while let newline = data.firstIndex(of: 0x0A) {
-            let line = Data(data[..<newline])
-            data.removeSubrange(data.startIndex...newline)
-            if !discarding, line.count <= 1_048_576 { body(line) }
-            discarding = false
+    /// Only explicit tool-error flags or structured execution envelopes prove failure.
+    /// Text mentioning an error (for example a searched document) is not execution evidence.
+    static func toolOutputFailed(_ payload: [String: Any]) -> Bool {
+        func failed(_ object: [String: Any]) -> Bool {
+            for key in ["is_error", "isError"] {
+                if let value = object[key] as? NSNumber, CFGetTypeID(value) == CFBooleanGetTypeID(), value.boolValue { return true }
+            }
+            guard object["output"] != nil || object["stdout"] != nil || object["stderr"] != nil,
+                  object["wall_time_seconds"] != nil || object["chunk_id"] != nil,
+                  let code = object["exit_code"] as? NSNumber, CFGetTypeID(code) != CFBooleanGetTypeID(),
+                  code.doubleValue.isFinite, code.doubleValue.rounded() == code.doubleValue else { return false }
+            return code.doubleValue != 0
         }
-        if data.count > 1_048_576 { data.removeAll(keepingCapacity: true); discarding = true }
+        func textFailed(_ text: String) -> Bool {
+            guard text.utf8.count <= 262_144, text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{"),
+                  ["\"is_error\"", "\"isError\"", "\"exit_code\""].contains(where: { text.contains($0) }),
+                  let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return false }
+            return failed(object)
+        }
+        if failed(payload) { return true }
+        if let object = payload["output"] as? [String: Any] { return failed(object) }
+        if let text = payload["output"] as? String { return textFailed(text) }
+        if let parts = payload["output"] as? [[String: Any]] {
+            return parts.prefix(64).contains { part in
+                if failed(part) { return true }
+                guard ["input_text", "text"].contains(part["type"] as? String ?? ""),
+                      let text = part["text"] as? String else { return false }
+                return textFailed(text)
+            }
+        }
+        return false
+    }
+
+    private func consumeCompleteLines(from data: inout Data, discarding: inout Bool, body: (Data) -> Void) {
+        var remainder = Data()
+        data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            guard let base = bytes.baseAddress else { return }
+            var start = 0
+            for index in bytes.indices where bytes[index] == 0x0A {
+                let count = index - start
+                if !discarding, count <= 1_048_576 {
+                    // Each retained line must own its bytes. Mutating the source
+                    // while slices share it copies the whole remaining tail per line.
+                    body(Data(bytes: base.advanced(by: start), count: count))
+                }
+                discarding = false
+                start = index + 1
+            }
+            let count = bytes.count - start
+            if count > 1_048_576 { discarding = true }
+            else if count > 0 { remainder = Data(bytes: base.advanced(by: start), count: count) }
+        }
+        data = remainder
     }
 
     static func sessionIDFromFilename(_ url: URL) -> String {
@@ -542,7 +614,7 @@ final class SessionActivityService {
     }
 
     private func parseDate(_ value: String) -> Date? {
-        fractionalDateFormatter.date(from: value) ?? dateFormatter.date(from: value)
+        FastTimestamp.parse(value) ?? fractionalDateFormatter.date(from: value) ?? dateFormatter.date(from: value)
     }
 
     func observeChanges(at urls: [URL], completion: (() -> Void)? = nil) {
@@ -857,7 +929,7 @@ enum ProjectActivityAggregator {
                         kind: activity.kind,
                         title: activity.title,
                         isRunning: activity.isRunning,
-                        updatedAt: activity.updatedAt
+                        updatedAt: activity.updatedAt, failed: activity.failed
                     )
                 }
             }.sorted { $0.updatedAt > $1.updatedAt }

@@ -5,6 +5,18 @@ import SwiftUI
     static func run() {
         var checks = 0
         func expect(_ condition: Bool, _ message: String) { precondition(condition, message); checks += 1 }
+        let wallpaper = ActivityIslandPreviewAssets.image("Wallpaper")
+        expect(wallpaper != nil, "preview wallpaper loads")
+        expect(wallpaper === ActivityIslandPreviewAssets.image("Wallpaper"), "preview reuses its decoded image")
+        let bitmap = wallpaper?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        expect(bitmap?.width == 2560 && bitmap?.height == 1440, "wallpaper decoding is bounded with original aspect ratio")
+        for name in ["StateSmoke", "QuantumNoise", "LiquidWave"] {
+            let image = ActivityIslandPreviewAssets.image(name)
+            expect(image != nil && image === ActivityIslandPreviewAssets.image(name), "effect thumbnails reuse their image")
+            expect(image?.cgImage(forProposedRect: nil, context: nil, hints: nil)?.width == 328, "small artwork is not enlarged")
+        }
+        expect(wallpaper === ActivityIslandPreviewAssets.image("Wallpaper"), "all four preview assets fit in cache")
+        expect(ActivityIslandPreviewAssets.image("missing-test-asset") == nil, "missing preview remains a safe fallback")
         let now = Date(timeIntervalSince1970: 1000)
         let rows = ActivityIslandDesktopPreview.sampleRows(now: now, privacy: false)
         expect(rows.count == 2 && rows[0].title == "整理项目资料", "neutral synthetic focus and rail")

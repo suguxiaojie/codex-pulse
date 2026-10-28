@@ -88,13 +88,14 @@ struct ActivityIslandPanelMetrics: Equatable {
     let maximumUsageHeight: CGFloat
     var listHeight: CGFloat { expandedRect.height - Self.headerHeight - Self.footerHeight }
     static let headerHeight: CGFloat = 36
-    static let footerHeight: CGFloat = 36
+    /// Bottom breathing room only; the former footer controls now live in the header.
+    static let footerHeight: CGFloat = 4
 
     static func focusHeight(for row: ActivitySessionSnapshot?) -> CGFloat {
-        guard let row else { return 78 }
-        if row.isPrivate { return 78 }
-        return 78 + CGFloat(max(0, row.recentSteps.count - 1)) * 17
-            + (!row.phase.isActive && !row.recentSteps.isEmpty ? 17 : 0)
+        // Header (44) + metadata (13) + vertical padding (24) + gaps; the timeline adds 34 + gap.
+        guard let row else { return 90 }
+        if row.isPrivate { return 113 }
+        return row.recentSteps.isEmpty ? 90 : 133
     }
     static let railHeight: CGFloat = 38 // 30 pt capsules plus 8 pt separation.
     static func stageHeight(rowCount: Int, focusHeight: CGFloat) -> CGFloat {

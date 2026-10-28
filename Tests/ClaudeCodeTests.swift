@@ -52,7 +52,61 @@ import Darwin
         print("Claude completion evidence: \(checks) checks passed")
     }
 
+    static func liveRegistryTests() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".tmp/claude-registry-tests/\(UUID().uuidString)")
+        let registryURL = root.appendingPathComponent("sessions")
+        try FileManager.default.createDirectory(at: registryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let now = start.addingTimeInterval(3600)
+        let id = UUID().uuidString.lowercased()
+        let reader = ClaudeLiveSessionRegistry(configurationDirectory: root)
+        let process = ClaudeLiveSessionRegistry.ProcessInfo(name: "claude", startedAt: start, uid: getuid())
+        var object: [String: Any] = ["pid": 101, "pidDomain": "darwin", "kind": "interactive",
+            "sessionId": id, "cwd": "/fixture", "procStart": ClaudeLiveSessionRegistry.processStamp(start),
+            "status": "busy", "statusUpdatedAt": start.addingTimeInterval(1).timeIntervalSince1970 * 1000]
+        let file = registryURL.appendingPathComponent("101.json")
+        func write(_ value: [String: Any]) throws { try json(value).write(to: file) }
+        try write(object)
+        expect(reader.read(now: now, lookup: { _ in process }).first?.status == "busy", "long-running owned busy registry remains valid")
+        object["status"] = "idle"; try write(object)
+        expect(reader.read(now: now, lookup: { _ in process }).first?.status == "idle", "idle status stays distinct from busy")
+        object["status"] = "busy"; try write(object)
+        expect(reader.read(now: now, lookup: { _ in nil }).isEmpty, "dead PID cannot restore a session")
+        expect(reader.read(now: now, lookup: { _ in .init(name: "claude", startedAt: start.addingTimeInterval(1), uid: getuid()) }).isEmpty,
+            "reused PID with a different start time is rejected")
+        expect(reader.read(now: now, lookup: { _ in .init(name: "sh", startedAt: start, uid: getuid()) }).isEmpty,
+            "shell is not a Claude owner")
+        expect(reader.read(now: now, lookup: { _ in .init(name: "claude", startedAt: start, uid: getuid() + 1) }).isEmpty,
+            "foreign UID is rejected")
+        for (key, value) in [("kind", "subagent" as Any), ("pidDomain", "linux"), ("pid", 102),
+                             ("sessionId", "../escape"), ("cwd", "relative"), ("statusUpdatedAt", true),
+                             ("statusUpdatedAt", now.addingTimeInterval(60).timeIntervalSince1970 * 1000)] {
+            var invalid = object; invalid[key] = value; try write(invalid)
+            expect(reader.read(now: now, lookup: { _ in process }).isEmpty, "invalid registry field rejected: " + key)
+        }
+        try write(object)
+        let project = root.appendingPathComponent("projects/project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let transcript = project.appendingPathComponent(id + ".jsonl")
+        try Data().write(to: transcript)
+        expect(reader.read(includeTranscripts: true, now: now, lookup: { _ in process }).first?.transcriptPath == transcript.path,
+            "exact session transcript is discovered without scanning its contents")
+        var duplicate = object; duplicate["pid"] = 102
+        let duplicateURL = registryURL.appendingPathComponent("102.json")
+        try json(duplicate).write(to: duplicateURL)
+        expect(reader.read(now: now, lookup: { _ in process }).isEmpty, "multiple owners of one session are ambiguous")
+        try FileManager.default.removeItem(at: duplicateURL)
+        try Data(repeating: 32, count: 65_537).write(to: file)
+        expect(reader.read(now: now, lookup: { _ in process }).isEmpty, "oversized registry entry is bounded")
+        try FileManager.default.removeItem(at: file)
+        let outside = root.appendingPathComponent("outside.json"); try json(object).write(to: outside)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: outside)
+        expect(reader.read(now: now, lookup: { _ in process }).isEmpty, "registry symlink cannot escape its directory")
+    }
     static func main() async throws {
+        try liveRegistryTests()
         if CommandLine.arguments.count > 2, CommandLine.arguments[1] == "--scan" {
             let scanner = ClaudeCodeUsageScanner(projectsURL: URL(fileURLWithPath: CommandLine.arguments[2]))
             var result = await scanner.scan()
@@ -191,12 +245,21 @@ import Darwin
         expect(request.decision(.cancel)?["interrupt"] as? Bool == true, "cancel interrupts")
         var question = permission; question["tool_name"] = "AskUserQuestion"
         question["tool_input"] = ["questions": [["question": "Choose?", "options": [["label": "A"]], "multiSelect": true]]]
-        expect(ClaudePermissionRequest.decode(.init(eventID: "q", kind: "hook", awaitsDecision: true, payload: json(question)), sessionID: "claude:fixture") == nil, "multi-select returns to client")
+        let multiple = ClaudePermissionRequest.decode(.init(eventID: "q", kind: "hook", awaitsDecision: true, payload: json(question)), sessionID: "claude:fixture")!
+        expect(multiple.questions[0].multiSelect, "multi-select decoded")
         question["tool_input"] = ["questions": [["question": "Choose?", "options": [["label": "A"], ["label": "B"]]]], "preserved": "value"]
         let single = ClaudePermissionRequest.decode(.init(eventID: "q", kind: "hook", awaitsDecision: true, payload: json(question)), sessionID: "claude:fixture")!
         let updated = single.decision(.once, answers: ["Choose?": "B"])?["updatedInput"] as? [String: Any]
         expect(updated?["answers"] as? [String: String] == ["Choose?": "B"] && updated?["preserved"] as? String == "value", "single selection preserves original input and exact answers")
-        expect(!single.permitsIslandAnswers(["Choose?": "unknown"]), "unknown island option rejected")
+        expect(single.permitsIslandAnswers(["Choose?": "custom"]), "island permits custom answers")
+        expect(!single.permitsIslandAnswers(["Choose?": " "]), "blank answer rejected")
+        expect(!single.permitsIslandAnswers(["Choose?": "A", "extra": "B"]), "extra question rejected")
+        expect(single.decision(.once, answers: ["Choose?": String(repeating: "a", count: 4001)]) == nil, "overlong answer rejected")
+        question["hook_event_name"] = "PreToolUse"
+        let pretool = ClaudePermissionRequest.decode(.init(eventID: "q", kind: "hook", awaitsDecision: true, payload: json(question)), sessionID: "claude:fixture")
+        expect(pretool?.questions.count == 1, "ordinary question intercepted before tool execution")
+        question["tool_name"] = "Bash"
+        expect(ClaudePermissionRequest.decode(.init(eventID: "q", kind: "hook", awaitsDecision: true, payload: json(question)), sessionID: "claude:fixture") == nil, "ordinary pretool not an approval")
         expect(single.decision(.once, answers: ["Choose?": "custom"]) != nil, "detail window retains custom answers")
         print("Claude integration tests: \(checks) checks passed")
     }

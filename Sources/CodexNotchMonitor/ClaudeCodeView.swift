@@ -209,7 +209,7 @@ struct ClaudeRequestsView: View {
 private struct ClaudeRequestCard: View {
     @ObservedObject var runtime: ClaudeCodeRuntime
     let request: ClaudePermissionRequest
-    @State private var answers: [String: String] = [:]
+    @StateObject private var draft = IslandAnswerDraft()
     @State private var confirmAlways = false
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -218,12 +218,19 @@ private struct ClaudeRequestCard: View {
             Text(request.detail).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
             ForEach(request.questions) { question in
                 Text(question.text).font(.headline)
+                if question.multiSelect { Text("可多选").font(.caption) }
                 ForEach(question.options, id: \.self) { option in
-                    Button { answers[question.text] = option } label: {
-                        Label(option, systemImage: answers[question.text] == option ? "checkmark.circle.fill" : "circle")
+                    Button {
+                        if question.multiSelect { draft.toggle(option, for: question.text, orderedOptions: question.options) }
+                        else { draft.select(option, for: question.text) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label(option, systemImage: draft.isSelected(option, for: question.text) ? "checkmark.square.fill" : "square")
+                            if let detail = question.descriptions[option] { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                        }
                     }.buttonStyle(.plain)
                 }
-                TextField("自定义回答", text: Binding(get: { answers[question.text] ?? "" }, set: { answers[question.text] = $0 }))
+                TextField("自定义回答", text: Binding(get: { draft.texts[question.text] ?? "" }, set: { draft.type($0, for: question.text) }))
             }
             if !request.suggestions.isEmpty && request.questions.isEmpty {
                 DisclosureGroup("建议的授权规则") {
@@ -241,8 +248,8 @@ private struct ClaudeRequestCard: View {
             } message: { Text("Claude Code 会将上方展示的规则写入用户设置，对后续会话生效。") }
     }
     @ViewBuilder private var actions: some View {
-        Button(request.questions.isEmpty ? "允许一次" : "提交回答") { runtime.respond(request.id, choice: .once, answers: answers) }
-            .disabled(!request.questions.allSatisfy { !(answers[$0.text] ?? "").isEmpty })
+        Button(request.questions.isEmpty ? "允许一次" : "提交回答") { runtime.respond(request.id, choice: .once, answers: draft.answers) }
+            .disabled(!request.questions.isEmpty && !request.permitsIslandAnswers(draft.answers))
         if !request.suggestions.isEmpty && request.questions.isEmpty {
             Button("本会话允许") { runtime.respond(request.id, choice: .session) }
             Button("始终允许") { confirmAlways = true }

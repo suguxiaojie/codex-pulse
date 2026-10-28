@@ -202,8 +202,12 @@ enum SessionLibraryPresentation {
         query: String,
         filter: SessionLibraryFilter
     ) -> [ContinuityProjectGroup] {
+        groups(projects: snapshot.projectGroups, query: query, filter: filter)
+    }
+
+    static func groups(projects: [ContinuityProjectGroup], query: String, filter: SessionLibraryFilter) -> [ContinuityProjectGroup] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return snapshot.projectGroups.compactMap { project in
+        return projects.compactMap { project in
             let projectMatches = search.isEmpty
                 || project.name.localizedCaseInsensitiveContains(search)
                 || project.id.localizedCaseInsensitiveContains(search)
@@ -433,6 +437,16 @@ final class CodexThreadService {
 }
 
 final class SessionContinuityService {
+    struct ProgressThrottle {
+        private var lastSent = -TimeInterval.infinity
+        private var lastCompleted = 0
+        mutating func shouldPublish(completed: Int, total: Int, now: TimeInterval) -> Bool {
+            guard completed > lastCompleted, completed <= total,
+                  completed == 1 || completed == total || now - lastSent >= 0.1 else { return false }
+            lastCompleted = completed; lastSent = now
+            return true
+        }
+    }
     struct ThreadEnvelope {
         let id: String
         let originalPath: String
@@ -455,6 +469,7 @@ final class SessionContinuityService {
     }
 
     private struct EnvelopeAccumulator {
+        let retainMessages: Bool
         var sessionID: String?
         var cwd: String?
         var timestamp: Date?
@@ -550,6 +565,10 @@ final class SessionContinuityService {
     }
 
     static func parseThreadEnvelope(at url: URL) -> ThreadEnvelope? {
+        parseThreadEnvelope(at: url, includeReadableMessages: true)
+    }
+
+    static func parseThreadEnvelope(at url: URL, includeReadableMessages: Bool) -> ThreadEnvelope? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = (attributes[.size] as? NSNumber)?.intValue
         else { return nil }
@@ -558,7 +577,7 @@ final class SessionContinuityService {
         defer { try? handle?.close() }
 
         do {
-            var accumulator = EnvelopeAccumulator()
+            var accumulator = EnvelopeAccumulator(retainMessages: includeReadableMessages)
             var bytesRead = 0
             let combinedLimit = headReadLimit + tailReadLimit
             if RolloutReader.isCompressed(url) {
@@ -640,10 +659,12 @@ final class SessionContinuityService {
             guard let message = CodexTranscriptParser.message(from: object) else { continue }
             if message.role == .user {
                 accumulator.hasUserMessage = true
-                if accumulator.firstUserMessage == nil { accumulator.firstUserMessage = message.text }
-                accumulator.appendMessage("用户：\(message.text)")
+                if accumulator.firstUserMessage == nil {
+                    accumulator.firstUserMessage = accumulator.retainMessages ? message.text : String(message.text.prefix(60))
+                }
+                if accumulator.retainMessages { accumulator.appendMessage("用户：\(message.text)") }
             } else {
-                accumulator.appendMessage("助手：\(message.text)")
+                if accumulator.retainMessages { accumulator.appendMessage("助手：\(message.text)") }
             }
         }
     }
@@ -705,16 +726,19 @@ final class SessionContinuityService {
 
         let files = RolloutReader.preferredFiles(liveFiles).map({ ($0, false) }) + RolloutReader.preferredFiles(archivedFiles).map({ ($0, true) })
         var activeCacheKeys = Set<String>()
+        var progressThrottle = ProgressThrottle()
+        let total = files.count
         for (index, item) in files.enumerated() {
             let (file, archived) = item
-            defer { DispatchQueue.main.async { progress?(index + 1, files.count) } }
+            defer {
+                if let progress, progressThrottle.shouldPublish(completed: index + 1, total: total, now: ProcessInfo.processInfo.systemUptime) {
+                    DispatchQueue.main.async { progress(index + 1, total) }
+                }
+            }
             activeCacheKeys.insert(file.path)
-            guard let record = parseThread(
-                file,
-                archived: archived,
-                title: indexNames,
-                catalog: catalog
-            ) else {
+            guard let record = autoreleasepool(invoking: {
+                parseThread(file, archived: archived, title: indexNames, catalog: catalog)
+            }) else {
                 unreadable += 1
                 continue
             }
@@ -739,7 +763,8 @@ final class SessionContinuityService {
         if let cached = envelopeCache[url.path], cached.signature == signature {
             envelope = cached.envelope
         } else {
-            guard let parsed = Self.parseThreadEnvelope(at: url) else { return nil }
+            // Inventory needs classification and a short title, not cached transcript bodies.
+            guard let parsed = Self.parseThreadEnvelope(at: url, includeReadableMessages: false) else { return nil }
             envelopeCache[url.path] = CachedEnvelope(signature: signature, envelope: parsed)
             envelope = parsed
         }
@@ -798,6 +823,7 @@ final class SessionContinuityService {
     }
 
     private static func parseDate(_ raw: String) -> Date? {
+        if let date = FastTimestamp.parse(raw) { return date }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)

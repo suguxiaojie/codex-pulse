@@ -1,6 +1,6 @@
 # 灵动岛：中文输入与异步提问消失 修复方案
 
-先读 `AGENTS.md`、`docs/island-text-answer.md`。不提交、不推送、不安装。受保护动效文件不得修改。
+相关边界见 `AGENTS.md`、`docs/island-text-answer.md`。本说明记录中文输入、提问保留与回答投递的实现。
 
 ## 1. 中文输入法无法上屏
 
@@ -31,16 +31,23 @@
 
 1. 先查清 `CodexDesktopRequestProjection`（`asyncQuestions`／`authoritativeAsyncQuestionIDs`／`resolvedAnswer`）在本轮结束后是否仍投影出未回答的异步提问。可以参考 `Tests/Fixtures` 和 NativeActivity 的测试夹具；如果夹具不够，就新增一个模拟“提问后本轮完成”的夹具。不要读取真实 `~/.codex`。
 2. 会话状态（`ActivitySessionState` 等）：只要会话仍有未回答的权威异步提问（或任何仍在等待的 handle），就保持“等待回复”状态（沿用现有 waitingApproval／reply 的表现与 replyRequestIDs），不进入完成态、不触发完成礼花／提示音、不按 1 分钟保留期移除。提问被回答或消失后，按正常完成逻辑处理（此时也不要补放完成礼花）。
-3. 提交：`CodexDesktopIPCClient.submit` 的异步分支要求 `acknowledgement.result.turnId == handle.turnID`，否则判为 `outcomeUnknown`。本轮已结束时，桌面端会开启新的一轮来回答，返回的 turnId 与原 turnId 不同。根据协议与夹具确认正确的判定：
-   - 本轮仍在进行：维持现有判定；
-   - 本轮已结束：只要返回了一个非空 turnId，并且之后的快照里该问题已解决（`resolvedAnswer` 有值或问题消失），就视为成功；
-   - 无法确认时，仍按“结果未知，请在 Codex 中确认”处理，不得重复发送（`attempted` 去重保留）。
-   - 提交前沿用现有的 refresh + validate 校验，不放松 handle 一致性校验。
+3. 提交前刷新快照并重新校验完整 handle；同一请求只尝试一次，不自动补发：
+   - 本轮仍在进行：调用 `thread-follower-steer-turn` v1，校验回执 `result.turnId` 等于原轮次。
+   - 本轮已结束：调用 `thread-follower-start-turn` v2，发送 `turnStart.request` 和 `turnStart.context`。请求只含当前 threadId、标记化回答 input、clientUserMessageId 和 `send_user_message_async_question` trigger；context 使用 `inheritThreadSettings=true`，由 owner 继承模型、目录和权限，不覆盖这些设置。
+   - `restoreMessage` 包含 id、text、createdAt、cwd、context；text、context.prompt 和 input 使用同一标记化回答。
+   - 新回执读取 `result.turn.id`。只有更新后的同 owner／同 stream 快照中，回执对应的新轮次实际包含相同问题 ID、题干和答案的用户消息或 accepted steering 消息，才显示已确认。问题消失本身不算投递证据。
+   - 回执缺失、答案不符、轮次不符或无法确认时仍显示结果未知；保留 attempted 去重。
 4. 不新增发起新回合的通用能力，只用于回答这一个仍在等待的提问（符合 AGENTS.md）。
 
 ## 3. 测试
 
 - 编辑器：组字时 `updateNSView` 不覆盖内容（把同步判断抽成纯函数测试）；激活与归还前台的策略写成纯函数测试（只有点击才激活，失焦或结束后归还）。
 - 投影与会话：“异步提问后本轮完成”时，会话保持等待回复，不被移除，不触发完成庆祝；回答后进入完成且不补放礼花。
-- 提交：轮次已结束时，新 turnId 加上问题已解决视为成功；问题未解决时为 outcomeUnknown；已尝试过的不重复发送。
+- 提交：夹具拒绝对非 inProgress 轮次 steer；覆盖已完成／中断／失败轮次的 start v2、canonical 历史、设置继承、恢复元数据、空回执、错误答案／轮次、问题消失但答案未到达，以及重复提交。
 - 运行完整测试（`SKIP_COST_SMOKE_TESTS=1`）与 arm64 Release 构建，核对受保护文件哈希；中文报告根因证据、改动和测试结果。
+
+## 4. 已结束轮次投递故障的协议依据
+
+本机 ChatGPT 26.1016.61520（Build 21421）的静态客户端实现确认：steerTurn 在当前轮次非 inProgress 时抛错；原生异步提问回答经过 sendMessage 协调器，在 start 与 steer 之间选择。follower start 返回 `result.turn.id`，steer 返回 `result.turnId`。v1.10.0 错将所有异步回答都送入 steer，且旧夹具接受已结束轮次的 steer，导致模拟测试通过、真实提交失败。
+
+修复前，夹具加入真实的非活动轮次拒绝规则后，旧实现稳定抛出 outcomeUnknown。协议来源哈希与回归日志保存在 `.tmp/async-reply-delivery/`；没有向真实会话自动提交答案。

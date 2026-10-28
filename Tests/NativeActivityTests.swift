@@ -153,6 +153,16 @@ enum NativeActivityTests {
         let projects = ProjectActivityAggregator.projects(snapshots: [liveNative], now: now, catalog: .empty)
         lifecycle.update(projects: projects, snapshots: [liveNative], usages: [:], now: now, completionHold: 8)
         expect(lifecycle.rows.first?.phase == .usingTool, "no-Hook native/local pipeline produces active card")
+        // Desktop evidence that never received a terminal update stops overriding the log once everything is quiet.
+        let lastSign = max(running.receivedAt, local.updatedAt, local.evidence?.fileModifiedAt ?? .distantPast)
+        let quietTool = local.activities.contains { $0.kind != .progress && $0.isRunning }
+        let grace = quietTool ? SessionActivityFreshnessPolicy.runningToolGrace : SessionActivityFreshnessPolicy.quietTurnGrace
+        expect(!running.isSilent(for: local, now: lastSign.addingTimeInterval(grace - 1)), "recently active desktop turn stays authoritative")
+        expect(running.isSilent(for: local, now: lastSign.addingTimeInterval(grace + 1)), "silent desktop turn stops overriding the log")
+        expect(quietTool ? !running.isSilent(for: local, now: lastSign.addingTimeInterval(SessionActivityFreshnessPolicy.quietTurnGrace + 1)) : true,
+               "a running tool keeps the longer grace")
+        expect(waiting.phase == .waitingApproval && !waiting.isSilent(for: local, now: now.addingTimeInterval(86_400)),
+               "an unanswered approval never times out")
         let terminalNative = NativeActivityEvidence.project(try projection(status: "completed"), previous: running, now: now.addingTimeInterval(1))!.applying(to: local)!
         lifecycle.update(projects: [], snapshots: [terminalNative], usages: [:], now: now.addingTimeInterval(1), completionHold: 8)
         expect(lifecycle.rows.first?.phase == .completed && lifecycle.rows.first?.endReason == .completed, "native terminal creates completion receipt with zero Hook input")
@@ -207,7 +217,9 @@ enum NativeActivityTests {
             var refreshes = 0
             let expires = Date().addingTimeInterval(25)
             while Date() < expires {
-                let (locals, names) = await withCheckedContinuation { continuation in service.fetch { continuation.resume(returning: ($0, $1)) } }
+                let (locals, names) = await withCheckedContinuation { continuation in
+                    service.fetch { snapshots, names, _ in continuation.resume(returning: (snapshots, names)) }
+                }
                 observer.observe(locals)
                 let result = observer.merge(locals, names: names)
                 let native = result.snapshots.filter { $0.nativePhase != nil }

@@ -117,6 +117,7 @@ public enum ClaudeCodeTranscriptDecoder {
 
     static func timestamp(_ value: Any?) -> Date? {
         guard let raw = value as? String else { return nil }
+        if let date = FastTimestamp.parse(raw) { return date }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)

@@ -48,7 +48,13 @@ final class ActivityIslandViewModel: ObservableObject {
     var onDismissAlert: (() -> Void)?
     var onAlertAction: ((SystemNotificationAction, IslandAlert) -> Void)?
     @Published var snapshot: ActivityIslandSnapshot?
-    @Published var sessions: [ActivitySessionSnapshot] = []
+    @Published var sessions: [ActivitySessionSnapshot] = [] {
+        didSet {
+            if let latest = sessions.max(by: { $0.updatedAt < $1.updatedAt }) { idlePetSpecies = .init(provider: latest.provider) }
+        }
+    }
+    /// The pet shown without a focused task: whoever worked most recently; Codex until Claude Code is ever seen.
+    private(set) var idlePetSpecies = IslandPetSpecies.codex
     @Published var presentation: ActivityIslandPresentation = .hidden
     @Published var reduceMotionOverride = false
     @Published var playbackVisible = false
@@ -57,6 +63,13 @@ final class ActivityIslandViewModel: ObservableObject {
     @Published var progressEffect: ActivityIslandProgressEffect = .stateSmoke
     @Published var privacyMode = false
     @Published var floatingUsageEnabled = true
+    @Published var clawdEnabled = true
+    @Published var clawdSize: IslandClawdSize = .medium
+    var floatingUsageCompactOffset: CGFloat { 24 }
+    var compactClawdPixel: CGFloat {
+        min(clawdSize.pixel, max(0, (metrics.compactRect.height - 4) / 12))
+    }
+
     @Published var glassAppearance: ActivityIslandGlassAppearance = .dark
     @Published var quotaState: QuotaState = .loading
     @Published private(set) var usageProvider: IslandUsageProvider = .codex
@@ -184,7 +197,9 @@ struct ActivityIslandView: View {
                     onExpand: model.onExpand,
                     replyCueVisible: model.playbackVisible && model.presentation == .compact,
                     claimReplyCue: { model.claimReplyCue(for: $0) },
-                    hasInlineApproval: model.approvalContent?(row)?.hasInlineControls == true)
+                    hasInlineApproval: model.approvalContent?(row)?.hasInlineControls == true,
+                    clawdEnabled: model.clawdEnabled, clawdPixel: model.compactClawdPixel,
+                    quotaPercent: model.compactQuotaPercent, clawdPlaying: model.clawdEnabled && model.playbackVisible)
                     .id("compact-task")
             } else if !compact && model.showsUsagePage {
                 ActivityIslandUsageDashboard(model: model)
@@ -199,13 +214,25 @@ struct ActivityIslandView: View {
                     reduceMotion: motionIsReduced, pinned: model.isPinned,
                     onPin: model.onPin, onSelect: model.onSelect, onSettings: model.onOpenSettings, onRefresh: model.onRefresh,
                     onOpenUsage: model.onOpenUsage, quotaTitle: model.compactQuotaPercent,
-                    claimReplyCue: { model.claimReplyCue(for: $0) }, approvalContent: model.approvalContent, onApprovalMeasured: { model.recordApprovalMeasurement($0) })
+                    claimReplyCue: { model.claimReplyCue(for: $0) }, approvalContent: model.approvalContent, onApprovalMeasured: { model.recordApprovalMeasurement($0) },
+                    hardwareGap: model.metrics.hardwareGap)
                     .environment(\.islandLiquidGlassEnabled, model.material == .liquidGlass)
                     .transition(.opacity)
             }
         }
+        .overlay {
+            if compact {
+                IslandCompactGlow(mood: model.showsCompactQuota ? .idle : .mood(for:
+                    ActivitySessionSnapshot.compactFocus(rows: model.sessions,
+                        selectedID: model.focusedSessionID, receipt: model.compactReceipt)),
+                    reduceMotion: motionIsReduced,
+                    playing: model.playbackVisible && model.presentation == .compact)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
+        }
         .environment(\.islandMascotContext, model.mascotContext)
         .environment(\.islandMascotSerial, model.completionBurstSerial)
+        .environment(\.islandClawdCardsAnimate, model.clawdEnabled)
         .environment(\.colorScheme, .dark)
         .modifier(IslandGlassAppearanceContext(appearance: model.glassAppearance, material: model.material))
         .animation(motionIsReduced ? nil : .easeOut(duration: 0.22), value: model.showsUsagePage)
@@ -281,7 +308,8 @@ struct IslandSessionPresentation {
         return row.projectName.isEmpty ? "Codex 任务" : "项目 · " + row.projectName
     }
     var currentStepDetail: String {
-        guard let step = row.recentSteps.last else { return runningDetail }
+        guard let step = row.recentSteps.last(where: { $0.state == .waiting })
+            ?? row.recentSteps.last(where: { $0.state == .running }) ?? row.recentSteps.last else { return runningDetail }
         let action = row.phase == .waitingApproval ? runningDetail : row.actionText.trimmingCharacters(in: .whitespacesAndNewlines)
         return action.isEmpty || action == step.title || action == row.phase.title || action == row.statusTitle
             ? step.title : step.title + " · " + action
@@ -316,7 +344,8 @@ struct IslandSessionPresentation {
     var accessibilitySummary: String {
         if row.isPrivate { return title + "，会话详情已隐藏" }
         let detail = isResult ? "耗时 " + duration() + "，" + turnTokens : currentStepDetail + "，已运行 " + duration() + "，" + turnTokens
-        return [row.title, title, detail, modelTitle, cumulativeTokens].joined(separator: "，")
+        let steps = row.recentSteps.map { $0.title + " " + $0.state.title }.joined(separator: "，")
+        return [row.title, title, detail, modelTitle, cumulativeTokens, steps].filter { !$0.isEmpty }.joined(separator: "，")
     }
     private var summaryGroup: String {
         if row.endReason == .cancelled { return "取消" }
@@ -423,13 +452,16 @@ struct ActivityIslandCompactContent: View {
     @State private var replyCueActive = false
     var hasInlineApproval = false
     private var presentation: IslandSessionPresentation { .init(row: row, hasInlineApproval: hasInlineApproval) }
+    var clawdEnabled = false
+    var clawdPixel: CGFloat = 2.2
+    var quotaPercent = "—"
+    var clawdPlaying = false
     private var symbol: some View {
-        IslandSessionMascot(row: row, size: 20, animated: animated, reduceMotion: reduceMotion,
-            replyCueActive: replyCueActive)
-            .frame(width: 20, height: 20)
-            .scaleEffect(replyCueActive ? 1.12 : 1)
+        Circle().fill(IslandMascotMood.mood(for: row).middleColor)
+            .frame(width: 8, height: 8)
+            .scaleEffect(replyCueActive ? 1.4 : 1)
             .animation(reduceMotion ? nil : MonitorDesktopTheme.selectionMotion, value: replyCueActive)
-            .frame(width: 30).accessibilityHidden(true)
+            .frame(width: 14).accessibilityHidden(true)
     }
     var taskText: some View {
         Group {
@@ -445,19 +477,22 @@ struct ActivityIslandCompactContent: View {
             }
         }
     }
+    /// Clawd layout: the right wing names the task itself, right-aligned and static.
+    private var clawdTaskTitle: some View {
+        let title = row.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Text(presentation.isResult || row.isPrivate || title.isEmpty ? presentation.compactTitle : title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(FloatingSurfaceTheme.primary())
+            .lineLimit(1).truncationMode(.tail)
+            .frame(height: 15, alignment: .trailing)
+    }
     private var statistics: some View {
         let side = max(0, (width - 40 - hardwareGap - (hardwareGap > 0 ? 16 : 0)) / 2)
-        let others = rows.filter { $0.id != row.id }
+        let activeCount = rows.filter { $0.phase.isActive }.count
         return HStack(spacing: 4) {
-            if others.isEmpty {
-                Text(presentation.duration()).monospacedDigit()
-                Text(presentation.turnTokens).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-            } else {
-                ForEach(Array(others.prefix(6))) { other in
-                    Capsule().fill(IslandSessionPresentation(row: other).color).frame(width: 3, height: 14)
-                }
-                if others.count > 6 { Text("+\(others.count - 6)") }
-            }
+            if activeCount > 1 { Text("×\(activeCount)").monospacedDigit() }
+            Text(presentation.duration()).monospacedDigit()
+            Text(presentation.turnTokens).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
         }.font(FloatingSurfaceTypography.metadata).foregroundStyle(FloatingSurfaceTheme.secondary())
             .frame(maxWidth: min(220, side), alignment: .trailing)
 
@@ -465,7 +500,25 @@ struct ActivityIslandCompactContent: View {
     var body: some View {
         Button { onExpand?() } label: {
             Group {
-                if hardwareGap > 0 {
+                if clawdEnabled {
+                    HStack(spacing: 0) {
+                        HStack(spacing: 6) {
+                            IslandClawdBadge(mood: .mood(for: row), pixel: clawdPixel,
+                                reduceMotion: reduceMotion, playing: clawdPlaying,
+                                species: IslandPetSpecies(provider: row.provider))
+                                .frame(width: clawdPixel * 14, height: clawdPixel * 12)
+                                .accessibilityHidden(true)
+                            Text(quotaPercent).monospacedDigit().fixedSize()
+                                .foregroundStyle(FloatingSurfaceTheme.accent())
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        if hardwareGap > 0 { Color.clear.frame(width: hardwareGap + 16) }
+                        HStack(spacing: 4) {
+                            clawdTaskTitle
+                            let count = rows.filter { $0.phase.isActive }.count
+                            if count > 1 { Text("×\(count)").monospacedDigit().fixedSize() }
+                        }.frame(maxWidth: .infinity, alignment: .trailing).clipped()
+                    }
+                } else if hardwareGap > 0 {
                     let side = max(0, (width - 40 - hardwareGap - 16) / 2)
                     HStack(spacing: 0) {
                         HStack(spacing: 10) { symbol; taskText.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading) }
@@ -576,8 +629,11 @@ struct ActivityIslandTaskCard: View {
     }
     private var metadataLine: some View {
         HStack(spacing: 8) {
-            Text((row.provider == "Codex" ? "" : "Claude · ") + presentation.modelTitle).lineLimit(1).truncationMode(.tail)
+            Text((row.provider == "Codex" ? "" : "Claude · ") + (row.isPrivate ? "模型已隐藏" : row.modelDetailsTitle)).lineLimit(1).truncationMode(.tail)
                 .help(presentation.modelTitle)
+            if !row.fastModeTitle.isEmpty {
+                Text(row.fastModeTitle).fixedSize().help("当前会话已开启 Fast 模式")
+            }
             Spacer(minLength: 4)
             if !presentation.isResult {
                 Group {
@@ -616,6 +672,7 @@ struct ActivityIslandExpandedList: View {
     var claimReplyCue: ((ActivitySessionSnapshot) -> Bool)?
     var approvalContent: ((ActivitySessionSnapshot) -> IslandApprovalContent?)?
     var onApprovalMeasured: ((IslandApprovalMeasurement) -> Void)?
+    var hardwareGap: CGFloat = 0
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -631,13 +688,22 @@ struct ActivityIslandExpandedList: View {
                     .help("查看额度与用量")
                     .accessibilityLabel("查看额度与用量").accessibilityValue(quotaTitle)
                 Spacer(minLength: 0)
-                Button { onPin?() } label: { chromeIcon(pinned ? "pin.fill" : "pin") }
-                    .buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true)).disabled(onPin == nil).accessibilityLabel(pinned ? "取消置顶" : "固定展开")
-                Button { onCollapse?() } label: {
-                    chromeIcon("chevron.up")
-                }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true)).disabled(onCollapse == nil)
-                    .accessibilityLabel("收起任务列表")
-            }.foregroundStyle(FloatingSurfaceTheme.primary()).padding(.horizontal, 28)
+                // Former footer merged into the header; the trailing wing stays clear of the camera housing.
+                HStack(spacing: 4) {
+                    IslandSessionSummaryView(rows: rows).font(FloatingSurfaceTypography.body)
+                        .modifier(IslandGlassChrome()).padding(.trailing, 2)
+                    Button { onRefresh?() } label: { chromeIcon("arrow.clockwise") }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true))
+                        .disabled(onRefresh == nil).accessibilityLabel("刷新任务状态")
+                    Button { onSettings?() } label: { chromeIcon("gearshape") }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true))
+                        .disabled(onSettings == nil).accessibilityLabel("灵动岛设置")
+                    Button { onPin?() } label: { chromeIcon(pinned ? "pin.fill" : "pin") }
+                        .buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true)).disabled(onPin == nil).accessibilityLabel(pinned ? "取消置顶" : "固定展开")
+                    Button { onCollapse?() } label: {
+                        chromeIcon("chevron.up")
+                    }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true)).disabled(onCollapse == nil)
+                        .accessibilityLabel("收起任务列表")
+                }.frame(maxWidth: hardwareGap > 0 ? max(0, (width - hardwareGap) / 2 - 22) : nil, alignment: .trailing)
+            }.foregroundStyle(FloatingSurfaceTheme.primary()).padding(.horizontal, 22)
                 .frame(height: ActivityIslandPanelMetrics.headerHeight)
             if rows.isEmpty {
                 Text("暂无运行任务").font(FloatingSurfaceTypography.body).foregroundStyle(FloatingSurfaceTheme.secondary())
@@ -665,15 +731,7 @@ struct ActivityIslandExpandedList: View {
                 }.frame(width: width - 56, height: listHeight).clipped()
                     .simultaneousGesture(DragGesture().onChanged { _ in onInteraction?() })
             }
-            HStack(spacing: 8) {
-                Spacer(minLength: 0)
-                IslandSessionSummaryView(rows: rows)
-                Button { onRefresh?() } label: { chromeIcon("arrow.clockwise") }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true))
-                    .disabled(onRefresh == nil).accessibilityLabel("刷新任务状态")
-                Button { onSettings?() } label: { chromeIcon("gearshape") }.buttonStyle(FloatingSurfaceButtonStyle(circularFocus: true))
-                    .disabled(onSettings == nil).accessibilityLabel("灵动岛设置")
-            }.font(FloatingSurfaceTypography.body).modifier(IslandGlassChrome())
-                .padding(.horizontal, 28).padding(.bottom, 12).frame(height: ActivityIslandPanelMetrics.footerHeight)
+            Color.clear.frame(height: ActivityIslandPanelMetrics.footerHeight)
         }.frame(width: width).accessibilityElement(children: .contain)
     }
     private func chromeIcon(_ name: String) -> some View {

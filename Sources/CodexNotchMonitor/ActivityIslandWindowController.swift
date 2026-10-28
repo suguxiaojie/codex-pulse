@@ -9,6 +9,7 @@ final class ActivityIslandWindowController: NSObject {
     private let model = ActivityIslandViewModel()
     private var presenter: ActivityIslandPanelPresenter!
     private var cancellables: Set<AnyCancellable> = []
+    private var alertTick: AnyCancellable?
     private var observers: [NSObjectProtocol] = []
     private var lifecycle = ActivityIslandLifecycle()
     private var preferences = ActivityIslandPreferences.load()
@@ -16,6 +17,7 @@ final class ActivityIslandWindowController: NSObject {
     private let focusHandoffTimer = ActivityIslandCollapseTimer()
     private var alertQueue = IslandAlertQueue()
     private var lastCompletionSoundAt: Date?
+    private var lastAttentionSoundAt: Date?
     private var hasObservedSessions = false
     private let startupAt = Date()
     private var terminalIdentity: String?
@@ -34,6 +36,8 @@ final class ActivityIslandWindowController: NSObject {
                 self.updateAlerts()
                 return
             }
+            // Click mode: hovering never opens the island, but still holds one that is already open.
+            if inside && self.preferences.expandTrigger == .click && self.model.presentation != .expanded { return }
             self.handle(inside ? .pointerEntered : .pointerExited)
             self.rescheduleTransitions()
         }
@@ -72,7 +76,7 @@ final class ActivityIslandWindowController: NSObject {
         model.approvalContent = { [weak self] row in
             guard let self else { return nil }
             var content = self.store.islandApproval(for: row)
-            if content.provider == "Codex", !content.questions.isEmpty {
+            if !content.questions.isEmpty {
                 let draft = self.model.answerDrafts[content.id] ?? IslandAnswerDraft()
                 draft.onInteraction = { [weak self] in self?.rescheduleTransitions() }
                 self.model.answerDrafts[content.id] = draft
@@ -80,7 +84,7 @@ final class ActivityIslandWindowController: NSObject {
             }
             return content
         }
-        store.$approvalRevision.receive(on: RunLoop.main).sink { [weak self] _ in
+        store.approvalUpdates.receive(on: RunLoop.main).sink { [weak self] _ in
             guard let self else { return }
             self.model.discardAnswerDrafts(except: self.store.islandAnswerRequestIDs)
             if !self.model.answerDrafts.values.contains(where: { $0.focusedQuestion != nil }) {
@@ -90,7 +94,10 @@ final class ActivityIslandWindowController: NSObject {
             self.rescheduleTransitions()
         }.store(in: &cancellables)
         store.claude.$requests.receive(on: RunLoop.main).sink { [weak self] _ in
-            self?.model.objectWillChange.send()
+            guard let self else { return }
+            self.model.discardAnswerDrafts(except: self.store.islandAnswerRequestIDs)
+            self.model.objectWillChange.send()
+            self.rescheduleTransitions()
         }.store(in: &cancellables)
         model.onSelect = { [weak self] id in
             guard let self, let row = self.model.sessions.first(where: { $0.id == id }) else { return }
@@ -189,13 +196,9 @@ final class ActivityIslandWindowController: NSObject {
         store.islandAlerts.sink { [weak self] alert in
             guard let self else { return }
             self.alertQueue.receive(alert,
-                enabled: alert.isEnabled(signals: self.store.notifyTiboSignals, recovery: self.store.notifyQuotaRecovery),
+                enabled: alert.isEnabled(signals: self.store.notifyTiboSignals, recovery: self.store.notifyQuotaRecovery, credits: self.store.notifyCreditExpiry),
                 available: self.alertsAvailable)
             self.refresh(animated: true)
-        }.store(in: &cancellables)
-        Timer.publish(every: 0.05, on: .main, in: .common).autoconnect().sink { [weak self] _ in
-            guard let self, self.model.alert != nil || !self.alertQueue.pending.isEmpty else { return }
-            self.updateAlerts()
         }.store(in: &cancellables)
         applyAppearance()
     }
@@ -207,8 +210,11 @@ final class ActivityIslandWindowController: NSObject {
         model.material = preferences.material
         model.glassDegree = preferences.glassDegree
         model.progressEffect = preferences.progressEffect
+        ActivityStateSmokeQuality.current = preferences.effectQuality
         model.privacyMode = preferences.privacyMode
         model.floatingUsageEnabled = preferences.floatingUsageEnabled
+        model.clawdEnabled = preferences.clawdEnabled
+        model.clawdSize = preferences.clawdSize
         model.glassAppearance = preferences.glassAppearance
     }
     private func reloadPreferences() {
@@ -256,6 +262,15 @@ final class ActivityIslandWindowController: NSObject {
         }
         let previousAttention = lifecycle.requiresAttention
         let newAttention = ActivitySessionSnapshot.newAttention(in: live, previous: previous)
+        if newAttention != nil, let tone = preferences.attentionSound {
+            let now = Date()
+            if ActivityIslandCompletionSound.shouldPlay(now: now, lastPlayedAt: lastAttentionSoundAt,
+                baseline: baseline, enabled: true,
+                islandVisible: lifecycle.presentation != .hidden && presenter.alertsAvailable) {
+                lastAttentionSoundAt = now
+                ActivityIslandCompletionAudio.play(tone)
+            }
+        }
         // A new request supersedes the old manual choice instead of bouncing back on refresh.
         if (newAttention != nil && !model.isAnswerInteracting) || !sessions.contains(where: { $0.id == manualFocusID }) {
             manualFocusID = nil
@@ -360,7 +375,7 @@ final class ActivityIslandWindowController: NSObject {
             blocked: celebrating || lifecycle.requiresAttention || model.sessions.contains { $0.phase == .waitingApproval }
                 || model.approvalRow != nil || model.isAnswerInteracting || model.resetConfirmationPresented || model.resetBusy,
             hovered: presenter.alertPointerInside, available: alertsAvailable,
-            signals: store.notifyTiboSignals, recovery: store.notifyQuotaRecovery)
+            signals: store.notifyTiboSignals, recovery: store.notifyQuotaRecovery, credits: store.notifyCreditExpiry)
         if celebrating, model.alert != nil, alertQueue.current == nil, !lifecycle.requiresAttention,
            !model.sessions.contains(where: { $0.phase == .waitingApproval }),
            let completed = model.compactReceipt, model.showsCompletedStatistic {
@@ -370,6 +385,18 @@ final class ActivityIslandWindowController: NSObject {
         }
         model.alert = alertQueue.current?.alert
         model.alertRemaining = alertQueue.current?.remaining ?? 0
+        synchronizeAlertTick()
+    }
+    private func synchronizeAlertTick() {
+        guard model.alert != nil || !alertQueue.pending.isEmpty else {
+            alertTick?.cancel()
+            alertTick = nil
+            return
+        }
+        guard alertTick == nil else { return }
+        alertTick = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect().sink { [weak self] _ in
+            self?.updateAlerts()
+        }
     }
     private func updateAlerts() {
         let previous = model.alert
@@ -389,7 +416,7 @@ final class ActivityIslandWindowController: NSObject {
         let frame = presenter.panel.frame
         let globalRect = CGRect(x: frame.minX + rect.minX, y: frame.maxY - rect.maxY,
             width: rect.width, height: rect.height)
-        model.mascotContext.update(visible: model.playbackVisible && model.presentation != .hidden,
+        model.mascotContext.update(visible: false,
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || model.reduceMotionOverride,
             islandRect: globalRect)
     }
@@ -468,6 +495,8 @@ final class ActivityIslandWindowController: NSObject {
     }
 
     private func targetScreen() -> NSScreen? {
-        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main ?? NSScreen.screens.first
+        // A chosen display that is disconnected falls back to the automatic rule.
+        if let chosen = IslandDisplayInfo.screen(for: preferences.displayTarget) { return chosen }
+        return NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main ?? NSScreen.screens.first
     }
 }

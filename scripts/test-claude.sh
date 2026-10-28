@@ -9,7 +9,9 @@ swiftc -swift-version 5 -parse-as-library Sources/ClaudePulseHelper/ClaudeHookPr
 swiftc -swift-version 5 Sources/ClaudePulseHelper/*.swift -o .tmp/claude-tests/helper
 swiftc -swift-version 5 -parse-as-library \
   Sources/CodexNotchMonitor/ClaudeCodePricing.swift \
+  Sources/CodexNotchMonitor/FastTimestamp.swift \
   Sources/CodexNotchMonitor/ClaudeCodeTranscript.swift \
+  Sources/CodexNotchMonitor/ClaudeLiveSessionRegistry.swift \
   Sources/CodexNotchMonitor/ClaudeCodeUsage.swift \
   Sources/CodexNotchMonitor/ClaudeCodeBridge.swift \
   Sources/CodexNotchMonitor/ClaudeCodeInstaller.swift \

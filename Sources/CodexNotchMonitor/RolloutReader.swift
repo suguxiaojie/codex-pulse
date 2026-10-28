@@ -31,11 +31,13 @@ enum RolloutReader {
         var processed: Int64 = 0, decoded = 0
         progress?(0, size)
         guard isCompressed(url) else {
-            while let bytes = try handle.read(upToCount: 128 * 1_024), !bytes.isEmpty {
+            while try autoreleasepool(invoking: { () throws -> Bool in
+                guard let bytes = try handle.read(upToCount: 128 * 1_024), !bytes.isEmpty else { return false }
                 guard decoded <= maximumDecodedBytes - bytes.count else { throw ReadError(reason: "解压后数据超过读取上限") }
                 decoded += bytes.count; processed += Int64(bytes.count)
                 try chunk(bytes); progress?(processed, size)
-            }
+                return true
+            }) {}
             progress?(processed, size)
             return
         }
@@ -46,7 +48,8 @@ enum RolloutReader {
         guard ZSTD_isError(configured) == 0 else { throw ReadError(reason: "无法设置解码窗口") }
         var output = [UInt8](repeating: 0, count: 128 * 1_024)
         var remaining = 1, sawInput = false
-        while let bytes = try handle.read(upToCount: 128 * 1_024), !bytes.isEmpty {
+        while try autoreleasepool(invoking: { () throws -> Bool in
+            guard let bytes = try handle.read(upToCount: 128 * 1_024), !bytes.isEmpty else { return false }
             sawInput = true
             try bytes.withUnsafeBytes { inputBytes in
                 var input = ZSTD_inBuffer(src: inputBytes.baseAddress, size: bytes.count, pos: 0)
@@ -64,8 +67,12 @@ enum RolloutReader {
                     guard decoded <= maximumDecodedBytes - produced else { throw ReadError(reason: "解压后数据超过读取上限") }
                     decoded += produced
                     if produced > 0 {
-                        let data = output.withUnsafeBytes { Data(bytes: $0.baseAddress!, count: produced) }
-                        try chunk(data)
+                        // A small compressed block can produce many output blocks.
+                        // Drain callback temporaries at the decoded-block boundary too.
+                        try autoreleasepool {
+                            let data = output.withUnsafeBytes { Data(bytes: $0.baseAddress!, count: produced) }
+                            try chunk(data)
+                        }
                     }
                     if input.pos == oldPosition && produced == 0 {
                         if input.pos == input.size { break }
@@ -74,7 +81,8 @@ enum RolloutReader {
                 } while input.pos < input.size || (remaining > 0 && produced == output.count)
             }
             processed += Int64(bytes.count); progress?(processed, size)
-        }
+            return true
+        }) {}
         guard sawInput, remaining == 0 else { throw ReadError(reason: "压缩记录为空或未完整写入") }
         progress?(processed, size)
     }

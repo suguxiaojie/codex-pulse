@@ -1,7 +1,7 @@
 import Foundation
 
 struct IslandAlert: Equatable, Identifiable {
-    enum Kind: Equatable { case tiboSignal, quotaRecovery }
+    enum Kind: Equatable { case tiboSignal, quotaRecovery, creditExpiry }
     struct Action: Equatable {
         let title: String
         let route: SystemNotificationAction
@@ -15,8 +15,9 @@ struct IslandAlert: Equatable, Identifiable {
     let actions: [Action]
     let sourceURL: String?
 
-    func isEnabled(signals: Bool, recovery: Bool) -> Bool {
-        kind == .tiboSignal ? signals : recovery
+    func isEnabled(signals: Bool, recovery: Bool, credits: Bool = true) -> Bool {
+        if kind == .creditExpiry { return credits }
+        return kind == .tiboSignal ? signals : recovery
     }
 }
 
@@ -44,7 +45,7 @@ struct IslandAlertQueue {
         trim()
     }
     mutating func advance(now: Date, blocked: Bool, hovered: Bool, available: Bool,
-                          signals: Bool = true, recovery: Bool = true) {
+                          signals: Bool = true, recovery: Bool = true, credits: Bool = true) {
         if let previous = lastTick, !paused, current != nil {
             current?.remaining -= max(0, now.timeIntervalSince(previous))
         }
@@ -53,8 +54,8 @@ struct IslandAlertQueue {
             pending.forEach { seen.insert($0.alert.id) }; pending.removeAll()
             dismiss(); paused = true; return
         }
-        pending.removeAll { !$0.alert.isEnabled(signals: signals, recovery: recovery) }
-        if let entry = current, entry.remaining <= 0 || !entry.alert.isEnabled(signals: signals, recovery: recovery) { dismiss() }
+        pending.removeAll { !$0.alert.isEnabled(signals: signals, recovery: recovery, credits: credits) }
+        if let entry = current, entry.remaining <= 0 || !entry.alert.isEnabled(signals: signals, recovery: recovery, credits: credits) { dismiss() }
         if blocked, let entry = current {
             pending.insert(entry, at: 0); current = nil
             // Preserve the interrupted card; evict the oldest waiting card instead.
@@ -78,6 +79,7 @@ enum SystemNotificationAction: Equatable {
     case none
 
     static func resolve(category: String, action: String, isDefault: Bool) -> Self {
+        if category == "CREDIT_EXPIRY" { return .none }
         let isRecovery = category == "QUOTA_RECOVERY" || category == "QUOTA_RECOVERY_UNVERIFIED"
         if category == "TIBO_SIGNAL" || isRecovery {
             if isDefault || action == "open-center" { return .openCenter }

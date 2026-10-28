@@ -57,53 +57,85 @@ import SwiftUI
         expect(context.enabled && context.monitorCount > 0, "visible island installs local mouse tracking")
         context.update(visible: false, reduceMotion: false, islandRect: rect)
         expect(!context.enabled && context.monitorCount == 0 && context.gaze == .zero, "hide removes all monitors and clears gaze")
-        let blink = IslandMascotBlink()
-        blink.update(active: false)
-        expect(!blink.isRunning && !blink.closed, "static presentation starts no blink task")
-        blink.update(active: true)
-        expect(blink.isRunning, "visible animated expression starts blink task")
-        blink.update(active: false)
-        expect(!blink.isRunning && !blink.closed, "hide or reduced motion cancels blink task")
         func orbs(_ view: NSView) -> [RippleGlowHostView] {
             (view as? RippleGlowHostView).map { [$0] } ?? view.subviews.flatMap(orbs)
         }
-        for mood: IslandMascotMood in [.think, .tool, .approve, .reply, .done, .fail, .idle] {
+        let moods: [IslandMascotMood] = [.think, .tool, .approve, .reply, .done, .fail, .idle]
+        for mood in moods {
             let host = NSHostingView(rootView: IslandMascotView(mood: mood, size: 26, animated: false, reduceMotion: true))
             host.frame = CGRect(x: 0, y: 0, width: 26, height: 26); host.layoutSubtreeIfNeeded()
-            expect(orbs(host).isEmpty, "all moods use mascot gradient bodies without a RippleGlow host")
+            expect(orbs(host).isEmpty, "card Clawd draws pixels without a RippleGlow host")
         }
-        func motion(_ mood: IslandMascotMood, _ time: Double, animated: Bool = true, reduced: Bool = false) -> IslandMascotMotionFrame {
-            .frame(mood: mood, time: time, animated: animated, reduceMotion: reduced)
+
+        // Sprite: feet stay anchored at y = 0 for every pose and squash.
+        for mood in moods {
+            for arms: IslandClawdPose.Arms in [.side, .up, .down, .hang, .oneLeft, .oneRight, .oneWave] {
+                for squash: CGFloat in [0.6, 0.97, 1] {
+                    var pose = IslandClawdPose(mood: mood, arms: arms); pose.squashY = squash
+                    let pixels = IslandClawdSprite.pixels(pose)
+                    expect(pixels.allSatisfy { $0.rect.maxY <= 0.0001 }, "sprite never extends below the feet")
+                    expect(pose.legsTucked || abs((pixels.map(\.rect.maxY).max() ?? 1)) < 0.0001, "legs reach the feet line")
+                    expect(pixels.allSatisfy { $0.rect.minX >= -5.6 && $0.rect.maxX <= 5.6 }, "sprite stays 11 pixels wide")
+                }
+            }
         }
-        expect(abs(motion(.think, 0.6).orbitDegrees - 90) < 0.0001, "think dot advances a quarter orbit in 0.6 seconds")
-        expect(abs(motion(.think, 1.2).orbitDegrees - 180) < 0.0001, "think dot has constant angular speed")
-        expect(abs(motion(.think, 2.4).orbitDegrees) < 0.0001, "think orbit repeats at 2.4 seconds")
-        expect(abs(motion(.tool, 0.275).toolDegrees - 90) < 0.0001, "tool arc advances a quarter turn in 0.275 seconds")
-        expect(abs(motion(.tool, 1.1).toolDegrees) < 0.0001, "tool arc repeats at 1.1 seconds")
-        for mood: IslandMascotMood in [.think, .tool] {
-            expect(abs(motion(mood, 0.8).breathingScale - 1.035) < 0.0001, "running breath peaks at 3.5 percent")
-            expect(abs(motion(mood, 2.4).breathingScale - 0.965) < 0.0001, "running breath contracts at 3.5 percent")
-            expect(abs(motion(mood, 3.2).breathingScale - 1) < 0.0001, "running breath repeats at 3.2 seconds")
-            expect(motion(mood, 0.6, animated: false) == motion(mood, 9, animated: false), "hidden motion frame is time-independent")
-            expect(motion(mood, 0.6, reduced: true) == motion(mood, 9, reduced: true), "Reduce Motion frame is time-independent")
+        expect(IslandClawdPose(mood: .idle).legsTucked && IslandClawdPose(mood: .idle).eyes == .closed, "idle sleeps with tucked legs")
+        expect(IslandClawdPose(mood: .fail).eyes == .cross && IslandClawdPose(mood: .done).eyes == .happy, "terminal eyes")
+        expect(!IslandClawdSprite.pixels(IslandClawdPose(mood: .approve)).contains { $0.ink == .glint }, "pixel-art eyes carry no glint")
+
+        for height: CGFloat in [32, 37, 40] {
+            model.metrics = ActivityIslandPanelMetrics(rowCount: 1, availableSize: CGSize(width: 1200, height: 800), safeAreaTop: height)
+            for size in IslandClawdSize.allCases {
+                model.clawdSize = size
+                expect(model.compactClawdPixel <= size.pixel, "compact pixel never exceeds preference")
+                expect(model.compactClawdPixel * 12 <= height - 4, "entire badge grid fits with two-point margins")
+                expect(model.floatingUsageCompactOffset == 24, "badge requires no hanging clearance")
+            }
         }
-        expect(abs(motion(.think, 0.9).lookX - 2.7) < 0.0001 && abs(motion(.think, 2.7).lookX - 0.1) < 0.0001,
-            "thinking eyes scan around the upper-right offset every 3.6 seconds")
-        let look = CGSize(width: 2, height: -1)
-        expect(IslandMascotMotionFrame.gaze(look, mood: .tool, animated: true, reduceMotion: false) == look, "tool squint follows gaze")
-        expect(IslandMascotMotionFrame.gaze(look, mood: .tool, animated: true, reduceMotion: true) == .zero, "reduced-motion tool ignores gaze")
-        expect(IslandMascotMotionFrame.gaze(look, mood: .tool, animated: false, reduceMotion: false) == .zero, "hidden tool ignores gaze")
-        expect(abs(IslandMascotMotionFrame.eyeScale(mood: .tool, closed: false, animated: true, reduceMotion: false) - 0.45) < 0.0001,
-            "tool eyes rest at 45 percent height")
-        expect(abs(IslandMascotMotionFrame.eyeScale(mood: .tool, closed: true, animated: true, reduceMotion: false) - 0.054) < 0.0001,
-            "tool blink amplitude is scaled by the squint")
-        expect(IslandMascotMotionFrame.eyeScale(mood: .tool, closed: true, animated: true, reduceMotion: true) == 0.45,
-            "Reduce Motion preserves a static squint")
+        for state: IslandClawdBadgeState in [.idle, .start, .think, .tool, .approve, .reply, .done, .fail] {
+            let images = IslandClawdBadgeRenderer.images(state, pixel: 2.2, scale: 2, gaze: 0)
+            expect(!images.isEmpty, "every clip renders")
+            expect(images.count == IslandClawdBadgeClips.clip(state).frames.count, "every frame is retained")
+            expect(IslandClawdBadgeRenderer.stillImage(state, pixel: 2.2, scale: 2) != nil, "static expression renders")
+        }
+        // Codex pet: same states, same frame contract, its own art; the provider decides which pet appears.
+        for state: IslandClawdBadgeState in [.idle, .start, .think, .tool, .approve, .reply, .done, .fail] {
+            let codex = IslandClawdBadgeRenderer.images(state, pixel: 2.2, scale: 2, gaze: 0, species: .codex)
+            expect(codex.count == IslandCodexClips.clip(state).frames.count, "every Codex frame renders")
+            expect(IslandClawdBadgeRenderer.stillImage(state, pixel: 2.2, scale: 2, species: .codex) != nil, "Codex expression renders")
+            expect(IslandCodexClips.clip(state).duration > 0, "Codex clip has a duration")
+            let clawdFirst = IslandClawdBadgeRenderer.images(state, pixel: 2.2, scale: 2, gaze: 0).first
+            expect(clawdFirst?.dataProvider?.data as Data? != codex.first?.dataProvider?.data as Data?, "Codex art differs from Clawd")
+        }
+        expect(IslandClawdBadgeRenderer.timing(.start, species: .codex).duration == IslandClawdBadgeRenderer.timing(.start, species: .clawd).duration,
+               "both pets hand off from start to work at the same moment")
+        expect(IslandPetSpecies(provider: "Codex") == .codex && IslandPetSpecies(provider: "Claude Code") == .clawd,
+               "provider picks the pet")
+        let petModel = ActivityIslandViewModel()
+        expect(petModel.idlePetSpecies == .codex, "idle defaults to the Codex pet before Claude Code is seen")
+        var claudeRow = ActivitySessionSnapshot(sessionID: "pet-claude", turnID: "t", projectID: "p", projectName: "P",
+            title: "Claude", phase: .working, actionText: "", updatedAt: Date(), tokenUsage: nil)
+        claudeRow.provider = "Claude Code"
+        let codexRow = ActivitySessionSnapshot(sessionID: "pet-codex", turnID: "t", projectID: "p", projectName: "P",
+            title: "Codex", phase: .working, actionText: "", updatedAt: Date().addingTimeInterval(-60), tokenUsage: nil)
+        petModel.sessions = [codexRow, claudeRow]
+        expect(petModel.idlePetSpecies == .clawd, "idle follows the most recently active client")
+        petModel.sessions = []
+        expect(petModel.idlePetSpecies == .clawd, "idle keeps the last active pet once sessions clear")
+        let codexBadge = IslandClawdBadgeView(frame: .zero)
+        codexBadge.apply(mood: .tool, pixel: 2.2, gaze: 0, reduceMotion: true, playing: true, species: .codex)
+        expect(codexBadge.shown == .tool && codexBadge.species == .codex, "badge shows the Codex pet")
+        let badge = IslandClawdBadgeView(frame: .zero)
+        badge.apply(mood: .think, pixel: 2.2, gaze: 0, reduceMotion: true, playing: true)
+        expect(badge.shown == .think, "reduced motion skips start reaction")
+        badge.apply(mood: .reply, pixel: 2.2, gaze: 0, reduceMotion: false, playing: false)
+        expect(badge.shown == .reply, "hidden badge keeps current expression")
+
         let mascotSource = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/CodexNotchMonitor/ActivityIslandMascot.swift")
         let source = try! String(contentsOf: mascotSource, encoding: .utf8)
         expect(!source.contains("RippleGlowOrb("), "mascot implementation does not reference the old orb")
-        expect(source.contains("paused: !moving"), "hidden and reduced-motion timelines are paused")
+        expect(!source.contains("TimelineView("), "card expressions have no frame clock")
         print("Island mascot: \(checks)/\(checks) passed")
     }
 }

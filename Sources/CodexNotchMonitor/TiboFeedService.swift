@@ -200,19 +200,19 @@ struct TiboFeed: Codable, Equatable {
 
         var seen = Set<String>()
         return result
+            .map { (item: $0, effective: $0.event.effectiveDate, announced: $0.event.announcedDate) }
             .sorted { lhs, rhs in
-                let leftFuture = lhs.event.kind == .resetScheduled
-                    && (lhs.event.effectiveDate ?? .distantPast) > now
-                let rightFuture = rhs.event.kind == .resetScheduled
-                    && (rhs.event.effectiveDate ?? .distantPast) > now
+                let leftFuture = lhs.item.event.kind == .resetScheduled
+                    && (lhs.effective ?? .distantPast) > now
+                let rightFuture = rhs.item.event.kind == .resetScheduled
+                    && (rhs.effective ?? .distantPast) > now
                 if leftFuture != rightFuture { return leftFuture }
                 if leftFuture, rightFuture {
-                    return (lhs.event.effectiveDate ?? .distantFuture)
-                        < (rhs.event.effectiveDate ?? .distantFuture)
+                    return (lhs.effective ?? .distantFuture) < (rhs.effective ?? .distantFuture)
                 }
-                return (lhs.event.announcedDate ?? .distantPast)
-                    > (rhs.event.announcedDate ?? .distantPast)
+                return (lhs.announced ?? .distantPast) > (rhs.announced ?? .distantPast)
             }
+            .map(\.item)
             .filter { seen.insert($0.id).inserted }
     }
 
@@ -222,6 +222,9 @@ struct TiboFeed: Codable, Equatable {
 }
 
 enum TiboFeedDate {
+    private static let lock = NSLock()
+    // Cache invalid dates too; bound memory independently of feed refresh count.
+    private static var cache: [String: Date?] = [:]
     private static let fractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -235,7 +238,13 @@ enum TiboFeedDate {
     }()
 
     static func parse(_ value: String) -> Date? {
-        fractional.date(from: value) ?? ordinary.date(from: value)
+        lock.withLock {
+            if let cached = cache[value] { return cached }
+            let date = fractional.date(from: value) ?? ordinary.date(from: value)
+            if cache.count >= 2048 { cache.removeAll(keepingCapacity: true) }
+            cache[value] = .some(date)
+            return date
+        }
     }
 }
 
@@ -388,6 +397,11 @@ final class TiboFeedService {
     }
 
     private static func isValid(_ event: TiboEvent) -> Bool {
+        // interpret runs on the URLSession callback queue before main-thread
+        // publication. Warm the dates used by display and recovery attribution.
+        _ = event.effectiveDate
+        _ = event.publishedDate
+        _ = event.timelineAt.flatMap(TiboFeedDate.parse)
         guard event.source.handle == "thsottiaux",
               !event.source.postId.isEmpty,
               event.source.postId.allSatisfy(\.isNumber),

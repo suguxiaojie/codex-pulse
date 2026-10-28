@@ -41,6 +41,26 @@ struct RolloutReaderTests {
         var kept = 0
         try RolloutReader.forEachLine(at: long) { _ in kept += 1 }
         expect(kept == 3, "oversized record skipped without losing trailing line")
+        var retainedChunks: [Data] = []
+        try RolloutReader.stream(at: long) { retainedChunks.append($0) }
+        expect(retainedChunks.count > 1, "large compressed input delivers multiple decoded chunks")
+        let retained = retainedChunks.reduce(into: Data()) { $0.append($1) }
+        expect(retained.count == sample.total, "callback can retain decoded chunks across autorelease boundaries")
+        expect(Data(retained.prefix(sample.head.count)) == sample.head, "head bytes unchanged after scoped release")
+        expect(Data(retained.suffix(sample.tail.count)) == sample.tail, "tail bytes unchanged after scoped release")
+        let largePlain = root.appendingPathComponent("large-plain.jsonl")
+        try retained.write(to: largePlain)
+        var plainChunks: [Data] = []
+        try RolloutReader.stream(at: largePlain) { plainChunks.append($0) }
+        expect(plainChunks.reduce(into: Data()) { $0.append($1) } == retained, "plain chunks remain valid after scoped release")
+        for source in [long, largePlain] {
+            do {
+                try RolloutReader.stream(at: source) { _ in throw NSError(domain: "ReaderCallback", code: 7) }
+                fatalError("callback error swallowed")
+            } catch let error as NSError {
+                expect(error.domain == "ReaderCallback" && error.code == 7, "callback errors propagate through autorelease scope")
+            }
+        }
         do { try RolloutReader.forEachLine(at: long, skipOversized: false) { _ in }; fatalError("strict export silently skipped a large record") } catch { checks += 1 }
         let copy = root.appendingPathComponent("export.jsonl")
         try RolloutReader.copyDecoded(from: fixture, to: copy)

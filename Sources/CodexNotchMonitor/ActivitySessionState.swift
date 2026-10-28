@@ -1,10 +1,36 @@
 import Foundation
 
 struct IslandStep: Identifiable, Equatable {
-    enum State { case done, running, waiting }
+    enum State {
+        case done, running, waiting, failed, ended
+        var isActive: Bool { self == .running || self == .waiting }
+        var afterTaskEnds: Self { isActive ? .ended : self }
+        var title: String {
+            switch self {
+            case .done: return "已完成"
+            case .running: return "执行中"
+            case .waiting: return "等待中"
+            case .failed: return "失败"
+            case .ended: return "已结束"
+            }
+        }
+    }
     let id: String
     var title: String
     var state: State
+
+    /// Both providers use the same bounded selection and terminal semantics.
+    static func visibleSteps(from ordered: [Self]) -> [Self] {
+        var seen = Set<String>()
+        let unique = Array(ordered.reversed().filter { seen.insert($0.id).inserted }.reversed())
+        let pending = unique.filter { $0.state.isActive }.suffix(3)
+        let finished = unique.filter { !$0.state.isActive }.suffix(3 - pending.count)
+        let ids = Set((Array(pending) + Array(finished)).map(\.id))
+        return unique.filter { ids.contains($0.id) }
+    }
+    func endingTask() -> Self {
+        var copy = self; copy.state = state.afterTaskEnds; return copy
+    }
 }
 
 /// One row always belongs to one session and one observed turn, never to a
@@ -33,6 +59,11 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
 
     var recentSteps: [IslandStep] = []
     var isRetainedReceipt = false
+    var fastMode: Bool? = nil
+
+    var fastModeTitle: String {
+        fastMode == true && !isPrivate ? "Fast" : ""
+    }
 
     var tokenTitle: String {
         guard !isPrivate, let sessionTotalTokens else { return "— tokens" }
@@ -75,6 +106,9 @@ struct ActivitySessionSnapshot: Identifiable, Equatable {
     }
 
     var modelTitle: String {
+        isPrivate ? "模型已隐藏" : [modelDetailsTitle, fastModeTitle].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+    var modelDetailsTitle: String {
         [modelName?.replacingOccurrences(of: "gpt-", with: "").replacingOccurrences(of: "-", with: " ").capitalized,
          reasoningEffort?.capitalized].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
@@ -145,6 +179,12 @@ struct ActivitySessionState {
     private var retentionDeadlines: [String: Date] = [:]
     private var residentOrder: [String] = []
 
+    private static func activitySteps(_ activities: [SessionActivityItem]) -> [IslandStep] {
+        activities.filter { $0.kind != .progress }
+            .sorted { $0.updatedAt == $1.updatedAt ? $0.id < $1.id : $0.updatedAt < $1.updatedAt }
+            .map { .init(id: $0.id, title: $0.title, state: $0.failed ? .failed : $0.isRunning ? .running : .done) }
+    }
+
     mutating func update(projects: [ActiveProjectState], snapshots: [LocalSessionSnapshot],
                          usages: [String: TurnTokenUsage],
                          now: Date, completionHold: TimeInterval, retention: TimeInterval = 60, threadNames: [String: String] = [:]) {
@@ -163,11 +203,7 @@ struct ActivitySessionState {
                     : task.phase == .usingTool ? local?.latestAssistantSummary ?? activity?.title ?? task.phase.title
                     : local?.latestAssistantSummary ?? task.phase.title
                 // The existing parser resets activities on turn start; no new source is read.
-                let currentActivities = session.activities.filter { $0.kind != .progress }
-                    .sorted { $0.updatedAt == $1.updatedAt ? $0.id < $1.id : $0.updatedAt < $1.updatedAt }
-                var steps = currentActivities.suffix(3).map {
-                    IslandStep(id: $0.id, title: $0.title, state: $0.isRunning ? .running : .done)
-                }
+                var steps = IslandStep.visibleSteps(from: Self.activitySteps(session.activities))
                 if steps.isEmpty {
                     steps = (sameTurn?.recentSteps ?? []).map { step in
                         var step = step
@@ -175,7 +211,9 @@ struct ActivitySessionState {
                         return step
                     }
                 }
-                if task.phase == .waitingApproval, !steps.isEmpty { steps[steps.count - 1].state = .waiting }
+                if task.phase == .waitingApproval, let current = steps.lastIndex(where: { $0.state.isActive }) {
+                    steps[current].state = .waiting
+                }
                 incoming.append(ActivitySessionSnapshot(
                     sessionID: session.id, turnID: task.turnID, projectID: project.id,
                     projectName: project.name, title: title.isEmpty ? previous?.title ?? project.name : title,
@@ -189,7 +227,7 @@ struct ActivitySessionState {
                     waitReason: task.phase == .waitingApproval ? local?.nativeWaitReason ?? sameTurn?.waitReason : nil,
                     replyRequestIDs: task.phase == .waitingApproval ? local?.nativeReplyRequestIDs ?? sameTurn?.replyRequestIDs ?? [] : [],
                     suppressCompletion: local?.nativeSuppressCompletion == true || sameTurn?.suppressCompletion == true,
-                    recentSteps: steps
+                    recentSteps: steps, fastMode: local?.fastMode
                 ))
             }
         }
@@ -214,8 +252,12 @@ struct ActivitySessionState {
                 row.updatedAt = min(now, local?.evidence?.endedAt ?? local?.updatedAt ?? now)
                 deadline = now.addingTimeInterval(completionHold)
                 retentionDeadline = row.updatedAt.addingTimeInterval(retention)
-                row.recentSteps = row.recentSteps.map { IslandStep(id: $0.id, title: $0.title, state: .done) }
             }
+            if let local, local.turnID == row.turnID {
+                let known = Self.activitySteps(local.activities)
+                if !known.isEmpty { row.recentSteps = known }
+            }
+            row.recentSteps = IslandStep.visibleSteps(from: row.recentSteps.map { $0.endingTask() })
             guard let deadline, let retentionDeadline, now < retentionDeadline else { continue }
             row.isRetainedReceipt = now >= deadline
             if let usage = ActivitySessionSnapshot.matchingUsage(usages, sessionID: row.sessionID, turnID: row.turnID) {
@@ -227,6 +269,7 @@ struct ActivitySessionState {
             if local?.turnID == row.turnID {
                 row.modelName = local?.model ?? row.modelName
                 row.reasoningEffort = local?.reasoningEffort ?? row.reasoningEffort
+                if let local { row.fastMode = local.fastMode }
                 row.startedAt = local?.startedAt ?? row.startedAt
                 row.sessionTotalTokens = [local?.sessionTotalTokens, row.sessionTotalTokens].compactMap { $0 }.max()
             }

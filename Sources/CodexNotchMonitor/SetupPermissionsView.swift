@@ -70,6 +70,10 @@ struct SetupPermissionsView: View {
                     SettingsRow(symbol: "arrow.counterclockwise", title: "额度恢复提醒", detail: "额度恢复立即提醒，原因确认后静音更新。") {
                         Toggle("额度恢复提醒", isOn: $store.notifyQuotaRecovery).labelsHidden().toggleStyle(.switch)
                     }
+                    SettingsRowDivider()
+                    SettingsRow(symbol: "clock.badge.exclamationmark", title: "重置卡到期提醒", detail: "应用运行时，在到期前 24、12、6 小时分别提醒。") {
+                        Toggle("重置卡到期提醒", isOn: $store.notifyCreditExpiry).labelsHidden().toggleStyle(.switch)
+                    }
                 }.modifier(MonitorDesktopReveal(delay: 0.08))
                 PanelSettingsGroup(title: "应用更新", symbol: "arrow.triangle.2.circlepath") {
                     SettingsRow(symbol: "arrow.triangle.2.circlepath", title: "当前版本", detail: "v\(store.appUpdateStatus.currentVersion) · Build \(store.appUpdateStatus.currentBuild) · \(checkedText)") {
@@ -132,7 +136,8 @@ struct SetupPermissionsView: View {
                    detail: store.nativeActivityConnectionDetail,
                    color: store.nativeActivityConnectionDetail == "等待连接" ? MonitorDesktopTheme.faintText : MonitorDesktopTheme.positive)
         statusCard(symbol: "bell", title: "通知", value: notificationTitle,
-                   detail: SettingsSummaryText.notifications(signals: store.notifyTiboSignals, recovery: store.notifyQuotaRecovery),
+                   detail: SettingsSummaryText.notifications(signals: store.notifyTiboSignals, recovery: store.notifyQuotaRecovery)
+                       + (store.notifyCreditExpiry ? " · 到期提醒已开启" : " · 到期提醒已关闭"),
                    color: store.quotaNotificationStatus == .enabled ? MonitorDesktopTheme.positive
                        : store.quotaNotificationStatus == .denied ? MonitorDesktopTheme.caution : MonitorDesktopTheme.faintText)
         statusCard(symbol: "shippingbox", title: "版本", value: "v\(store.appUpdateStatus.currentVersion)",

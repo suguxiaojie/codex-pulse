@@ -150,11 +150,12 @@ public enum CodexDesktopIPCError: Error, Equatable, LocalizedError {
 }
 
 /// Version-specific desktop follower adapter, separate from app-server JSON-RPC.
-/// It observes existing owners and never claims thread ownership or starts turns.
+/// It observes existing owners without claiming ownership. A reply turn is only
+/// dispatched for a user-confirmed, still-current asynchronous question handle.
 public actor CodexDesktopIPCClient {
     public private(set) var lastConnectionError: String?
     static let observationMethods: Set<String> = ["initialize", "thread-owner-discovery", "thread-stream-following-changed"]
-    static let submissionMethods: Set<String> = ["thread-follower-command-approval-decision", "thread-follower-file-approval-decision", "thread-follower-permissions-request-approval-response", "thread-follower-submit-user-input", "thread-follower-submit-mcp-server-elicitation-response", "thread-follower-steer-turn"]
+    static let submissionMethods: Set<String> = ["thread-follower-command-approval-decision", "thread-follower-file-approval-decision", "thread-follower-permissions-request-approval-response", "thread-follower-submit-user-input", "thread-follower-submit-mcp-server-elicitation-response", "thread-follower-steer-turn", "thread-follower-start-turn"]
     public struct Configuration: Sendable {
         public let isEnabled: Bool
         public let socketURL: URL
@@ -336,9 +337,9 @@ public actor CodexDesktopIPCClient {
         try validate(handle, key: key)
         let response = try DesktopIPCJSON.decode(result, limit: 1_048_576)
         if handle.kind == .asynchronousQuestion {
-            // Native desktop uses follower steering for these questions. It has
-            // no cross-IPC expected-turn CAS; refresh and revalidate immediately
-            // before this one user action, then await the native reply in stream.
+            // Match the desktop coordinator: steer an active turn, start a reply
+            // turn after completion. Refresh this exact question before either
+            // one-shot operation; neither IPC verb provides a question CAS.
             guard Self.validResponse(response, method: "item/tool/requestUserInput") else { throw CodexDesktopIPCError.invalidResponse }
             try await refreshSnapshot(key)
             try validate(handle, key: key)
@@ -352,19 +353,37 @@ public actor CodexDesktopIPCClient {
             let reply = DesktopIPCJSON.array([.object(["questionItemId": .string(questionID), "question": .string(title), "answer": .string(answer)])])
             let text = CodexDesktopRequestProjector.asyncReplyOpeningTag + "\n" + String(decoding: try reply.encode(), as: UTF8.self) + "\n" + CodexDesktopRequestProjector.asyncReplyClosingTag
             let messageID = UUID().uuidString
-            let context: DesktopIPCJSON = .object(["prompt": .string(title + "\n" + answer), "turnTrigger": .string("send_user_message_async_question"),
+            let context: DesktopIPCJSON = .object(["prompt": .string(text), "turnTrigger": .string("send_user_message_async_question"),
                 "addedFiles": .array([]), "fileAttachments": .array([]), "imageAttachments": .array([]), "commentAttachments": .array([]),
                 "ideContext": .null, "workspaceRoots": entry.state["cwd"]?.string.map { .array([.string($0)]) } ?? .array([])])
-            let restore: DesktopIPCJSON = .object(["id": .string(messageID), "cwd": entry.state["cwd"] ?? .null, "context": context])
+            let restore: DesktopIPCJSON = .object(["id": .string(messageID), "text": .string(text),
+                "createdAt": .integer(Int64(Date().timeIntervalSince1970 * 1_000)),
+                "cwd": entry.state["cwd"] ?? .null, "context": context])
             let before = try CodexDesktopRequestProjector.project(conversationID: handle.conversationID, state: entry.state)
             let turnEnded = ["completed", "interrupted", "failed"].contains(before.status)
+            let input: DesktopIPCJSON = .array([.object(["type": .string("text"), "text": .string(text), "text_elements": .array([])])])
+            let method: String
+            let params: [String: DesktopIPCJSON]
+            if turnEnded {
+                method = "thread-follower-start-turn"
+                params = ["conversationId": .string(handle.conversationID), "turnStart": .object([
+                    "request": .object(["threadId": .string(handle.conversationID), "input": input,
+                        "clientUserMessageId": .string(messageID), "turnTrigger": .string("send_user_message_async_question")]),
+                    // Let the owner inherit model, workspace and permissions;
+                    // never manufacture overrides from an old turn's params.
+                    "context": .object(["inheritThreadSettings": .bool(true), "restoreMessage": restore,
+                        "attachments": .array([]), "commentAttachments": .array([])])])]
+            } else {
+                method = "thread-follower-steer-turn"
+                params = ["conversationId": .string(handle.conversationID), "clientUserMessageId": .string(messageID),
+                    "input": input, "restoreMessage": restore, "attachments": .array([])]
+            }
             attempted.insert(AttemptIdentity(handle))
-            let data = try await request(method: "thread-follower-steer-turn", version: 1, targetOwner: handle.ownerClientID,
-                params: ["conversationId": .string(handle.conversationID), "clientUserMessageId": .string(messageID),
-                    "input": .array([.object(["type": .string("text"), "text": .string(text), "text_elements": .array([])])]),
-                    "restoreMessage": restore, "attachments": .array([])], submission: true)
+            let data = try await request(method: method, version: turnEnded ? 2 : 1, targetOwner: handle.ownerClientID,
+                params: params, submission: true)
             let acknowledgement = try DesktopIPCJSON.decode(data, limit: configuration.maximumFrameBytes)
-            guard let replyTurn = acknowledgement["result"]?["turnId"]?.string,
+            let returnedTurn = turnEnded ? acknowledgement["result"]?["turn"]?["id"] : acknowledgement["result"]?["turnId"]
+            guard let replyTurn = returnedTurn?.string,
                   !replyTurn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CodexDesktopIPCError.outcomeUnknown }
             if turnEnded {
                 do { try await refreshSnapshot(key) }
@@ -372,9 +391,9 @@ public actor CodexDesktopIPCClient {
                 guard epoch == handle.connectionEpoch, let after = ledger[key],
                       after.owner.clientID == handle.ownerClientID,
                       after.streamGeneration == entry.streamGeneration, after.revision > entry.revision,
-                      let projection = try? CodexDesktopRequestProjector.project(conversationID: handle.conversationID, state: after.state),
-                      projection.pendingRequestsAreAuthoritative,
-                      !projection.authoritativeAsyncQuestionIDs.contains(questionID) else { throw CodexDesktopIPCError.outcomeUnknown }
+                      replyTurn != handle.turnID,
+                      CodexDesktopRequestProjector.containsAcceptedAsyncReply(state: after.state, turnID: replyTurn,
+                        questionID: questionID, question: title, answer: answer) else { throw CodexDesktopIPCError.outcomeUnknown }
                 return .confirmedResolved
             } else if replyTurn != handle.turnID { throw CodexDesktopIPCError.outcomeUnknown }
             return .acceptedForDispatch
@@ -589,6 +608,21 @@ public actor CodexDesktopIPCClient {
     }
     static func permitsSubmissionMessage(_ message: DesktopIPCJSON, owner: String?) -> Bool {
         guard let owner, !owner.isEmpty else { return false }
+        if message["method"]?.string == "thread-follower-start-turn" {
+            guard message["version"]?.integer == 2,
+                  let params = message["params"], let request = params["turnStart"]?["request"],
+                  let context = params["turnStart"]?["context"],
+                  let conversation = params["conversationId"]?.string, !conversation.isEmpty,
+                  request["threadId"] == params["conversationId"],
+                  request["turnTrigger"]?.string == "send_user_message_async_question",
+                  Set(request.object?.keys.map { $0 } ?? []) == ["threadId", "input", "clientUserMessageId", "turnTrigger"],
+                  Set(context.object?.keys.map { $0 } ?? []) == ["inheritThreadSettings", "restoreMessage", "attachments", "commentAttachments"],
+                  context["inheritThreadSettings"]?.bool == true,
+                  let input = request["input"]?.array, input.count == 1,
+                  input[0]["type"]?.string == "text", let text = input[0]["text"]?.string,
+                  text.hasPrefix(CodexDesktopRequestProjector.asyncReplyOpeningTag),
+                  text.hasSuffix(CodexDesktopRequestProjector.asyncReplyClosingTag) else { return false }
+        }
         return message["type"]?.string == "request" && submissionMethods.contains(message["method"]?.string ?? "")
             && message["targetClientId"] == .string(owner)
             && message["targetClientIds"] == nil

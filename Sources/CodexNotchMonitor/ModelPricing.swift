@@ -10,13 +10,14 @@ enum ModelPricing {
         static let standard = Multipliers(inputAndCache: 1, output: 1)
     }
 
-    /// OpenAI Docs prices verified on 2026-09-30. These entries take
+    /// OpenAI Docs prices verified on 2026-10-29; cache writes use the 30m rate. These entries take
     /// precedence over the community catalog so an older third-party value
     /// cannot override a current first-party rate. The catalog still fills in
     /// models that are not represented in this official snapshot.
     private static let official: [String: Rates] = [
         "gpt-6-astra": rates(10, 50, 12.5, 1),
         "gpt-6.1-sol": rates(2, 10, 2.5, 0.1),
+        "gpt-6.1-terra": rates(1, 5, 1.25, 0.05),
         "gpt-6-sol": rates(2, 10, 2.5, 0.2),
         "gpt-6-luna": rates(0.1, 0.5, 0.125, 0.01),
         "gpt-5.6": rates(4, 20, 5, 0.4),
@@ -28,6 +29,7 @@ enum ModelPricing {
     private static let longContextModels: Set<String> = [
         "gpt-6-astra",
         "gpt-6.1-sol",
+        "gpt-6.1-terra",
         "gpt-6-sol",
         "gpt-6-luna",
         "gpt-5.6",
@@ -37,7 +39,7 @@ enum ModelPricing {
     ]
 
     static let longContextThreshold = 272_000
-    static let officialRateVerifiedAt = "2026-09-30"
+    static let officialRateVerifiedAt = "2026-10-29"
 
     /// Codex-only build-time fallback. The daily catalog takes precedence and
     /// can add or update models without requiring an app release.
@@ -201,18 +203,37 @@ enum OfficialPricingCatalog {
               document.contains("Short context: ≤272K input tokens. Long context: >272K input tokens.")
         else { return nil }
         let table = String(document[heading.upperBound..<end.lowerBound])
-        let header = "| Model | Short context input | Short context cached input | Short context cache writes | Short context output | Long context input | Long context cached input | Long context cache writes | Long context output |"
-        guard table.contains(header) else { return nil }
+        func fields(_ line: Substring) -> [String] {
+            line.split(separator: "|", omittingEmptySubsequences: false).dropFirst().dropLast()
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        let lines = table.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let headerLine = lines.first(where: { $0.hasPrefix("|") && fields(Substring($0)).contains("Model") }) else { return nil }
+        let header = fields(Substring(headerLine))
+        let common = ["Model", "Short context input", "Short context cached input", "Short context output",
+                      "Long context input", "Long context cached input", "Long context output"]
+        let legacy = Set(common + ["Short context cache writes", "Long context cache writes"])
+        let current = Set(common + ["Short context 30m write", "Long context 30m write",
+                                    "Short context 12h write", "Long context 12h write"])
+        guard Set(header).count == header.count, Set(header) == legacy || Set(header) == current else { return nil }
+        let columns = Dictionary(uniqueKeysWithValues: header.enumerated().map { ($0.element, $0.offset) })
+        let write = Set(header) == legacy ? "cache writes" : "30m write"
+        let names = ["Short context input", "Short context cached input", "Short context \(write)", "Short context output",
+                     "Long context input", "Long context cached input", "Long context \(write)", "Long context output"]
+        let supported = requiredModels.union(["gpt-6.1-terra"])
         var rates: [String: CatalogRates] = [:]
         var multipliers: [String: ModelPricing.Multipliers] = [:]
-        for line in table.split(separator: "\n") where line.hasPrefix("|") {
-            let fields = line.split(separator: "|", omittingEmptySubsequences: false).dropFirst().dropLast().map { $0.trimmingCharacters(in: .whitespaces) }
-            guard let model = fields.first, requiredModels.contains(model) else { continue }
-            guard fields.count == 9, rates[model] == nil else { return nil }
-            let values = fields.dropFirst().compactMap { field -> Double? in
+        for line in lines where line.hasPrefix("|") {
+            let cells = fields(Substring(line))
+            guard let modelIndex = columns["Model"], cells.indices.contains(modelIndex), supported.contains(cells[modelIndex]) else { continue }
+            let model = cells[modelIndex]
+            guard cells.count == header.count, rates[model] == nil else { return nil }
+            func price(_ field: String) -> Double? {
                 guard field.first == "$", let value = Double(field.dropFirst()), value.isFinite, value >= 0, value <= 1_000_000 else { return nil }
                 return value
             }
+            guard cells.enumerated().allSatisfy({ $0.offset == modelIndex || price($0.element) != nil }) else { return nil }
+            let values = names.compactMap { columns[$0].flatMap { price(cells[$0]) } }
             guard values.count == 8, values[0] > 0, values[3] > 0 else { return nil }
             let inputRatio = values[4] / values[0]
             let outputRatio = values[7] / values[3]
@@ -225,7 +246,7 @@ enum OfficialPricingCatalog {
             rates[model] = rate
             multipliers[model] = .init(inputAndCache: inputRatio, output: outputRatio)
         }
-        guard Set(rates.keys) == requiredModels else { return nil }
+        guard requiredModels.isSubset(of: Set(rates.keys)) else { return nil }
         return Snapshot(rates: rates, multipliers: multipliers, threshold: 272_000)
     }
 

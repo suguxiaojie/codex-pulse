@@ -1,9 +1,9 @@
 import SwiftUI
 
 extension IslandAlert {
-    var mood: IslandMascotMood { kind == .tiboSignal ? .tool : .done }
+    var mood: IslandMascotMood { kind == .creditExpiry ? .approve : kind == .tiboSignal ? .tool : .done }
     var tint: Color {
-        kind == .tiboSignal ? Color(red: 98/255, green: 208/255, blue: 1)
+        kind == .creditExpiry ? .orange : kind == .tiboSignal ? Color(red: 98/255, green: 208/255, blue: 1)
             : Color(red: 76/255, green: 212/255, blue: 122/255)
     }
 }
@@ -12,12 +12,23 @@ struct IslandAlertCard: View {
     @ObservedObject var model: ActivityIslandViewModel
     let alert: IslandAlert
     let reduceMotion: Bool
+    var topInset: CGFloat? = nil
+
+    @MainActor static func fittingHeight(model: ActivityIslandViewModel, alert: IslandAlert,
+                                        width: CGFloat, topInset: CGFloat) -> CGFloat {
+        let host = NSHostingView(rootView: IslandAlertCard(model: model, alert: alert,
+            reduceMotion: true, topInset: topInset)
+            .frame(width: width).fixedSize(horizontal: false, vertical: true))
+        host.sizingOptions = [.intrinsicContentSize]
+        host.layoutSubtreeIfNeeded()
+        return ceil(host.fittingSize.height)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
                 IslandMascotView(mood: alert.mood, size: 30,
-                    animated: model.playbackVisible, reduceMotion: reduceMotion)
+                    animated: model.playbackVisible, reduceMotion: reduceMotion, species: model.idlePetSpecies)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(alert.title).font(.system(size: 14, weight: .bold)).lineLimit(2)
                     HStack(spacing: 6) {
@@ -41,30 +52,35 @@ struct IslandAlertCard: View {
             }
             Text(alert.body).font(.system(size: 12)).foregroundStyle(.white.opacity(0.78))
                 .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 0)
-            HStack(spacing: 8) {
-                Spacer(minLength: 0)
-                ForEach(Array(alert.actions.enumerated()), id: \.offset) { index, action in
-                    let primary = index == alert.actions.count - 1
-                    Button { model.onAlertAction?(action.route, alert) } label: {
-                        Text(action.title).font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(primary ? .black : .white.opacity(0.8))
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(primary ? alert.tint : .white.opacity(0.08), in: Capsule())
-                    }.buttonStyle(.plain)
-                }
-            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { actionButtons }
+                VStack(alignment: .trailing, spacing: 8) { actionButtons }
+            }.frame(maxWidth: .infinity, alignment: .trailing)
             GeometryReader { proxy in
                 Rectangle().fill(alert.tint)
                     .frame(width: proxy.size.width * max(0, min(1, model.alertRemaining / 8)))
             }.frame(height: 2).accessibilityHidden(true)
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 10)
-        .padding(.top, model.metrics.hardwareGap > 0 ? model.metrics.compactRect.height : 0)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.001).onTapGesture { model.onAlertAction?(.openCenter, alert) })
+        .padding(.horizontal, 28).padding(.top, 20).padding(.bottom, 16)
+        .padding(.top, topInset ?? (model.metrics.hardwareGap > 0 ? model.metrics.compactRect.height : 0))
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Color.black.opacity(0.001).onTapGesture {
+            if alert.kind != .creditExpiry { model.onAlertAction?(.openCenter, alert) }
+        })
         .accessibilityElement(children: .contain)
+    }
+
+    private var actionButtons: some View {
+        ForEach(Array(alert.actions.enumerated()), id: \.offset) { index, action in
+            let primary = index == alert.actions.count - 1
+            Button { model.onAlertAction?(action.route, alert) } label: {
+                Text(action.title).font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(primary ? .black : .white.opacity(0.8))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(primary ? alert.tint : .white.opacity(0.08), in: Capsule())
+            }.buttonStyle(.plain).fixedSize()
+        }
     }
 }
 

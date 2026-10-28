@@ -156,6 +156,17 @@ private struct MonitorCenterPressStyle: ButtonStyle {
     }
 }
 
+private struct MonitorCenterShortcut: ViewModifier {
+    let key: Int?
+    func body(content: Content) -> some View {
+        if let key, let character = String(key).first {
+            content.keyboardShortcut(KeyEquivalent(character), modifiers: .command)
+        } else {
+            content
+        }
+    }
+}
+
 private struct MonitorCenterEmptyState: View {
     let symbol: String
     let title: String
@@ -174,10 +185,18 @@ private struct MonitorCenterEmptyState: View {
                         .accessibilityHidden(true)
                 }
             }
-            .frame(width: 40, height: 40)
-            .background(MonitorDesktopTheme.glyphFill, in: RoundedRectangle(cornerRadius: 11))
+            .frame(width: 44, height: 44)
+            .background(LinearGradient(colors: [MonitorDesktopTheme.accent.opacity(0.16), MonitorDesktopTheme.accent.opacity(0.04)],
+                                       startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .strokeBorder(MonitorDesktopTheme.accent.opacity(0.22), lineWidth: 0.75))
+            .background {
+                Circle().fill(MonitorDesktopTheme.accent.opacity(0.10)).frame(width: 96, height: 96).blur(radius: 24)
+                    .accessibilityHidden(true)
+            }
+            .padding(.bottom, 2)
             Text(title)
-                .font(.system(size: 13.5, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(MonitorDesktopTheme.primaryText)
             Text(detail)
                 .font(MonitorDesktopTypography.rowDetail)
@@ -260,6 +279,7 @@ struct NotchView: View {
     @State private var continuityUnfilteredExpansionIDs: Set<String>?
     @State private var continuitySearchText = ""
     @State private var continuityFilter: SessionLibraryFilter = .all
+    @State private var continuityViewCache = SessionLibraryViewCache()
     @State private var selectedContinuityThreadID: String?
     @State private var showsContinuityDetails = false
     @State private var showsContinuityOperations = false
@@ -807,80 +827,28 @@ struct NotchView: View {
 
     private var monitorCenterView: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 10) {
-                    CodexMark(size: 27)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Codex Pulse")
-                            .font(.system(size: 17, weight: .semibold))
-                            .tracking(-0.15)
-                        Text("本地用量与会话")
-                            .font(MonitorDesktopTypography.metadata)
-                            .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                    }
+            monitorCenterSidebar
+                .frame(width: MonitorCenterLayout.sidebarWidth)
+                .background(MonitorDesktopTheme.sidebarBackground.opacity(reduceTransparency ? 1 : 0.72))
+                .overlay(alignment: .trailing) {
+                    Rectangle().fill(MonitorDesktopTheme.rimHighlight.opacity(0.06)).frame(width: 0.5)
                 }
-                .padding(.horizontal, 26)
-                .padding(.top, 34)
-                .padding(.bottom, 22)
-
-                VStack(spacing: 24) {
-                    monitorCenterNavigationGroup("监控", settings: false)
-                    monitorCenterNavigationGroup("设置", settings: true)
-                }
-                .padding(.horizontal, 17)
-
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Label("会话与用量在本机处理", systemImage: "lock.fill")
-                    Text(store.continuityAccountSubtitle ?? store.continuityAccountTitle)
-                        .lineLimit(2)
-                }
-                .font(MonitorDesktopTypography.metadata)
-                .foregroundStyle(MonitorDesktopTheme.faintText)
-                .padding(24)
-            }
-            .frame(width: MonitorCenterLayout.sidebarWidth)
-            .background(MonitorDesktopTheme.sidebarBackground.opacity(reduceTransparency ? 1 : 0.55))
-
-            Divider().overlay(MonitorDesktopTheme.separator)
 
             VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(expandedPage.title)
-                            .font(MonitorDesktopTypography.pageTitle)
-                            .tracking(-0.21)
-                        Text(expandedPage.subtitle)
-                            .font(MonitorDesktopTypography.pageSubtitle)
-                            .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                    }
-                    Spacer()
-                    if monitorCenterPageCanRefresh {
-                        MonitorRefreshButton(
-                            title: monitorCenterRefreshTitle,
-                            loadingTitle: expandedPage == .continuity ? "检查中" : "刷新中",
-                            isRefreshing: monitorCenterPageIsRefreshing,
-                            action: refreshCurrentMonitorCenterPage
-                        )
-                    } else if expandedPage == .panelSettings {
-                        Label("更改即时生效", systemImage: "checkmark.circle")
-                            .font(MonitorDesktopTypography.metadata)
-                            .foregroundStyle(PanelSettingsTheme.clay)
-                    }
-                }
-                .padding(.horizontal, 26)
-                .padding(.top, 31)
-                .padding(.bottom, 17)
-
-                Divider().overlay(MonitorDesktopTheme.separator)
-
+                monitorCenterHeader
                 monitorCenterDetail
                     .opacity(monitorCenterContentOpacity)
                     .offset(y: monitorCenterContentOffset)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 16)
+                    .padding(.horizontal, 26)
+                    .padding(.top, 14)
+                    .padding(.bottom, 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .background(alignment: .top) {
+                // Ember wash: the island's state light, resting faintly above every page.
+                RadialGradient(colors: [MonitorDesktopTheme.accent.opacity(0.085), .clear],
+                               center: UnitPoint(x: 0.82, y: -0.08), startRadius: 0, endRadius: 520)
+                    .frame(height: 360).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
         .font(MonitorDesktopTypography.body)
@@ -898,57 +866,185 @@ struct NotchView: View {
         }
     }
 
+    private var monitorCenterSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 11) {
+                CodexMark(size: 28)
+                    .padding(5)
+                    .background(MonitorDesktopTheme.rimHighlight.opacity(0.04), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(MonitorDesktopTheme.rimHighlight.opacity(0.08), lineWidth: 0.75))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Codex Pulse")
+                        .font(.system(size: 16, weight: .semibold))
+                        .tracking(-0.2)
+                    Text("本地用量与会话")
+                        .font(MonitorDesktopTypography.metadata)
+                        .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 44)
+            .padding(.bottom, 26)
+
+            VStack(spacing: 22) {
+                monitorCenterNavigationGroup("监控", settings: false)
+                monitorCenterNavigationGroup("设置", settings: true)
+            }
+            .padding(.horizontal, 12)
+
+            Spacer(minLength: 16)
+
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(MonitorDesktopTheme.positive)
+                    .frame(width: 22, height: 22)
+                    .background(MonitorDesktopTheme.positive.opacity(0.12), in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("会话与用量在本机处理")
+                        .font(MonitorDesktopTypography.metadataMedium)
+                        .foregroundStyle(MonitorDesktopTheme.secondaryText)
+                    Text(store.continuityAccountSubtitle ?? store.continuityAccountTitle)
+                        .font(MonitorDesktopTypography.metadata)
+                        .foregroundStyle(MonitorDesktopTheme.faintText)
+                        .lineLimit(2)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MonitorDesktopTheme.rimHighlight.opacity(0.03), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(MonitorDesktopTheme.rimHighlight.opacity(0.06), lineWidth: 0.75))
+            .padding(12)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var monitorCenterHeader: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: expandedPage.symbol)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(MonitorDesktopTheme.accent)
+                .frame(width: 40, height: 40)
+                .background(LinearGradient(colors: [MonitorDesktopTheme.accent.opacity(0.20), MonitorDesktopTheme.accent.opacity(0.05)],
+                                           startPoint: .top, endPoint: .bottom),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(LinearGradient(colors: [MonitorDesktopTheme.accent.opacity(0.40), MonitorDesktopTheme.accent.opacity(0.08)],
+                                                 startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(expandedPage.title)
+                    .font(MonitorDesktopTypography.pageTitle)
+                    .tracking(-0.3)
+                Text(expandedPage.subtitle)
+                    .font(MonitorDesktopTypography.pageSubtitle)
+                    .foregroundStyle(MonitorDesktopTheme.tertiaryText)
+            }
+            .id(expandedPage)
+            .transition(.opacity)
+            Spacer()
+            if monitorCenterPageCanRefresh {
+                MonitorRefreshButton(
+                    title: monitorCenterRefreshTitle,
+                    loadingTitle: expandedPage == .continuity ? "检查中" : "刷新中",
+                    isRefreshing: monitorCenterPageIsRefreshing,
+                    action: refreshCurrentMonitorCenterPage
+                )
+            } else if expandedPage == .panelSettings || expandedPage == .settings {
+                Label("更改即时生效", systemImage: "checkmark.circle.fill")
+                    .font(MonitorDesktopTypography.metadataMedium)
+                    .foregroundStyle(MonitorDesktopTheme.positive)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(MonitorDesktopTheme.positive.opacity(0.10), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 34)
+        .padding(.bottom, 16)
+        .overlay(alignment: .bottom) {
+            // Hairline that catches the ember on the left and fades into the canvas.
+            LinearGradient(colors: [MonitorDesktopTheme.accent.opacity(0.35), MonitorDesktopTheme.rimHighlight.opacity(0.07),
+                                    MonitorDesktopTheme.rimHighlight.opacity(0.02)],
+                           startPoint: .leading, endPoint: .trailing)
+                .frame(height: 0.75).padding(.horizontal, 26)
+        }
+        .animation(reduceMotion ? nil : MonitorDesktopTheme.pageMotion, value: expandedPage)
+    }
+
+    /// ⌘1…⌘8 follow the sidebar order: monitoring pages first, then settings.
+    private func monitorCenterShortcut(for section: MonitorCenterSection) -> Int? {
+        let ordered = MonitorCenterSection.allCases.filter { !$0.isSettings } + MonitorCenterSection.allCases.filter(\.isSettings)
+        return ordered.firstIndex(of: section).map { $0 + 1 }.flatMap { $0 <= 9 ? $0 : nil }
+    }
+
     private func monitorCenterNavigationGroup(_ title: String, settings: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(MonitorDesktopTypography.metadataMedium)
-                .foregroundStyle(MonitorDesktopTheme.tertiaryText)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 3)
+                .font(MonitorDesktopTypography.groupLabel)
+                .tracking(1.4)
+                .foregroundStyle(MonitorDesktopTheme.faintText)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 5)
+                .accessibilityAddTraits(.isHeader)
             ForEach(MonitorCenterSection.allCases.filter { $0.isSettings == settings }) { section in
+                let selected = expandedPage == section
                 Button { showPage(section) } label: {
                     HStack(spacing: 10) {
                         Image(systemName: section.symbol)
-                            .font(.system(size: 15, weight: .medium))
-                            .frame(width: 21)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(selected ? Color.white : MonitorDesktopTheme.secondaryText)
+                            .frame(width: 26, height: 26)
+                            .background {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(selected
+                                        ? AnyShapeStyle(LinearGradient(colors: [MonitorDesktopTheme.accent, MonitorDesktopTheme.accentDeep],
+                                                                       startPoint: .top, endPoint: .bottom))
+                                        : AnyShapeStyle(MonitorDesktopTheme.rimHighlight.opacity(0.045)))
+                                    .shadow(color: MonitorDesktopTheme.accent.opacity(selected ? 0.45 : 0), radius: 7, y: 2)
+                            }
                             .accessibilityHidden(true)
                         Text(section.title)
-                            .font(MonitorDesktopTypography.controlLarge)
+                            .font(MonitorDesktopTypography.navigation)
+                            .foregroundStyle(selected ? MonitorDesktopTheme.primaryText : MonitorDesktopTheme.secondaryText)
                         Spacer(minLength: 0)
                         if section == .continuity,
                            !store.continuitySnapshot.recoverableThreads.isEmpty {
                             Text("\(store.continuitySnapshot.recoverableThreads.count)")
                                 .font(MonitorDesktopTypography.metadataMedium)
                                 .monospacedDigit()
-                                .padding(.horizontal, 6)
+                                .foregroundStyle(MonitorDesktopTheme.caution)
+                                .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.18), in: Capsule())
+                                .background(MonitorDesktopTheme.caution.opacity(0.15), in: Capsule())
                         }
                     }
-                    .foregroundStyle(expandedPage == section
-                        ? MonitorDesktopTheme.accent
-                        : MonitorDesktopTheme.secondaryText)
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity, minHeight: 40)
+                    .padding(.horizontal, 7)
+                    .frame(maxWidth: .infinity, minHeight: 38)
                     .background {
-                        if expandedPage == section {
-                            if reduceMotion {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(MonitorDesktopTheme.selection)
-                            } else {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(MonitorDesktopTheme.selection)
-                                    .matchedGeometryEffect(id: "center-navigation-selection", in: centerNavigationNamespace)
+                        if selected {
+                            let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            Group {
+                                if reduceMotion {
+                                    shape.fill(MonitorDesktopTheme.selection)
+                                } else {
+                                    shape.fill(MonitorDesktopTheme.selection)
+                                        .matchedGeometryEffect(id: "center-navigation-selection", in: centerNavigationNamespace)
+                                }
                             }
+                            .overlay(shape.strokeBorder(MonitorDesktopTheme.accent.opacity(0.16), lineWidth: 0.75))
                         }
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(MonitorCenterPressStyle())
                 .accessibilityLabel(section.title)
-                .accessibilityValue(expandedPage == section ? "当前页面" : "")
-                .accessibilityAddTraits(expandedPage == section ? .isSelected : [])
-                .help(section.subtitle)
+                .accessibilityValue(selected ? "当前页面" : "")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .help(section.subtitle + (monitorCenterShortcut(for: section).map { " · ⌘\($0)" } ?? ""))
+                .modifier(MonitorCenterShortcut(key: monitorCenterShortcut(for: section)))
             }
         }
         .animation(reduceMotion ? .easeOut(duration: 0.12) : MonitorDesktopTheme.selectionMotion, value: expandedPage)
@@ -1378,12 +1474,15 @@ struct NotchView: View {
     private func transitionMonitorCenter(to page: MonitorCenterSection) {
         monitorCenterTransitionGeneration += 1
         let generation = monitorCenterTransitionGeneration
-        monitorCenterContentOpacity = reduceMotion ? 0.75 : 0.35
-        monitorCenterContentOffset = reduceMotion ? 0 : 9
+        // Content rises when moving down the sidebar and settles from above when moving up.
+        let order = MonitorCenterSection.allCases
+        let forward = (order.firstIndex(of: page) ?? 0) >= (order.firstIndex(of: expandedPage) ?? 0)
+        monitorCenterContentOpacity = reduceMotion ? 0.75 : 0
+        monitorCenterContentOffset = reduceMotion ? 0 : (forward ? 14 : -14)
         expandedPage = page
         DispatchQueue.main.async {
             guard monitorCenterTransitionGeneration == generation else { return }
-            withAnimation(reduceMotion ? .easeOut(duration: 0.16) : MonitorDesktopTheme.selectionMotion) {
+            withAnimation(reduceMotion ? .easeOut(duration: 0.16) : MonitorDesktopTheme.pageMotion) {
                 monitorCenterContentOpacity = 1
                 monitorCenterContentOffset = 0
             }
@@ -1476,7 +1575,7 @@ struct NotchView: View {
                 showsContinuityDetails = false
             }
         }
-        .onChange(of: store.continuitySnapshot.projectGroups.map(\.id)) { ids in
+        .onChange(of: continuityViewData.allProjects.map(\.id)) { ids in
             expandedContinuityProjectIDs.formIntersection(ids)
         }
         .onChange(of: continuityOperationAttentionToken) { _ in
@@ -1888,16 +1987,18 @@ struct NotchView: View {
         return "\(formatter.string(fromByteCount: processed)) / \(formatter.string(fromByteCount: total))"
     }
 
-    private var filteredContinuityProjects: [ContinuityProjectGroup] {
-        SessionLibraryPresentation.groups(
+    private var continuityViewData: SessionLibraryViewData {
+        continuityViewCache.resolve(
             snapshot: store.continuitySnapshot,
             query: continuitySearchText,
             filter: continuityFilter
         )
     }
 
+    private var filteredContinuityProjects: [ContinuityProjectGroup] { continuityViewData.projects }
+
     private var visibleContinuityThreadIDs: [String] {
-        filteredContinuityProjects.flatMap { $0.threads.map(\.id) }
+        continuityViewData.visibleThreadIDs
     }
 
     private var selectedContinuityThread: LocalThreadRecord? {
@@ -1907,7 +2008,7 @@ struct NotchView: View {
     }
 
     private var firstRecoverableProjectID: String? {
-        store.continuitySnapshot.projectGroups.first { $0.threads.contains(where: \.canRecover) }?.id
+        continuityViewData.allProjects.first { $0.threads.contains(where: \.canRecover) }?.id
     }
 
     private func revealFilteredContinuityProjects() {
@@ -2575,8 +2676,9 @@ struct NotchView: View {
     }
 
     private var continuityThreadCard: some View {
-        let projects = filteredContinuityProjects
-        let completeProjects = Dictionary(uniqueKeysWithValues: store.continuitySnapshot.projectGroups.map { ($0.id, $0) })
+        let data = continuityViewData
+        let projects = data.projects
+        let completeProjects = data.completeProjectsByID
         return VStack(spacing: 0) {
             HStack(spacing: SessionLibraryColumns.spacing) {
                 Text("项目／会话")
@@ -2615,7 +2717,8 @@ struct NotchView: View {
             } else {
                 List(selection: $selectedContinuityThreadID) {
                     ForEach(projects) { project in
-                        continuityProjectSection(project, completeProject: completeProjects[project.id])
+                        continuityProjectSection(project, completeProject: completeProjects[project.id],
+                            summary: data.summariesByID[project.id] ?? SessionProjectSummary(threads: project.threads))
                     }
                 }
                 .listStyle(.inset)
@@ -2639,11 +2742,11 @@ struct NotchView: View {
     @ViewBuilder
     private func continuityProjectSection(
         _ project: ContinuityProjectGroup,
-        completeProject: ContinuityProjectGroup?
+        completeProject: ContinuityProjectGroup?,
+        summary: SessionProjectSummary
     ) -> some View {
         let total = completeProject?.threads.count ?? project.threads.count
         let isExpanded = expandedContinuityProjectIDs.contains(project.id)
-        let summary = SessionProjectSummary(threads: project.threads)
         let countText = total == project.threads.count
             ? "\(total) 条会话" : "\(project.threads.count)／\(total) 条会话"
         HStack(spacing: SessionLibraryColumns.spacing) {
@@ -4478,6 +4581,7 @@ struct NotchView: View {
                 MonitorCenterEmptyState(symbol: "square.grid.3x3.fill", title: "正在整理成本活动…", detail: "", isLoading: true)
             } else if TokenActivityLayout.usesBars(rangeDays: costActivityDays) {
                 AnalysisActivityBarChart(samples: costBarSamples, hourly: costActivityDays == 1, isCost: true, reduceMotion: reduceMotion)
+                    .equatable()
                     .id(costActivityDays)
                     .transition(.opacity)
             } else {
@@ -4898,6 +5002,7 @@ struct NotchView: View {
                 MonitorCenterEmptyState(symbol: "square.grid.3x3.fill", title: "正在整理 Token 活动…", detail: "", isLoading: true)
             } else if TokenActivityLayout.usesBars(rangeDays: tokenActivityDays) {
                 AnalysisActivityBarChart(samples: tokenBarSamples, hourly: false, isCost: false, reduceMotion: reduceMotion)
+                    .equatable()
                     .id(tokenActivityDays)
                     .transition(.opacity)
             } else {
@@ -5846,20 +5951,13 @@ private struct UsageCountMetric: View {
     }
 }
 
-private struct AnalysisActivityBarSample: Identifiable {
-    var id: Date { date }
-    let date: Date
-    let value: Double
-    let tokens: Int?
-}
-
 private enum AnalysisActivityStyle {
     static func accent(isCost: Bool) -> Color { isCost ? MonitorDesktopTheme.costData : MonitorDesktopTheme.usageData }
     static let cornerRadius: CGFloat = 3
     static let hoverAnimation = MonitorDesktopTheme.hoverMotion
 
     static func dollars(_ value: Double) -> String {
-        String(format: value > 0 && value < 1 ? "$%.4f" : "$%.2f", value)
+        AnalysisBarPresentation.dollars(value)
     }
 
     static func tokens(_ value: Int) -> String { CountFormatter.display(Int64(value)) + " Token" }
@@ -5902,8 +6000,11 @@ private struct AnalysisActivityReadout: View {
     }
 }
 
-private struct AnalysisActivityBarChart: View {
+private struct AnalysisActivityBarChart: View, Equatable {
     @AppStorage(CountStyle.preferenceKey) private var countStyle = CountStyle.chinese.rawValue
+    @Environment(\.locale) private var locale
+    @Environment(\.calendar) private var calendar
+    @Environment(\.timeZone) private var timeZone
     let samples: [AnalysisActivityBarSample]
     let hourly: Bool
     let isCost: Bool
@@ -5912,18 +6013,19 @@ private struct AnalysisActivityBarChart: View {
     @State private var entered = false
     private var weekly: Bool { !hourly && samples.count == 7 }
 
-    private var maximum: Double { max(0.000001, samples.map(\.value).max() ?? 0) }
     private var slotCount: Int { hourly ? 24 : max(1, samples.count) }
-    private var hovered: AnalysisActivityBarSample? {
-        guard let hoveredIndex, samples.indices.contains(hoveredIndex) else { return nil }
-        return samples[hoveredIndex]
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.samples == rhs.samples && lhs.hourly == rhs.hourly && lhs.isCost == rhs.isCost && lhs.reduceMotion == rhs.reduceMotion
     }
 
     var body: some View {
+        let presentation = AnalysisBarPresentation(samples: samples, hourly: hourly, isCost: isCost,
+            style: CountStyle(rawValue: countStyle) ?? .chinese, locale: locale, calendar: calendar, timeZone: timeZone)
+        let hovered = hoveredIndex.flatMap { presentation.rows.indices.contains($0) ? presentation.rows[$0] : nil }
         VStack(spacing: 10) {
             AnalysisActivityReadout(
                 label: hourly ? "按小时" : "按天",
-                value: hovered.map(detail) ?? "峰值 " + formatted(samples.map(\.value).max() ?? 0),
+                value: hovered?.detail ?? presentation.peak,
                 selected: hovered != nil
             )
             GeometryReader { proxy in
@@ -5937,7 +6039,8 @@ private struct AnalysisActivityBarChart: View {
                     HStack(alignment: .bottom, spacing: 0) {
                         ForEach(0..<slotCount, id: \.self) { index in
                             let sample = samples.indices.contains(index) ? samples[index] : nil
-                            let height = sample.map { max(0, $0.value) / maximum * proxy.size.height } ?? 0
+                            let row = presentation.rows.indices.contains(index) ? presentation.rows[index] : nil
+                            let height = (row?.ratio ?? 0) * proxy.size.height
                             AnalysisActivityMark(isCost: isCost, active: (sample?.value ?? 0) > 0, opacity: ActivityHeatmapPalette.opacity(for: 4), selected: hoveredIndex == index)
                                 .frame(width: AnalysisBarLayout.width(slotWidth: proxy.size.width / CGFloat(slotCount), count: slotCount, hourly: hourly), height: height * (entered ? 1 : 0))
                                 .opacity(height > 0 ? 1 : 0)
@@ -5946,13 +6049,13 @@ private struct AnalysisActivityBarChart: View {
                                 .frame(height: proxy.size.height, alignment: .bottom)
                                 .contentShape(Rectangle())
                                 .onHover { inside in hoveredIndex = inside && sample != nil ? index : nil }
-                                .help(sample.map(detail) ?? "尚未发生的时段")
+                                .help(row?.detail ?? "尚未发生的时段")
                                 .accessibilityElement()
-                                .accessibilityLabel(sample.map { label($0.date) } ?? "尚未发生的时段")
-                                .accessibilityValue(sample.map(detail) ?? "无数据")
+                                .accessibilityLabel(row?.label ?? "尚未发生的时段")
+                                .accessibilityValue(row?.detail ?? "无数据")
                         }
                     }
-                    if !samples.contains(where: { $0.value > 0 }) {
+                    if !presentation.hasValues {
                         Text("当前范围暂无" + (isCost ? "可估算成本" : "Token 记录"))
                             .font(MonitorDesktopTypography.metadata)
                             .foregroundStyle(MonitorDesktopTheme.tertiaryText)
@@ -5969,13 +6072,13 @@ private struct AnalysisActivityBarChart: View {
                         if hour != "24:00" { Spacer() }
                     }
                 } else if weekly {
-                    ForEach(samples) { sample in
-                        Text(label(sample.date)).frame(maxWidth: .infinity)
+                    ForEach(Array(presentation.rows.enumerated()), id: \.offset) { _, row in
+                        Text(row.label).frame(maxWidth: .infinity)
                     }
                 } else {
-                    Text(samples.first.map { label($0.date) } ?? "—")
+                    Text(presentation.rows.first?.label ?? "—")
                     Spacer()
-                    Text(samples.last.map { label($0.date) } ?? "—")
+                    Text(presentation.rows.last?.label ?? "—")
                 }
             }
             .font(MonitorDesktopTypography.metadata)
@@ -5989,23 +6092,6 @@ private struct AnalysisActivityBarChart: View {
         .onAppear { entered = true }
     }
 
-    private func label(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = hourly ? "HH:00" : "M/d"
-        return formatter.string(from: date)
-    }
-
-    private func formatted(_ value: Double) -> String {
-        if isCost { return AnalysisActivityStyle.dollars(value) }
-        return CountFormatter.chart(value) + " Token"
-    }
-
-    private func detail(_ sample: AnalysisActivityBarSample) -> String {
-        var text = label(sample.date) + " · " + formatted(sample.value)
-        if isCost, let tokens = sample.tokens { text += " · " + CountFormatter.display(Int64(tokens)) + " Token" }
-        if !isCost { text = label(sample.date) + " · " + CountFormatter.chart(sample.value) + " Token" }
-        return text
-    }
 }
 
 private struct TokenActivityHeatmap: View {

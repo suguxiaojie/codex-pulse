@@ -308,6 +308,24 @@ public enum CodexDesktopRequestProjector {
         return (live.reversed().first(where: { $0["turnId"]?.nonemptyString != nil }), state["turns"]?.array != nil)
     }
 
+    /// A new current turn can hide the old question without delivering its answer.
+    /// Confirm the native reply content in the acknowledged turn instead.
+    static func containsAcceptedAsyncReply(state: DesktopIPCJSON, turnID: String,
+                                          questionID: String, question: String, answer: String) -> Bool {
+        guard let object = state.object else { return false }
+        let turn = currentTurn(object)
+        guard turn.authoritative, turn.value?["turnId"]?.string == turnID,
+              let items = turn.value?["items"]?.array else { return false }
+        return items.contains { item in
+            let type = item["type"]?.string
+            guard type == "userMessage" || (type == "steeringUserMessage" && item["status"]?.string == "accepted"),
+                  let content = item[type == "userMessage" ? "content" : "input"]?.array, content.count == 1,
+                  content[0]["type"]?.string == "text", let text = content[0]["text"]?.string,
+                  let replies = questionReplies(text) else { return false }
+            return replies.contains { $0.id == questionID && $0.question == question && $0.answer == answer }
+        }
+    }
+
     private static func asyncQuestions(items: [PublicJSON], turnID: String) throws -> [CodexDesktopProjectedAsyncQuestion] {
         var questions: [CodexDesktopProjectedAsyncQuestion] = []
         var questionIndices: [String: Int] = [:]

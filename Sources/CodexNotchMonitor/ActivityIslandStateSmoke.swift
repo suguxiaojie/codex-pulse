@@ -1374,8 +1374,10 @@ float activityQuantumMotionDensity(float2 pixel, float2 resolution, float front,
     float2 cell;
     float seed;
     float particle = activityQuantumGrain(point, cell, seed);
+    // Ambient cards (0.1 < w <= 0.5) keep a faint field ahead of the progress front.
     float activation = u.quantumEnabled.w > 0.5 ? 1.0
-        : activityQuantumFrontCoverage(pixel, resolution, front, u.completionFillProgress);
+        : max(activityQuantumFrontCoverage(pixel, resolution, front, u.completionFillProgress),
+              u.quantumEnabled.w > 0.1 ? 0.12 : 0.0);
     float packet = activityQuantumTransportPulse(pixel, resolution, front, phase);
     float restingWeight = max(0.0, 1.0 - dot(mode, float4(1.0)) - failure);
     float groupSeed = activityStateSmokeHash(floor(cell / 7.0) + 263.0);
@@ -1573,13 +1575,17 @@ float4 activityStateSmokeSample(VertexOut in, ActivityStateSmokeUniforms u) {
     if (u.effectStyle >= 1.5 && u.effectStyle < 2.5) {
         density = activityQuantumMotionDensity(pixel, resolution, completionFront, u);
     } else if (u.effectStyle >= 2.5) {
+        bool ambient = !fullSurface && u.quantumEnabled.w > 0.1;
         density = activityProgressSloshDensity(
             uv,
-            completionFront,
+            ambient ? 1.35 : completionFront,
             u.fieldTime,
             u.pulse,
             u.turbulence
         );
+        if (ambient) {
+            density *= max(activityQuantumFrontCoverage(pixel, resolution, boundedFront, u.completionFillProgress), 0.12);
+        }
     }
     if (u.effectStyle > 0.5) {
         float effectProgressGate = mix(
@@ -1771,19 +1777,20 @@ private final class ActivityStateSmokeRenderer:
     private var reduceMotion = false
     private var playbackEnabled = true
     private var fullSurface = false
+    private var ambientBase = false
 
     init(view: MTKView) throws {
-        guard let device = MTLCreateSystemDefaultDevice() else {
+        guard let device = ActivityStateSmokeMetalResources.device else {
             throw ActivityStateSmokeRendererError.unavailableMetal
         }
-        guard let queue = device.makeCommandQueue() else {
+        guard let queue = ActivityStateSmokeMetalResources.commandQueue else {
             throw ActivityStateSmokeRendererError.missingCommandQueue
         }
 
         view.device = device
         view.colorPixelFormat = .bgra8Unorm
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = ActivityStateSmokeQuality.current.framesPerSecond
         view.enableSetNeedsDisplay = false
         view.isPaused = false
         view.framebufferOnly = true
@@ -1805,11 +1812,22 @@ private final class ActivityStateSmokeRenderer:
         applyPlaybackState(in: view)
     }
 
+    func setAmbientBase(_ enabled: Bool, in view: MTKView) {
+        guard ambientBase != enabled else { return }
+        ambientBase = enabled
+        if view.isPaused { view.needsDisplay = true }
+    }
+
     func setFullSurfacePresentation(_ enabled: Bool, in view: MTKView) {
         guard fullSurface != enabled else { return }
         fullSurface = enabled
-        view.preferredFramesPerSecond = enabled ? 30 : 60
+        applyQuality(in: view)
         applyPlaybackState(in: view)
+    }
+
+    func applyQuality(in view: MTKView) {
+        let quality = ActivityStateSmokeQuality.current
+        view.preferredFramesPerSecond = fullSurface ? quality.fullSurfaceFramesPerSecond : quality.framesPerSecond
     }
 
     func setReduceMotion(_ enabled: Bool, in view: MTKView) {
@@ -2006,7 +2024,7 @@ private final class ActivityStateSmokeRenderer:
             quantumClock: SIMD4<Float>(quantumMotion.displacement.x,
                 quantumMotion.displacement.y, quantumMotion.phase, quantumMotion.profile.failure),
             quantumEnabled: SIMD4<Float>(1, quantumMotion.profile.visibility,
-                state == .completed ? 1 : 0, fullSurface ? 1 : 0),
+                state == .completed ? 1 : 0, fullSurface ? 1 : ambientBase ? 0.25 : 0),
             opacityStopPositions: currentProfile.opacityCurve.stopPositions,
             opacityStopOpacities: currentProfile.opacityCurve.stopOpacities,
             background: currentProfile.background,
@@ -2060,9 +2078,32 @@ private final class ActivityStateSmokeRenderer:
     }
 }
 
+/// One Metal device and command queue shared by every task card.
+private enum ActivityStateSmokeMetalResources {
+    static let device = MTLCreateSystemDefaultDevice()
+    static let commandQueue = device?.makeCommandQueue()
+}
+
+/// The user's "特效画质" choice, applied to every live task-card effect.
+enum ActivityStateSmokeQuality {
+    static let didChange = Notification.Name("ActivityStateSmokeQualityDidChange")
+    static var current: ActivityIslandEffectQuality = .balanced {
+        didSet { if current != oldValue { NotificationCenter.default.post(name: didChange, object: nil) } }
+    }
+}
+
 final class ActivityStateSmokeMetalView: MTKView {
     private var smokeRenderer: ActivityStateSmokeRenderer?
     private(set) var fullSurfacePresentation = false
+    private(set) var ambientBasePresentation = false
+    private var requestedPlayback = true
+    private var screenSleeping = false
+    private var sessionInactive = false
+    private var screenLocked = false
+    /// Task cards size their drawable from the quality setting; the settings preview manages its own.
+    var managesDrawableSize = true {
+        didSet { autoResizeDrawable = false; updateDrawableSize() }
+    }
 
     var isRendererAvailable: Bool {
         smokeRenderer != nil
@@ -2071,6 +2112,100 @@ final class ActivityStateSmokeMetalView: MTKView {
     init(frame: NSRect) {
         super.init(frame: frame, device: nil)
         smokeRenderer = try? ActivityStateSmokeRenderer(view: self)
+        autoResizeDrawable = false
+        // Pause when nobody can see the effect, or when the Mac asks to save power.
+        for name in [NSWindow.didChangeOcclusionStateNotification,
+                     NSApplication.didHideNotification, NSApplication.didUnhideNotification,
+                     .NSProcessInfoPowerStateDidChange, ProcessInfo.thermalStateDidChangeNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(playbackEnvironmentChanged), name: name, object: nil)
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(qualityChanged),
+                                               name: ActivityStateSmokeQuality.didChange, object: nil)
+        for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification,
+                     NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(playbackEnvironmentChanged), name: name, object: nil)
+        }
+        for name in ["com.apple.screenIsLocked", "com.apple.screenIsUnlocked"] {
+            DistributedNotificationCenter.default().addObserver(self, selector: #selector(playbackEnvironmentChanged),
+                                                                name: Notification.Name(name), object: nil)
+        }
+        // Task cards advance with progress over a faint full-card field (方案 2).
+        setFullSurfacePresentation(false)
+        setAmbientBase(true)
+        synchronizePlayback()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateDrawableSize()
+        synchronizePlayback()
+    }
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateDrawableSize()
+    }
+    override func layout() {
+        super.layout()
+        updateDrawableSize()
+        synchronizePlayback()
+    }
+    override func viewDidHide() { super.viewDidHide(); synchronizePlayback() }
+    override func viewDidUnhide() { super.viewDidUnhide(); synchronizePlayback() }
+
+    private func updateDrawableSize() {
+        guard managesDrawableSize else { return }
+        let scale = (window?.backingScaleFactor ?? 1) * ActivityStateSmokeQuality.current.resolutionScale
+        let size = CGSize(width: max(1, ceil(bounds.width * scale)), height: max(1, ceil(bounds.height * scale)))
+        if drawableSize != size {
+            drawableSize = size
+            redrawIfPaused()
+        }
+    }
+
+    @objc private func qualityChanged(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.qualityChanged(notification) }
+            return
+        }
+        // The settings preview keeps its own bounded frame rate and drawable.
+        guard managesDrawableSize else { return }
+        smokeRenderer?.applyQuality(in: self)
+        updateDrawableSize()
+    }
+
+    @objc private func playbackEnvironmentChanged(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.playbackEnvironmentChanged(notification) }
+            return
+        }
+        switch notification.name {
+        case NSWorkspace.screensDidSleepNotification: screenSleeping = true
+        case NSWorkspace.screensDidWakeNotification: screenSleeping = false
+        case NSWorkspace.sessionDidResignActiveNotification: sessionInactive = true
+        case NSWorkspace.sessionDidBecomeActiveNotification: sessionInactive = false
+        case Notification.Name("com.apple.screenIsLocked"): screenLocked = true
+        case Notification.Name("com.apple.screenIsUnlocked"): screenLocked = false
+        default: break
+        }
+        synchronizePlayback()
+    }
+
+    /// Effective playback: what the caller asked for, gated by visibility and power state.
+    var environmentAllowsPlayback: Bool {
+        window?.occlusionState.contains(.visible) == true
+            && !isHiddenOrHasHiddenAncestor && !NSApp.isHidden
+            && !screenSleeping && !screenLocked && !sessionInactive
+            && !ProcessInfo.processInfo.isLowPowerModeEnabled
+            && ProcessInfo.processInfo.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
+    }
+    private func synchronizePlayback() {
+        smokeRenderer?.setPlaybackEnabled(requestedPlayback && environmentAllowsPlayback, in: self)
     }
 
     @available(*, unavailable)
@@ -2079,12 +2214,18 @@ final class ActivityStateSmokeMetalView: MTKView {
     }
 
     func setPlaybackEnabled(_ enabled: Bool) {
-        smokeRenderer?.setPlaybackEnabled(enabled, in: self)
+        requestedPlayback = enabled
+        synchronizePlayback()
     }
 
     func setFullSurfacePresentation(_ enabled: Bool) {
         fullSurfacePresentation = enabled
         smokeRenderer?.setFullSurfacePresentation(enabled, in: self)
+    }
+
+    func setAmbientBase(_ enabled: Bool) {
+        ambientBasePresentation = enabled
+        smokeRenderer?.setAmbientBase(enabled, in: self)
     }
 
     func setReduceMotion(_ enabled: Bool) {
@@ -2131,6 +2272,8 @@ final class CodexActivityStateSmokePreviewHostView: NSView {
         wantsLayer = true
         layer?.masksToBounds = true
         addSubview(smokeView)
+        smokeView.managesDrawableSize = false
+        smokeView.setFullSurfacePresentation(false)
         smokeView.setPlaybackEnabled(false)
         smokeView.preferredFramesPerSecond = 24
         smokeView.autoResizeDrawable = false

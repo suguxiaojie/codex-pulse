@@ -3,7 +3,10 @@ import Foundation
 @main
 enum CostSmokeTests {
     static func main() {
+        try! CostIncrementalTests.run()
+        try! CostAggregationCacheTests.run()
         verifyCompressedCostRollouts()
+        verifyTimestampFormats()
         verifyArchivedSessionsAreIncludedOnce()
         verifyMovedThreadUsesCurrentProject()
         verifyTokenActivityGridGeometry()
@@ -13,6 +16,11 @@ enum CostSmokeTests {
         verifyAccountTimelineSplitsExistingSession()
         verifyLifetimeTokens()
         verifyAstraOfficialPricing()
+        if ProcessInfo.processInfo.environment["COST_SYNTHETIC_ONLY"] == "1" {
+            CostAggregationCacheTests.verifyPricing()
+            print("Synthetic cost smoke tests passed; real-home fetch skipped.")
+            return
+        }
         let service = CostService()
         let fetchStartedAt = Date()
         var immediateSnapshotSeconds: TimeInterval = 0
@@ -77,6 +85,28 @@ enum CostSmokeTests {
             exit(0)
         }
         RunLoop.main.run()
+    }
+
+    private static func verifyTimestampFormats() {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".tmp/cost-timestamp-tests/\(UUID().uuidString)")
+        let sessions = root.appendingPathComponent(".codex/sessions")
+        try! FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let timestamps = ["2026-10-26T01:00:00.125Z", "2026-10-26T01:00:01Z", "2026-10-26T09:00:02.250+08:00", "invalid"]
+        let lines = timestamps.map { timestamp in
+            try! JSONSerialization.data(withJSONObject: ["timestamp": timestamp, "type": "event_msg",
+                "payload": ["type": "token_count", "info": ["last_token_usage": ["input_tokens": 100, "output_tokens": 10]]]],
+                options: [.sortedKeys])
+        }
+        var data = Data()
+        for line in lines { data.append(line); data.append(0x0A) }
+        try! data.write(to: sessions.appendingPathComponent("timestamps.jsonl"))
+        let events = CostService.scanCodex(homeDirectory: root, lookbackDays: nil).sorted { $0.timestamp < $1.timestamp }
+        check(events.count == 3, "reused timestamp formatters accept fractional, whole-second and offset dates; reject invalid dates")
+        check(abs(events[1].timestamp.timeIntervalSince(events[0].timestamp) - 0.875) < 0.000_001, "whole-second fallback preserves timestamp")
+        check(abs(events[2].timestamp.timeIntervalSince(events[0].timestamp) - 2.125) < 0.000_001, "timezone offset and fractional precision preserved")
+        check(events.allSatisfy { $0.input == 100 && $0.output == 10 }, "timestamp reuse preserves usage counters")
     }
 
     private static func verifyCompressedCostRollouts() {

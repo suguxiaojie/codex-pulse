@@ -45,9 +45,72 @@ enum ActivitySessionStateTests {
         sqlite3_close(database)
         let service = SessionActivityService()
         let now = Date()
+        let fastFile = root.appendingPathComponent("fast-mode.jsonl")
+        func fastContext(_ tier: Any?, turn: String) throws -> Data {
+            var payload: [String: Any] = ["turn_id": turn, "model": "gpt-test"]
+            if let tier { payload["service_tier"] = tier }
+            var data = try JSONSerialization.data(withJSONObject: ["type": "turn_context", "payload": payload])
+            data.append(0x0A)
+            return data
+        }
+        for (tier, expected) in [("fast", true), ("priority", true), ("default", false), ("standard", false), ("flex", false)] {
+            try fastContext(tier, turn: tier).write(to: fastFile)
+            expect(service.readSnapshot(from: fastFile)?.fastMode == expected, "explicit tier maps to Fast mode: " + tier)
+        }
+        for value: Any in ["auto", "unexpected", true, 1, NSNull()] {
+            try fastContext(value, turn: UUID().uuidString).write(to: fastFile)
+            expect(service.readSnapshot(from: fastFile)?.fastMode == nil, "invalid or automatic tier stays unknown")
+        }
+        var fastLines = try fastContext("fast", turn: "old")
+        fastLines.append(try fastContext(nil, turn: "new"))
+        try fastLines.write(to: fastFile)
+        expect(service.readSnapshot(from: fastFile)?.fastMode == nil, "new turn cannot inherit old Fast mode")
+        let settingsFile = root.appendingPathComponent("owned-settings.jsonl")
+        func settingsLine(owner: String?, tier: Any) throws -> Data {
+            var payload: [String: Any] = ["type": "thread_settings_applied", "thread_settings": ["service_tier": tier]]
+            if let owner { payload["thread_id"] = owner }
+            var data = try JSONSerialization.data(withJSONObject: ["type": "event_msg", "payload": payload])
+            data.append(0x0A)
+            return data
+        }
+        var settingsLines = Data(#"{"type":"session_meta","payload":{"id":"owned-session","cwd":"/fixture"}}"#.utf8)
+        settingsLines.append(0x0A)
+        settingsLines.append(try settingsLine(owner: "owned-session", tier: "priority"))
+        settingsLines.append(try fastContext(nil, turn: "first"))
+        try settingsLines.write(to: settingsFile)
+        expect(service.readSnapshot(from: settingsFile)?.fastMode == true, "One current thread settings supply Fast even when turn context has no tier")
+        func appendSettings(_ data: Data) throws -> LocalSessionSnapshot? {
+            let handle = try FileHandle(forWritingTo: settingsFile)
+            try handle.seekToEnd(); try handle.write(contentsOf: data); try handle.close()
+            return service.readSnapshot(from: settingsFile)
+        }
+        let nextTurnSettings = try appendSettings(fastContext(nil, turn: "second"))
+        expect(nextTurnSettings?.fastMode == true, "session setting persists into next turn")
+        let foreignSettings = try appendSettings(settingsLine(owner: "different-session", tier: "default"))
+        expect(foreignSettings?.fastMode == true, "foreign checkpoint cannot overwrite session setting")
+        let unownedSettings = try appendSettings(settingsLine(owner: nil, tier: "default"))
+        expect(unownedSettings?.fastMode == true, "unowned checkpoint cannot overwrite session setting")
+        let clearedSettings = try appendSettings(settingsLine(owner: "owned-session", tier: NSNull()))
+        expect(clearedSettings?.fastMode == false, "explicit tier clear disables Fast")
+        let disabledNextTurn = try appendSettings(fastContext(nil, turn: "third"))
+        expect(disabledNextTurn?.fastMode == false, "disabled setting persists across turns")
+        let reenabledSettings = try appendSettings(settingsLine(owner: "owned-session", tier: "fast"))
+        expect(reenabledSettings?.fastMode == true, "live settings enable Fast again")
+        let unknownSettings = try appendSettings(settingsLine(owner: "owned-session", tier: "invalid"))
+        expect(unknownSettings?.fastMode == nil, "unrecognized setting clears stale Fast")
+        let invalidSettings = try appendSettings(settingsLine(owner: "owned-session", tier: true))
+        expect(invalidSettings?.fastMode == nil, "non-string setting is not Fast")
+        expect(SessionActivityService().readSnapshot(from: settingsFile)?.fastMode == nil, "cold and incremental settings parsing agree")
         let compactWorking = ActivitySessionSnapshot(sessionID: "compact-live", turnID: "one", projectID: "p",
             projectName: "Project", title: "Task", phase: .usingTool, actionText: "运行测试", updatedAt: now, tokenUsage: nil)
         expect(compactWorking.compactTaskText == "工作中 · 运行测试", "compact text includes actual activity instead of a phase-only label")
+        var fastRow = compactWorking
+        expect(fastRow.fastModeTitle.isEmpty && fastRow.modelTitle == fastRow.modelDetailsTitle, "unknown Fast mode has no label or separator")
+        fastRow.fastMode = true
+        expect(fastRow.fastModeTitle == "Fast" && fastRow.modelTitle.contains("Fast"), "enabled Fast mode shows only Fast")
+        fastRow.fastMode = false
+        expect(fastRow.fastModeTitle.isEmpty && fastRow.modelTitle == fastRow.modelDetailsTitle, "disabled Fast mode has no label or separator")
+        expect(!fastRow.hidingDetails().modelTitle.contains("Fast"), "privacy hides model metadata")
         var compactThinking = compactWorking; compactThinking.phase = .working; compactThinking.actionText = "正在思考"
         expect(compactThinking.compactTaskText == "思考中 · Task", "duplicate phase falls back to the task title")
         expect(compactWorking.hidingDetails().compactTaskText == "工作中 · 任务内容已隐藏", "compact privacy cannot leak task or action")
@@ -109,6 +172,31 @@ enum ActivitySessionStateTests {
                 "total_token_usage": ["total_tokens": total, "cached_input_tokens": 999999, "reasoning_output_tokens": 9999],
                 "last_token_usage": ["total_tokens": last]]]]
         }
+        let executionFailure: [String: Any] = ["exit_code": 1, "output": "fixture", "wall_time_seconds": 0.1]
+        let encodedFailure = String(decoding: try JSONSerialization.data(withJSONObject: executionFailure), as: UTF8.self)
+        expect(SessionActivityService.toolOutputFailed(["is_error": true]), "explicit Codex error flag is retained")
+        expect(SessionActivityService.toolOutputFailed(["output": executionFailure]), "structured execution failure is retained")
+        expect(SessionActivityService.toolOutputFailed(["output": [["type": "input_text", "text": encodedFailure]]]),
+            "Codex text content blocks preserve structured exit failures")
+        for output: Any in ["Error is a word in this document", "{\"status\":\"failed\"}", ["exit_code": 1],
+                           ["exit_code": true, "output": "", "wall_time_seconds": 1], ["is_error": 1]] {
+            expect(!SessionActivityService.toolOutputFailed(["output": output]), "ordinary text and ambiguous data cannot invent tool failure")
+        }
+        let toolEvents: [[String: Any]] = [
+            ["type": "session_meta", "payload": ["id": "tool-parity", "cwd": "/Demo"]], event("task_started", "one"),
+            ["type": "response_item", "payload": ["type": "function_call", "call_id": "a", "name": "shell_command", "arguments": "{}"]],
+            ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "a", "output": [["type": "input_text", "text": encodedFailure]]]],
+            ["type": "response_item", "payload": ["type": "function_call", "call_id": "a", "name": "shell_command", "arguments": "{}"]],
+            ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "a", "output": "late generic return"]]
+        ]
+        let toolFixture = try fixture("tool-outcome-parity", toolEvents)
+        let toolSnapshot = service.readSnapshot(from: toolFixture)!
+        expect(toolSnapshot.activities.count == 1 && toolSnapshot.activities[0].failed && !toolSnapshot.activities[0].isRunning,
+            "duplicate starts and generic returns cannot reopen or erase a known failure")
+        let newToolTurn = try fixture("tool-outcome-new-turn", toolEvents + [event("task_complete", "one"), event("task_started", "two"),
+            ["type": "response_item", "payload": ["type": "function_call", "call_id": "a", "name": "shell_command", "arguments": "{}"]]])
+        expect(service.readSnapshot(from: newToolTurn)?.activities.first?.failed == false,
+            "failure evidence is isolated to its turn")
         let publicMessage: [String: Any] = ["type": "response_item", "payload": ["type": "message", "role": "assistant",
             "channel": "commentary", "content": [["type": "output_text", "text": "紧凑态已经改成原项目的布局，正在验证当前动作。"]]]]
         let sessionUsageFile = try fixture("session-usage", [
@@ -268,12 +356,27 @@ enum ActivitySessionStateTests {
         stepState.update(projects: projects([stepSource]), snapshots: [stepSource], usages: [:], now: now, completionHold: 8)
         expect(stepState.rows.first?.recentSteps.count == 3 && stepState.rows.first?.recentSteps.last?.state == .waiting, "same-turn sparse wait keeps steps and marks last waiting")
         expect(stepState.rows.first?.hidingDetails().recentSteps.isEmpty == true, "privacy removes step titles")
-        let stepEnd = snapshot("steps", active: false, reason: .completed)
+        let stepEnd = snapshot("steps", active: false, reason: .completed, items: [])
         stepState.update(projects: [], snapshots: [stepEnd], usages: [:], now: now, completionHold: 8)
-        expect(stepState.rows.first?.recentSteps.map(\.state) == [.done, .done, .done], "receipt preserves steps as done")
+        expect(stepState.rows.first?.recentSteps.map(\.state) == [.done, .done, .ended], "task completion does not fabricate missing tool success")
         stepState.update(projects: [], snapshots: [stepEnd], usages: [:], now: now.addingTimeInterval(8), completionHold: 8)
         expect(stepState.rows.first?.isRetainedReceipt == true, "receipt boundary marks retained row")
         expect(stepState.rows.first?.hidingDetails().isRetainedReceipt == true, "privacy preserves lifecycle retention flag")
+        let frozenEnd = stepState.rows.first?.updatedAt
+        var resolvedItems = stepItems
+        resolvedItems[3].isRunning = false; resolvedItems[3].failed = true
+        let lateResult = snapshot("steps", active: false, reason: .completed, items: resolvedItems)
+        stepState.update(projects: [], snapshots: [lateResult], usages: [:], now: now.addingTimeInterval(9), completionHold: 8)
+        expect(stepState.rows.first?.recentSteps.last?.state == .failed && stepState.rows.first?.updatedAt == frozenEnd,
+            "late explicit results refine nodes without restarting the completion receipt")
+        let mixedSteps: [IslandStep] = [
+            .init(id: "running", title: "A", state: .running), .init(id: "old", title: "B", state: .done),
+            .init(id: "failed", title: "C", state: .failed), .init(id: "done", title: "D", state: .done)]
+        expect(IslandStep.visibleSteps(from: mixedSteps).map(\.id) == ["running", "failed", "done"],
+            "common node policy keeps pending work and recent results")
+        expect(mixedSteps.map { $0.endingTask().state } == [.ended, .done, .failed, .done],
+            "both providers preserve known results on completion, cancellation and failure")
+        expect(IslandStep.visibleSteps(from: mixedSteps + mixedSteps).count == 3, "node identity dedup preserves three-slot bound")
         let nextSteps = snapshot("steps", turn: "next", items: [])
         stepState.update(projects: projects([nextSteps]), snapshots: [nextSteps], usages: [:], now: now, completionHold: 8)
         expect(stepState.rows.first?.turnID == "next" && stepState.rows.first?.recentSteps.isEmpty == true && stepState.rows.first?.isRetainedReceipt == false, "new turn replaces retained receipt and clears steps")

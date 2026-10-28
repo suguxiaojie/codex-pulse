@@ -2,6 +2,7 @@ import Foundation
 
 enum SystemNotificationTests {
     static func run() throws {
+        try creditExpiryReminders()
         func signal(_ id: String, text: String = "重置预告", active: Bool = true) -> CodexResetRadarSignal {
             .init(tweetId: id, summary: text, at: "2026-10-23T10:00:00Z",
                   url: "https://x.com/thsottiaux/status/\(id)", kind: "signal",
@@ -114,5 +115,67 @@ enum SystemNotificationTests {
         precondition(SystemNotificationAction.resolve(category: "", action: "", isDefault: true) == .openSource)
         precondition(SystemNotificationAction.resolve(category: "", action: "dismiss", isDefault: false) == .none)
         print("System notification tests: passed")
+    }
+}
+
+extension SystemNotificationTests {
+    static func creditExpiryReminders() throws {
+        let expiry = Date(timeIntervalSince1970: 2_000_000_000)
+        func card(_ id: String = "card-a", status: String = "available", expires: Date? = nil) -> QuotaResetCredit {
+            .init(id: id, resetType: "weekly", status: status, grantedAt: nil,
+                  expiresAt: expires ?? expiry, title: "周额度卡", description: nil)
+        }
+        func summary(_ credits: [QuotaResetCredit], count: Int? = nil) -> QuotaResetCreditSummary {
+            .init(availableCount: count ?? credits.count, credits: credits)
+        }
+        let snapshot = summary([card()])
+        var ledger = CreditExpiryReminderLedger()
+        func at(_ hours: Double) -> Date { expiry.addingTimeInterval(-hours * 3600) }
+        precondition(ledger.observe(snapshot, accountID: "account-a", now: at(24.01)).isEmpty)
+        let first = ledger.observe(snapshot, accountID: "account-a", now: at(24))
+        precondition(first.count == 1 && first[0].subtitle == "24 小时内到期")
+        precondition(first[0].category == "CREDIT_EXPIRY" && first[0].playsSound)
+        precondition(first[0].title == "重置卡即将过期")
+        precondition(first[0].body.contains("周额度卡") && !first[0].identifier.contains("account-a"))
+        precondition(first[0].islandAlert?.kind == .creditExpiry)
+        precondition(first[0].islandAlert?.isEnabled(signals: false, recovery: false) == true)
+        precondition(first[0].islandAlert?.isEnabled(signals: true, recovery: true, credits: false) == false)
+        var queue = IslandAlertQueue()
+        queue.receive(first[0].islandAlert!, enabled: true, available: true)
+        queue.advance(now: at(24), blocked: false, hovered: false, available: true, credits: false)
+        precondition(queue.current == nil && queue.pending.isEmpty, "disabling credit reminders removes queued cards")
+        precondition(SystemNotificationAction.resolve(category: "CREDIT_EXPIRY", action: "", isDefault: true) == .none)
+        ledger = CreditExpiryReminderLedger(data: ledger.data)
+        precondition(ledger.observe(snapshot, accountID: "account-a", now: at(23)).isEmpty)
+        let second = ledger.observe(snapshot, accountID: "account-a", now: at(12))
+        precondition(second.count == 1 && second[0].subtitle == "12 小时内到期" && second[0].identifier != first[0].identifier)
+        precondition(ledger.observe(snapshot, accountID: "account-a", now: at(12)).isEmpty)
+        let third = ledger.observe(snapshot, accountID: "account-a", now: at(6))
+        precondition(third.count == 1 && third[0].subtitle == "6 小时内到期")
+        precondition(ledger.observe(snapshot, accountID: "account-a", now: at(5)).isEmpty)
+        precondition(ledger.observe(snapshot, accountID: "account-a", now: at(8)).isEmpty, "backward clock cannot replay older stages")
+        precondition(ledger.observe(snapshot, accountID: "account-b", now: at(5)).count == 1, "account ledgers are isolated")
+        precondition(ledger.observe(snapshot, accountID: "account-a", now: expiry).isEmpty)
+        var catchup = CreditExpiryReminderLedger()
+        let late = catchup.observe(snapshot, accountID: "a", now: at(4))
+        precondition(late.count == 1 && late[0].subtitle == "6 小时内到期", "missed stages collapse to one urgent reminder")
+        precondition(catchup.observe(snapshot, accountID: "a", now: at(3)).isEmpty)
+        var filters = CreditExpiryReminderLedger()
+        precondition(filters.observe(snapshot, accountID: nil, now: at(20)).isEmpty)
+        precondition(filters.observe(nil, accountID: "a", now: at(20)).isEmpty)
+        precondition(filters.observe(summary([card()], count: 0), accountID: "a", now: at(20)).isEmpty)
+        for status in ["used", "redeemed", "expired", "unknown", "revoked"] {
+            precondition(filters.observe(summary([card(status: status)]), accountID: "a", now: at(20)).isEmpty)
+        }
+        let noExpiry = QuotaResetCredit(id: "no-date", resetType: "weekly", status: "available",
+            grantedAt: nil, expiresAt: nil, title: nil, description: nil)
+        precondition(filters.observe(summary([noExpiry, card("reset-credit-0"), card("")]), accountID: "a", now: at(20)).isEmpty)
+        let multiple = filters.observe(summary([card(), card(), card("card-b")]), accountID: "a", now: at(20))
+        precondition(multiple.count == 2, "duplicates collapse while separate cards remain independent")
+        let extended = filters.observe(summary([card(expires: expiry.addingTimeInterval(3600))]), accountID: "a", now: at(20))
+        precondition(extended.count == 1 && extended[0].identifier != multiple[0].identifier, "changed expiry has a new reminder timeline")
+        var damaged = CreditExpiryReminderLedger(data: Data("invalid".utf8))
+        precondition(damaged.observe(snapshot, accountID: "a", now: at(20)).count == 1)
+        print("Credit expiry reminders: 24/12/6 thresholds, restart, catch-up, account scope, availability, duplicates and expiry changes passed")
     }
 }

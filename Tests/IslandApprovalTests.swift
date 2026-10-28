@@ -236,9 +236,11 @@ import Foundation
         expect(asyncFixture.submissions[0]["targetClientId"] as? String == "fixture-owner"
             && asyncFixture.submissions[0]["targetClientIds"] == nil, "steer request also uses singular target only")
         await asyncClient.stop()
-        for mode in ["resolved", "gone", "pending", "empty", "running"] {
+        for mode in ["resolved", "interrupted", "failed", "canonical", "gone", "wrong-answer", "wrong-turn", "pending", "empty", "running"] {
             var initial = state([], items: [item])
-            if mode != "running" { initial["turns"] = [["turnId": "turn", "status": "completed", "items": [item]]] }
+            if mode != "running" {
+                initial["turns"] = [["turnId": "turn", "status": ["interrupted", "failed"].contains(mode) ? mode : "completed", "items": [item]]]
+            }
             let fixture = CodexDesktopIPCFixture(state: initial)
             fixture.setSteerResultTurn(mode == "empty" ? "" : "new-turn")
             let (client, _, snapshot) = try await fixture.connectedClient()
@@ -246,25 +248,68 @@ import Foundation
             let wire = IslandCodexApproval(snapshot.requests[0])!
             let question = wire.questions[0]
             let response = wire.response("answers", answers: [question.id: "回答"])!
-            if mode == "resolved" {
+            let shouldResolve = ["resolved", "interrupted", "failed", "canonical"].contains(mode)
+            if shouldResolve || ["wrong-answer", "wrong-turn", "empty"].contains(mode) {
                 let reply = CodexDesktopRequestProjector.asyncReplyOpeningTag
-                    + String(decoding: data([["questionItemId": question.id, "question": question.title, "answer": "回答"]]), as: UTF8.self)
+                    + String(decoding: data([["questionItemId": question.id, "question": question.title,
+                        "answer": mode == "wrong-answer" ? "别的答案" : "回答"]]), as: UTF8.self)
                     + CodexDesktopRequestProjector.asyncReplyClosingTag
+                let replyTurn: [String: Any] = ["turnId": mode == "wrong-turn" ? "other-turn" : "new-turn",
+                    "status": "inProgress", "items": [["type": "userMessage", "content": [["type": "text", "text": reply]]]]]
                 var next = initial
-                next["turns"] = [["turnId": "turn", "status": "completed", "items": [item,
-                    ["type": "steeringUserMessage", "status": "accepted", "input": [["type": "text", "text": reply]]]]]]
+                next["turns"] = [replyTurn]
+                if mode == "canonical" {
+                    next["turns"] = []
+                    next["turnHistory"] = ["kind": "canonical", "history": ["entitiesByKey": ["reply": replyTurn],
+                        "islands": [["newerBoundary": ["status": "exhausted"], "entries": [["value": "reply"]]]]]]
+                }
                 fixture.setStateAfterSteer(next)
-            } else if mode == "gone" { fixture.setStateAfterSteer(state([], items: [])) }
-            else if mode == "pending" { fixture.setStateAfterSteer(initial) }
-            if mode == "resolved" || mode == "gone" {
+            } else if mode == "gone" {
+                fixture.setStateAfterSteer(["id": "conversation", "source": "appServer", "requests": [],
+                    "turns": [["turnId": "new-turn", "status": "inProgress", "items": []]]])
+            } else if mode == "pending" { fixture.setStateAfterSteer(initial) }
+            if shouldResolve {
                 let outcome = try await client.submit(handle: wire.handle, result: response)
-                expect(outcome == .confirmedResolved, "resolved post-turn answer reports confirmed success")
+                expect(outcome == .confirmedResolved, "exact reply in acknowledged new turn confirms success")
                 expect(fixture.followingCount == 3, "ended answer confirms a post-dispatch snapshot")
             } else {
                 await fails(client, wire.handle, response, .outcomeUnknown)
-                await fails(client, wire.handle, response, .alreadySubmitted)
+                await fails(client, wire.handle, response,
+                    ["pending", "running", "empty"].contains(mode) ? .alreadySubmitted : .staleRequest)
             }
             expect(fixture.submissions.count == 1, "ended and uncertain answers never dispatch twice")
+            let submission = fixture.submissions[0]
+            expect(submission["targetClientId"] as? String == "fixture-owner" && submission["targetClientIds"] == nil,
+                "reply stays with the exact owner")
+            if mode != "running" {
+                expect(submission["method"] as? String == "thread-follower-start-turn" && submission["version"] as? Int == 2,
+                    "inactive turn uses native start v2, never steer")
+                let params = submission["params"] as! [String: Any]
+                let start = params["turnStart"] as! [String: Any]
+                let request = start["request"] as! [String: Any]
+                let context = start["context"] as! [String: Any]
+                let restore = context["restoreMessage"] as! [String: Any]
+                let restoreContext = restore["context"] as! [String: Any]
+                let input = request["input"] as! [[String: Any]]
+                expect(Set(request.keys) == ["threadId", "input", "clientUserMessageId", "turnTrigger"],
+                    "reply does not override model, workspace or permissions")
+                expect(request["threadId"] as? String == "conversation"
+                    && request["turnTrigger"] as? String == "send_user_message_async_question"
+                    && context["inheritThreadSettings"] as? Bool == true, "reply inherits native thread settings")
+                expect(restore["id"] as? String == request["clientUserMessageId"] as? String
+                    && restore["text"] as? String == input[0]["text"] as? String
+                    && restoreContext["prompt"] as? String == input[0]["text"] as? String
+                    && restore["createdAt"] as? Int64 != nil, "native restore metadata preserves the tagged answer")
+                expect(CodexDesktopIPCClient.permitsSubmissionMessage(try DesktopIPCJSON.decode(data(submission), limit: 1_048_576), owner: "fixture-owner"),
+                    "exact async reply passes the restricted start gate")
+                for key in ["approvalPolicy", "model", "cwd"] {
+                    var altered = submission, alteredParams = params, alteredStart = start, alteredRequest = request
+                    alteredRequest[key] = "override"
+                    alteredStart["request"] = alteredRequest; alteredParams["turnStart"] = alteredStart; altered["params"] = alteredParams
+                    expect(!CodexDesktopIPCClient.permitsSubmissionMessage(try DesktopIPCJSON.decode(data(altered), limit: 1_048_576), owner: "fixture-owner"),
+                        "async reply gate rejects setting overrides")
+                }
+            }
             await client.stop()
         }
         let observedFixture = CodexDesktopIPCFixture(state: state([request()]))
@@ -291,7 +336,8 @@ import Foundation
         for method in CodexDesktopIPCClient.submissionMethods {
             let message: DesktopIPCJSON = .object(["type": .string("request"), "method": .string(method), "targetClientId": .string("owner")])
             expect(!CodexDesktopIPCClient.permitsObservationMessage(message), "ordinary writes cannot submit")
-            expect(CodexDesktopIPCClient.permitsSubmissionMessage(message, owner: "owner"), "submission gate permits exact owner")
+            expect(CodexDesktopIPCClient.permitsSubmissionMessage(message, owner: "owner") == (method != "thread-follower-start-turn"),
+                "start requires the restricted async reply payload, other replies require exact owner")
             expect(!CodexDesktopIPCClient.permitsSubmissionMessage(message, owner: "other"), "wrong owner blocked")
             for audience in [DesktopIPCJSON.array([.string("owner")]), .array([]), .null] {
                 var malformed = message.object!; malformed["targetClientIds"] = audience

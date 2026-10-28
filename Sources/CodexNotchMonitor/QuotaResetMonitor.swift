@@ -461,18 +461,16 @@ final class QuotaResetMonitor {
 
     private func nearbyEvidence(in feed: TiboFeed?, detectedAt: Date, changes: [QuotaResetChange], plans: [String]?, now: Date) -> [TiboEvent] {
         guard let feed else { return [] }
-        return feed.officialEvidenceEvents(now: now).filter { event in
+        return feed.officialEvidenceEvents(now: now).compactMap { event -> (event: TiboEvent, distance: TimeInterval)? in
             guard [.resetCompleted, .resetScheduled].contains(event.kind), event.confidence >= 0.65,
                   let time = event.effectiveDate ?? event.announcedDate,
                   abs(time.timeIntervalSince(detectedAt)) <= 3 * 3600,
                   time <= now.addingTimeInterval(30 * 60),
                   scopeMatches(event, changes: changes, plans: plans)
-            else { return false }
-            return event.kind != .resetScheduled || event.effectiveDate != nil
-        }.sorted {
-            abs(($0.effectiveDate ?? $0.announcedDate ?? .distantPast).timeIntervalSince(detectedAt))
-                < abs(($1.effectiveDate ?? $1.announcedDate ?? .distantPast).timeIntervalSince(detectedAt))
-        }
+            else { return nil }
+            guard event.kind != .resetScheduled || event.effectiveDate != nil else { return nil }
+            return (event, abs(time.timeIntervalSince(detectedAt)))
+        }.sorted { $0.distance < $1.distance }.map(\.event)
     }
 
     private func scopeMatches(_ event: TiboEvent, changes: [QuotaResetChange], plans: [String]?) -> Bool {

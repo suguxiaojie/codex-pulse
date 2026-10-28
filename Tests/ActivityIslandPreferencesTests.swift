@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -16,10 +17,10 @@ struct ActivityIslandPreferencesTests {
         expect(ActivityIslandPreferences.defaults.floatingUsageEnabled && ActivityIslandPreferences.defaults.glassAppearance == .dark,
             "unified glass appearance defaults to dark")
         defaults.set(false, forKey: ActivityIslandPreferenceKey.floatingUsageEnabled)
-        defaults.set("light", forKey: ActivityIslandPreferenceKey.usageCapsuleTone)
+        defaults.set("light", forKey: "activityIsland.usageCapsuleTone") // retired key, never read
         expect(!ActivityIslandPreferences.load(from: defaults).floatingUsageEnabled && ActivityIslandPreferences.load(from: defaults).glassAppearance == .dark,
             "legacy capsule light does not expand to the footer")
-        expect(defaults.string(forKey: ActivityIslandPreferenceKey.usageCapsuleTone) == "light", "legacy preference remains intact")
+        expect(defaults.string(forKey: "activityIsland.usageCapsuleTone") == "light", "legacy preference remains intact")
         for appearance in ActivityIslandGlassAppearance.allCases {
             defaults.set(appearance.rawValue, forKey: ActivityIslandPreferenceKey.glassAppearance)
             expect(ActivityIslandPreferences.load(from: defaults).glassAppearance == appearance, "new appearance persists")
@@ -34,6 +35,62 @@ struct ActivityIslandPreferencesTests {
         expect(ActivityIslandPreferences.load(from: defaults).glassAppearance == .dark, "invalid appearance falls back to dark")
         defaults.removeObject(forKey: ActivityIslandPreferenceKey.floatingUsageEnabled)
         defaults.removeObject(forKey: ActivityIslandPreferenceKey.glassAppearance)
+        expect(ActivityIslandPreferences.defaults.effectQuality == .balanced, "effect quality defaults to balanced")
+        expect(ActivityIslandEffectQuality.allCases.map(\.framesPerSecond) == [60, 30, 24]
+               && ActivityIslandEffectQuality.allCases.map(\.fullSurfaceFramesPerSecond) == [60, 30, 24]
+               && ActivityIslandEffectQuality.allCases.map(\.resolutionScale) == [1, 0.75, 0.5], "quality tiers match the agreed values")
+        defaults.set("smooth", forKey: ActivityIslandPreferenceKey.effectQuality)
+        expect(ActivityIslandPreferences.load(from: defaults).effectQuality == .smooth, "effect quality persists")
+        defaults.set("ultra", forKey: ActivityIslandPreferenceKey.effectQuality)
+        expect(ActivityIslandPreferences.load(from: defaults).effectQuality == .balanced, "invalid effect quality falls back to balanced")
+        defaults.removeObject(forKey: ActivityIslandPreferenceKey.effectQuality)
+        let pet = ActivityIslandPreferences.defaults
+        expect(pet.clawdEnabled && pet.clawdSize == .medium, "Clawd defaults on, medium")
+        expect(IslandClawdSize.allCases.map(\.pixel) == [1.6, 2.2, 2.8], "Clawd sizes match the 18/24/31 pt design")
+        defaults.set(false, forKey: ActivityIslandPreferenceKey.clawdEnabled)
+        defaults.set("large", forKey: ActivityIslandPreferenceKey.clawdSize)
+        let loaded = ActivityIslandPreferences.load(from: defaults)
+        expect(!loaded.clawdEnabled && loaded.clawdSize == .large, "Clawd preferences persist")
+        defaults.set("huge", forKey: ActivityIslandPreferenceKey.clawdSize)
+        expect(ActivityIslandPreferences.load(from: defaults).clawdSize == .medium, "invalid Clawd size falls back to medium")
+        for key in [ActivityIslandPreferenceKey.clawdEnabled, ActivityIslandPreferenceKey.clawdSize] {
+            defaults.removeObject(forKey: key)
+        }
+        // Settings consolidation: attention sound, expand trigger, display, capsule style, confetti off, reset keys.
+        let fresh = ActivityIslandPreferences.defaults
+        expect(fresh.attentionSound == .ping && fresh.expandTrigger == .hover && fresh.displayTarget == .automatic,
+               "new settings default to ping, hover and automatic display")
+        defaults.set("off", forKey: ActivityIslandPreferenceKey.attentionSound)
+        expect(ActivityIslandPreferences.load(from: defaults).attentionSound == nil, "attention sound can be turned off")
+        defaults.set("Hero", forKey: ActivityIslandPreferenceKey.attentionSound)
+        expect(ActivityIslandPreferences.load(from: defaults).attentionSound == .hero, "attention tone persists")
+        defaults.set("click", forKey: ActivityIslandPreferenceKey.expandTrigger)
+        defaults.set("main", forKey: ActivityIslandPreferenceKey.displayTarget)
+        let chosen = ActivityIslandPreferences.load(from: defaults)
+        expect(chosen.expandTrigger == .click && chosen.displayTarget == .main, "expand trigger and display persist")
+        defaults.set("tap", forKey: ActivityIslandPreferenceKey.expandTrigger)
+        defaults.set("left", forKey: ActivityIslandPreferenceKey.displayTarget)
+        let invalid = ActivityIslandPreferences.load(from: defaults)
+        expect(invalid.expandTrigger == .hover && invalid.displayTarget == .automatic, "invalid trigger and display fall back")
+        defaults.set("display:1552-41178-0", forKey: ActivityIslandPreferenceKey.displayTarget)
+        expect(ActivityIslandPreferences.load(from: defaults).displayTarget == .display("1552-41178-0"), "a specific display persists")
+        defaults.set("display:", forKey: ActivityIslandPreferenceKey.displayTarget)
+        expect(ActivityIslandPreferences.load(from: defaults).displayTarget == .automatic, "empty display identity falls back")
+        expect(IslandDisplayInfo.screen(for: .display("missing-display")) == nil, "a disconnected display yields no screen")
+        let connected = IslandDisplayInfo.connected()
+        expect(connected.count == NSScreen.screens.count && Set(connected.map(\.id)).count == connected.count
+               && connected.filter(\.isMain).count == min(1, connected.count), "connected displays have unique identities and one main")
+        for style in ActivityIslandCapsuleStyle.allCases {
+            expect(ActivityIslandCapsuleStyle.current(material: style.material, appearance: style.appearance ?? .dark) == style,
+                   "capsule style round-trips through material and appearance")
+        }
+        defaults.set("off", forKey: ActivityIslandPreferenceKey.confettiIntensity)
+        expect(ActivityIslandPreferences.load(from: defaults).confettiIntensity == .off
+               && !ActivityIslandConfettiIntensity.playable.contains(.off), "confetti can be turned off")
+        expect(Set(ActivityIslandPreferenceKey.all).count == ActivityIslandPreferenceKey.all.count
+               && ActivityIslandPreferenceKey.all.allSatisfy { $0.hasPrefix("activityIsland.") }, "reset touches only island keys")
+        for key in ActivityIslandPreferenceKey.all { defaults.removeObject(forKey: key) }
+        expect(ActivityIslandPreferences.load(from: defaults) == .defaults, "reset restores every default")
         // Deliberately hostile legacy values must not affect the new island.
         let retired: [String: Any] = ["enabled": false, "mode": "menuBar", "screen": "main", "position": "trailing",
             "visualStyle": "particleOrb", "surfaceOpacity": 0.1, "surfaceScale": 0.25,

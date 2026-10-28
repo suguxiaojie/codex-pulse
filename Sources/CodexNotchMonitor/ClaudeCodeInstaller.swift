@@ -121,7 +121,7 @@ struct ClaudeCodeInstaller: Sendable {
                 for event in Self.eventNames {
                     var groups = hooks[event] as? [[String: Any]] ?? []
                     var group: [String: Any] = ["hooks": [["type": "command", "command": hookCommand,
-                        "timeout": event == "PermissionRequest" ? Self.permissionTimeoutSeconds : 5]]]
+                        "timeout": event == "PermissionRequest" ? Self.permissionTimeoutSeconds : event == "PreToolUse" ? Self.decisionTimeoutSeconds + 5 : 5]]]
                     if Self.toolEvents.contains(event) { group["matcher"] = "*" }
                     groups.append(group)
                     hooks[event] = groups

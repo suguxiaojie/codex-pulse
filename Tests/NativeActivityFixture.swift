@@ -95,8 +95,19 @@ final class CodexDesktopIPCFixture: @unchecked Sendable {
                             emitLocked(["type": "response", "requestId": id, "resultType": "error", "error": "no-client-found"])
                         } else { response(id: id, method: method!, owner: "fixture-owner", result: ["supportsUntrustedAppInput": supportsInput]) }
                     } else if acknowledgeSubmissions, let method {
-                        if method == "thread-follower-steer-turn", let next = stateAfterSteer {
+                        if method == "thread-follower-steer-turn",
+                           (state["turns"] as? [[String: Any]])?.last?["status"] as? String != "inProgress" {
+                            emitLocked(["type": "response", "requestId": id, "resultType": "error",
+                                "error": "Cannot steer a conversation without an active turn"])
+                            return
+                        }
+                        if (method == "thread-follower-steer-turn" || method == "thread-follower-start-turn"), let next = stateAfterSteer {
                             state = next; revision += 1
+                        }
+                        if method == "thread-follower-start-turn" {
+                            response(id: id, method: method, owner: acknowledgementOwner,
+                                result: ["result": ["turn": ["id": steerResultTurn]]])
+                            return
                         }
                         response(id: id, method: method, owner: acknowledgementOwner,
                             result: method == "thread-follower-steer-turn" ? ["result": ["turnId": steerResultTurn]] : ["ok": true])

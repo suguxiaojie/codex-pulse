@@ -24,14 +24,17 @@ All data comes from your Mac: the Codex App Server, desktop IPC, and local sessi
 
 ### Dynamic Island
 
-- **Glowing eye mascot**: a little expressive character sits on the left in compact mode. It looks around while thinking, squints during tool execution, opens wide with an amber halo when approval is needed, gives a smiling bounce on completion, and shows crossed eyes on failure. Its gaze follows the pointer as it approaches the notch.
+- **Fast mode**: Expanded cards show “Fast” alongside model details only when explicitly enabled; disabled or unknown states show no label. Claude uses its session status line’s `fast_mode`; Codex reads owned `thread_settings_applied` checkpoints and explicit per-turn tiers, including Codex CLI sessions in One. Missing evidence shows no label; global defaults are not treated as session evidence. Hidden in privacy mode.
+
+- **In-island Clawd**: compact mode places Clawd and quota on the left, with task status and ×N for concurrent tasks on the right. Animation uses cached frames; card portraits are static and gaze is fixed. The outline breathes while awaiting approval or a reply, and flashes once on completion or failure. Supports hiding Clawd, three sizes, and Reduce Motion.
 - **Hardware black shell**: the island matches the notch, with concave top corners that blend into the menu bar. A thin edge light follows the task state, with adjustable intensity in settings.
-- **Focus stage**: the expanded island shows a single focus card with the current task's latest 3 steps and Token usage for this turn. Other sessions appear as a row of capsules; click one to switch. New approval or reply requests automatically take focus. Three seconds after a task finishes, focus moves to a task that is still running. Ended sessions remain in the list for 1 minute.
-- **In-island approval**: explicitly approve or answer single-choice questions for requests currently waiting in Codex or Claude Code. Other requests return to the original client; nothing is approved automatically.
+- **Focus stage**: the expanded island shows a single focus card with up to 3 steps and Token usage for this turn, prioritizing running or waiting calls. Codex and Claude share status labels, colors, and node rules; task endings preserve known outcomes and mark unresolved calls gray. Other sessions appear as a row of capsules; click one to switch. New approval or reply requests automatically take focus. Three seconds after a task finishes, focus moves to a task that is still running. Ended sessions remain in the list for 1 minute. Collapsing pauses expanded-card animations while preserving answer drafts for reopening; see [focus stage](docs/island-focus-stage.md).
+- **Reset-card expiry reminders**: available quota reset cards trigger system and island notifications at 24, 12, and 6 hours before expiry, once per card and stage. Enabled by default under Setup & Permissions. Checks run with successful minute-by-minute quota refreshes while the app is running; reopening catches up only the most urgent missed stage. Used or expired cards are excluded.
+- **In-island approval**: explicitly approve or answer questions for requests currently waiting in Codex or Claude Code. Claude Code questions support single choice, multiple selections, custom text, and option descriptions. Other requests return to the original client; nothing is approved automatically.
 - **Motion effects**: retain three Metal progress effects (state smoke, quantum noise, and liquid waves), plus completion confetti and confirmation pulses. All become static when Reduce Motion is enabled.
 
-- **Alerts and completion feedback**: Followed signals and quota recovery appear as system notifications and island cards. Alerts pause on hover and yield to approvals and completion celebrations. Choose from three confetti levels and five completion sounds.
-- **Text answers**: Answer Codex questions with free text, including Chinese input methods. Unanswered asynchronous questions remain visible after the turn ends; success requires both a valid response and an authoritative snapshot.
+- **Alerts and completion feedback**: Followed signals and quota recovery appear as system notifications and island cards. Alerts use the configured expanded width and fit their height to the content. They pause on hover and yield to approvals and completion celebrations. Choose from three confetti levels and five completion sounds.
+- **Text answers**: Answer Codex questions with free text, including Chinese input methods. Unanswered asynchronous questions remain visible after the turn ends; replies after completion start a turn in the same conversation with inherited settings, and success requires a valid response plus the actual answer in an authoritative snapshot.
 - **Notification settings**: Request notification permission when needed, send a sound-enabled test notification, and preview number formatting using current-account usage.
 
 ### Glass menu bar panel
@@ -43,10 +46,10 @@ All data comes from your Mac: the Codex App Server, desktop IPC, and local sessi
 
 ### Monitor Center
 
-- **Usage and costs**: view Token usage, caches, project rankings, and trends by period. Costs are estimated using public model prices: API-equivalent amounts, not subscription bills.
+- **Usage and costs**: view Token usage, caches, project rankings, and trends by period. Costs are estimated using public model prices: API-equivalent amounts, not subscription bills. Official Standard synchronization accepts the current and legacy table formats, uses the 30-minute cache-write rate, and retains the last valid prices on failure.
 - **Activity Center**: brings together official quotas, community updates, reset timelines, and local recovery records, with each source clearly identified.
-- **Session management**: search projects and sessions, inspect account ownership and exception summaries, and export Markdown / HTML, create raw backups, import, or migrate projects.
-- **Claude Code**: separate connection controls, permission requests, official quotas, and local Token and cost history.
+- **Session management**: search projects and sessions, inspect account ownership and exception summaries, and export Markdown / HTML, create raw backups, import, or migrate projects. The inventory caches metadata and short titles; full-text exports still read the original logs.
+- **Claude Code**: separate connection controls, permission requests, official quotas, and local Token and cost history. The island shows the latest public progress text for the current turn alongside real tool steps, including Bash command descriptions, with running, waiting, success, failure, and ended states; up to three nodes prioritize calls still running or waiting. After the monitor restarts, verified busy sessions are recovered from Claude’s local registry; idle windows do not count as active tasks.
 
 ### Number units
 
@@ -97,7 +100,7 @@ Large numbers use Chinese 万 (ten thousand) / 亿 (hundred million) units by de
 
 ## Download and install
 
-Current version: **v1.10.0**. Download the installer for your Mac from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0):
+Current source and local build: **v1.11.0 (Build 33)**. Latest public release: **v1.10.0**. Download the installer for your Mac from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0):
 
 | Mac processor | Installer |
 |---|---|
@@ -119,7 +122,7 @@ The app was renamed from Codex Monitor. Its Bundle ID, `CodexNotchMonitor.app` f
 | Official quotas and account | Local Codex App Server; shows quota percentages and reset times, not remaining message counts |
 | Quota forecast | Extrapolated from the current window's used percentage and elapsed time; an estimate only, with no forecast during the first hour of a cycle |
 | Token and project statistics | Local structured session logs, including caches; covers only history still readable on this Mac |
-| Live tasks | Codex uses desktop IPC and local logs; Claude Code uses optional dedicated Hooks, plus transcripts and process fallback |
+| Live tasks | Codex uses desktop IPC and local logs; Claude Code uses optional dedicated Hooks, transcripts, process fallback, and its local live-session registry at startup |
 | Costs | Token × public model prices; API-equivalent estimates, **not subscription bills**; unknown prices are explicitly marked |
 | Community updates and predictions | Third-party aggregator [codex-reset.com](https://codex-reset.com/zh/tibo); predictions do not guarantee a reset for your account |
 | Session account ownership | Uses only reliably observed evidence; records predating the baseline or lacking evidence remain “Unassigned” |

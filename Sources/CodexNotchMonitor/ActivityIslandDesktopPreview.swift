@@ -12,6 +12,8 @@ struct ActivityIslandDesktopPreview: View {
     var privacyMode = false
     var floatingUsageEnabled = true
     var glassAppearance: ActivityIslandGlassAppearance = .dark
+    var clawdEnabled = true
+    var clawdSize: IslandClawdSize = .medium
     @State private var referenceDate = Date()
 
     static func sampleRows(now: Date, privacy: Bool) -> [ActivitySessionSnapshot] {
@@ -42,6 +44,25 @@ struct ActivityIslandDesktopPreview: View {
             quotaTitle: privacyMode ? "额度已隐藏" : "5h 72% · 7d 46%")
     }
 
+    /// Compact strip so the pet switch and size are visible in the preview.
+    private var compactSample: some View {
+        let focus = rows.first
+        return HStack(spacing: 6) {
+            IslandClawdBadge(mood: focus.map { .mood(for: $0) } ?? .idle, pixel: clawdSize.pixel,
+                             reduceMotion: reduceMotion, playing: animated,
+                             species: focus.map { IslandPetSpecies(provider: $0.provider) } ?? .codex)
+                .frame(width: clawdSize.pixel * 14, height: clawdSize.pixel * 12)
+            Text(privacyMode ? "—" : "72%").monospacedDigit().foregroundStyle(FloatingSurfaceTheme.accent())
+            Spacer(minLength: 12)
+            Text(privacyMode ? "会话详情已隐藏" : focus?.title ?? "").lineLimit(1)
+                .foregroundStyle(FloatingSurfaceTheme.primary(.dark))
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .padding(.horizontal, 14).frame(width: 300, height: 32)
+        .background(Color.black, in: UnevenRoundedRectangle(bottomLeadingRadius: 12, bottomTrailingRadius: 12, style: .continuous))
+        .environment(\.colorScheme, .dark)
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let width = min(proxy.size.width - 24, 510) * min(1, CGFloat(expandedWidth) / max(1, maximumExpandedWidth))
@@ -65,7 +86,9 @@ struct ActivityIslandDesktopPreview: View {
                     ], current: true, now: Date(timeIntervalSince1970: 0))
                         .modifier(IslandGlassChrome()).padding(.top, stageHeight + 8)
                 }
+                if clawdEnabled { compactSample.frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 12) }
             }.frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                .environment(\.islandClawdCardsAnimate, clawdEnabled)
         }.environment(\.islandLiquidGlassEnabled, material == .liquidGlass)
             .modifier(IslandGlassAppearanceContext(appearance: glassAppearance, material: material))
             .allowsHitTesting(false).accessibilityElement(children: .ignore)

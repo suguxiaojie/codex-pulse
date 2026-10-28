@@ -80,7 +80,8 @@ struct IslandFloatingUsageCapsule: View {
                         .modifier(IslandGlassAppearanceContext(appearance: model.glassAppearance, material: model.material))
                         .environment(\.islandLiquidGlassEnabled, model.material == .liquidGlass)
                 }
-                .position(x: geometry.value.rect.midX, y: geometry.value.rect.maxY + 24)
+                .position(x: geometry.value.rect.midX,
+                          y: geometry.value.rect.maxY + (geometry.value.compact ? model.floatingUsageCompactOffset : 24))
             }
         }.id(geometry.generation).allowsHitTesting(false)
     }

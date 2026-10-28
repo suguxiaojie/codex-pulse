@@ -82,6 +82,17 @@ struct NativeActivityEvidence {
             suppressCompletion: pendingAfterEnd || (previous?.turnID == turn && previous?.suppressCompletion == true))
     }
 
+    /// The desktop stream can stop without ever sending a terminal update (Codex quit, the stream dropped).
+    /// A running turn whose desktop state and local log have both been quiet past the local freshness
+    /// grace no longer overrides the log. Waiting for approval or a reply never goes silent this way.
+    func isSilent(for local: LocalSessionSnapshot, now: Date) -> Bool {
+        guard [.starting, .working, .usingTool].contains(phase) else { return false }
+        let toolRunning = local.turnID == turnID && local.activities.contains { $0.kind != .progress && $0.isRunning }
+        let grace = toolRunning ? SessionActivityFreshnessPolicy.runningToolGrace : SessionActivityFreshnessPolicy.quietTurnGrace
+        let lastSign = max(receivedAt, local.updatedAt, local.evidence?.fileModifiedAt ?? .distantPast)
+        return now.timeIntervalSince(lastSign) >= grace
+    }
+
     func applying(to local: LocalSessionSnapshot) -> LocalSessionSnapshot? {
         // A native old turn cannot overwrite newer local start/terminal evidence.
         if local.turnID != turnID, let localStart = local.startedAt {
@@ -102,7 +113,7 @@ struct NativeActivityEvidence {
             latestAssistantSummary: sameTurn ? local.latestAssistantSummary : nil,
             nativePhase: phase == .working && toolRunning ? .usingTool : phase, sessionKind: local.sessionKind,
             nativeWaitReason: waitReason, nativeReplyRequestIDs: replyRequestIDs,
-            nativeSuppressCompletion: suppressCompletion)
+            nativeSuppressCompletion: suppressCompletion, fastMode: sameTurn ? local.fastMode : nil)
     }
 }
 
@@ -237,13 +248,14 @@ final class NativeActivityObserver {
             }
         }
     }
-    func merge(_ snapshots: [LocalSessionSnapshot], names: [String: String])
+    func merge(_ snapshots: [LocalSessionSnapshot], names: [String: String], now: Date = Date())
         -> (snapshots: [LocalSessionSnapshot], names: [String: String]) {
         var titles = names
         let internalIDs = Set(snapshots.filter { ![CodexActivitySessionKind.user, .unknown].contains($0.sessionKind) }.map(\.sessionID)).union(excluded)
         let result = snapshots.filter { !internalIDs.contains($0.sessionID) }.map { local in
             let terminal = terminalTurns[local.sessionID].flatMap { $0.turnID == local.turnID ? $0 : nil }
-            guard let value = evidence[local.sessionID] ?? terminal, let merged = value.applying(to: local) else { return local }
+            guard let value = evidence[local.sessionID] ?? terminal, !value.isSilent(for: local, now: now),
+                  let merged = value.applying(to: local) else { return local }
             if !value.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { titles[local.sessionID] = value.title }
             return merged
         }

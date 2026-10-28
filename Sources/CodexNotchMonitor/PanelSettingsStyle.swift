@@ -80,8 +80,7 @@ struct PanelSettingsSegments: View {
                         .frame(maxWidth: .infinity, minHeight: 24)
                         .background {
                             if selection == option {
-                                Capsule().fill(PanelSettingsTheme.thumb)
-                                    .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+                                MonitorSegmentThumb()
                                     .matchedGeometryEffect(id: "panel-selection", in: namespace)
                             }
                         }
@@ -94,7 +93,7 @@ struct PanelSettingsSegments: View {
             }
         }
         .padding(3)
-        .background(PanelSettingsTheme.track, in: Capsule())
+        .modifier(MonitorSegmentTrack())
         .frame(width: width)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
@@ -171,11 +170,14 @@ struct SettingsGlyph: View {
     var tint: Color = MonitorDesktopTheme.accent
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         Image(systemName: symbol)
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(tint)
             .frame(width: 28, height: 28)
-            .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background(LinearGradient(colors: [tint.opacity(0.16), tint.opacity(0.06)], startPoint: .top, endPoint: .bottom), in: shape)
+            .overlay(shape.strokeBorder(LinearGradient(colors: [tint.opacity(0.28), tint.opacity(0.06)],
+                                                       startPoint: .top, endPoint: .bottom), lineWidth: 0.75))
             .accessibilityHidden(true)
     }
 }
@@ -187,13 +189,17 @@ struct SettingsSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(title).font(MonitorDesktopTypography.sectionLabel).tracking(0.6)
+            HStack(spacing: 7) {
+                // A short ember tick anchors each group without adding another box.
+                Capsule().fill(MonitorDesktopTheme.accent.opacity(0.85)).frame(width: 3, height: 11)
+                    .accessibilityHidden(true)
+                Text(title).font(MonitorDesktopTypography.sectionLabel).tracking(0.8)
+                    .foregroundStyle(MonitorDesktopTheme.secondaryText)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
-                if let trailing { Text(trailing).font(MonitorDesktopTypography.metadata) }
+                if let trailing { Text(trailing).font(MonitorDesktopTypography.metadata).foregroundStyle(MonitorDesktopTheme.tertiaryText) }
             }
-            .foregroundStyle(MonitorDesktopTheme.tertiaryText).padding(.horizontal, 4)
+            .padding(.horizontal, 4)
             VStack(spacing: 0) { content }
                 .padding(.horizontal, 14)
                 .modifier(MonitorDesktopCardSurface(cornerRadius: 14))
@@ -261,16 +267,20 @@ struct SettingsStageSurface: ViewModifier {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(MonitorDesktopTheme.surface)
                     .overlay {
-                        RadialGradient(colors: [MonitorDesktopTheme.stageHighlight, .clear],
+                        RadialGradient(colors: [MonitorDesktopTheme.accent.opacity(scheme == .dark ? 0.10 : 0.06), .clear],
                                        center: .top, startRadius: 0, endRadius: geometry.size.width * 0.7)
                             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
-                    .shadow(color: .black.opacity(scheme == .dark ? 0.16 : 0.07), radius: 10, y: 3)
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.34 : 0.07), radius: 14, y: 6)
             }
         }
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(contrast == .increased ? MonitorDesktopTheme.contrastOutline : MonitorDesktopTheme.border.opacity(0.5), lineWidth: 0.5)
+                .strokeBorder(contrast == .increased
+                    ? AnyShapeStyle(MonitorDesktopTheme.contrastOutline)
+                    : AnyShapeStyle(LinearGradient(colors: [MonitorDesktopTheme.rimHighlight.opacity(scheme == .dark ? 0.12 : 0.5),
+                                                            MonitorDesktopTheme.rimHighlight.opacity(scheme == .dark ? 0.03 : 0.2)],
+                                                   startPoint: .top, endPoint: .bottom)), lineWidth: 0.75)
                 .allowsHitTesting(false)
         }
     }
@@ -283,13 +293,11 @@ struct SettingsStage<Accessory: View, Content: View>: View {
     @ViewBuilder var accessory: () -> Accessory
     @ViewBuilder var content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var breathes = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Circle().fill(MonitorDesktopTheme.accent).frame(width: 6, height: 6)
-                    .opacity(reduceMotion || breathes ? 1 : 0.55)
+                SettingsStageIndicator(reduceMotion: reduceMotion).frame(width: 6, height: 6)
                     .accessibilityHidden(true)
                 Text(title).font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 4)
@@ -306,17 +314,72 @@ struct SettingsStage<Accessory: View, Content: View>: View {
             }
         }
         .padding(14).modifier(SettingsStageSurface())
-        .task(id: reduceMotion) {
-            breathes = false
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { breathes = true }
-        }
-        .onDisappear { breathes = false }
     }
 
     private var captionLabel: some View {
         Text(caption).font(MonitorDesktopTypography.metadata)
             .foregroundStyle(MonitorDesktopTheme.secondaryText).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct SettingsStageIndicator: NSViewRepresentable {
+    let reduceMotion: Bool
+
+    func makeNSView(context: Context) -> SettingsStageIndicatorView { SettingsStageIndicatorView() }
+    func updateNSView(_ view: SettingsStageIndicatorView, context: Context) {
+        view.reduceMotion = reduceMotion
+        view.layer?.backgroundColor = NSColor(MonitorDesktopTheme.accent).cgColor
+        view.updatePlayback()
+    }
+}
+
+private final class SettingsStageIndicatorView: NSView {
+    var reduceMotion = false
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 3
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    deinit { observers.forEach { NotificationCenter.default.removeObserver($0) } }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        observers.removeAll()
+        if let window {
+            for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
+                         NSWindow.didDeminiaturizeNotification, NSWindow.willCloseNotification] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] note in
+                    MainActor.assumeIsolated {
+                        if note.name == NSWindow.willCloseNotification { self?.layer?.removeAnimation(forKey: "breath") }
+                        else { self?.updatePlayback() }
+                    }
+                })
+            }
+        }
+        updatePlayback()
+    }
+    override func viewDidHide() { super.viewDidHide(); updatePlayback() }
+    override func viewDidUnhide() { super.viewDidUnhide(); updatePlayback() }
+
+    func updatePlayback() {
+        guard !reduceMotion, !isHiddenOrHasHiddenAncestor, let window,
+              window.isVisible, !window.isMiniaturized, window.occlusionState.contains(.visible) else {
+            layer?.removeAnimation(forKey: "breath")
+            return
+        }
+        guard layer?.animation(forKey: "breath") == nil else { return }
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = 0.55
+        animation.toValue = 1
+        animation.duration = 2.4
+        animation.autoreverses = true
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer?.add(animation, forKey: "breath")
     }
 }
 

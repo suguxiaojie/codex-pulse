@@ -16,6 +16,7 @@ final class QuotaResetNotifier: NSObject, UNUserNotificationCenterDelegate {
         let source = UNNotificationAction(identifier: "open-source", title: "打开原帖", options: [.foreground])
         let manual = UNNotificationAction(identifier: "confirm-manual", title: "标记为手动重置", options: [.foreground])
         center.setNotificationCategories([
+            UNNotificationCategory(identifier: "CREDIT_EXPIRY", actions: [], intentIdentifiers: []),
             UNNotificationCategory(identifier: "TIBO_SIGNAL", actions: [openCenter, source], intentIdentifiers: []),
             UNNotificationCategory(identifier: "QUOTA_RECOVERY", actions: [openHistory], intentIdentifiers: []),
             UNNotificationCategory(identifier: "QUOTA_RECOVERY_UNVERIFIED", actions: [openHistory, manual], intentIdentifiers: [])

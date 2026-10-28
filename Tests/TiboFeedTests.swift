@@ -30,6 +30,7 @@ enum TiboFeedTests {
         check(feed.events.count == 1, "decode event")
         check(feed.events[0].announcedDate != nil, "parse fractional ISO date")
         check(feed.events[0].effectiveDate != nil, "parse effective date")
+        checkSortParity()
         check(TiboFeedService.interpret(status: 304, data: Data()) == .unchanged, "accept 304")
         check(
             TiboFeedService.interpret(status: 500, data: valid) == .rejected("HTTP 500"),
@@ -634,6 +635,41 @@ enum TiboFeedTests {
         }
         """.utf8)
         return (feed, timeline, forecast)
+    }
+
+    private static func checkSortParity() {
+        func event(_ id: String, _ announced: String, _ effective: String?, _ kind: TiboEventKind) -> TiboEvent {
+            TiboEvent(kind: kind, announcedAt: announced, effectiveAt: effective,
+                scope: .init(plans: ["all"], windows: ["all"]),
+                source: .init(handle: "thsottiaux", postId: id, url: "https://x.com/thsottiaux/status/\(id)"),
+                confidence: 1, rationale: "fixture", text: "fixture")
+        }
+        let date = "2026-08-13T12:00:00Z"
+        let events = [
+            event("1", date, "2026-08-14T12:00:00.000Z", .resetScheduled),
+            event("2", date, "2026-08-13T13:00:00Z", .resetScheduled),
+            event("3", date, nil, .resetCompleted),
+            event("4", date, "invalid", .resetScheduled),
+            event("5", "invalid", nil, .uncertain),
+            event("3", "2026-08-12T12:00:00Z", nil, .resetCompleted),
+            event("6", date, "2026-08-13T13:00:00Z", .resetScheduled)
+        ]
+        let feed = TiboFeed(schemaVersion: 1, generatedAt: date, lastSuccessfulCheckAt: nil,
+            monitor: .init(status: "ok", errorCode: nil), events: events)
+        for now in [TiboFeedDate.parse(date)!, TiboFeedDate.parse("2026-08-15T12:00:00Z")!] {
+            var seen = Set<String>()
+            let expected = events.sorted { lhs, rhs in
+                let leftFuture = lhs.kind == .resetScheduled && (lhs.effectiveDate ?? .distantPast) > now
+                let rightFuture = rhs.kind == .resetScheduled && (rhs.effectiveDate ?? .distantPast) > now
+                if leftFuture != rightFuture { return leftFuture }
+                if leftFuture, rightFuture {
+                    return (lhs.effectiveDate ?? .distantFuture) < (rhs.effectiveDate ?? .distantFuture)
+                }
+                return (lhs.announcedDate ?? .distantPast) > (rhs.announcedDate ?? .distantPast)
+            }.filter { seen.insert($0.id).inserted }
+            check(feed.displayEvents(now: now).map(\.event) == expected,
+                "cached sort preserves future/past, ties, invalid dates and duplicate selection")
+        }
     }
 
     private static func check(_ condition: @autoclosure () -> Bool, _ label: String) {

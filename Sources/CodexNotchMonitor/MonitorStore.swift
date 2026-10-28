@@ -86,11 +86,17 @@ final class MonitorStore: ObservableObject {
     @Published var notifyQuotaRecovery = UserDefaults.standard.object(forKey: "notifyQuotaRecovery") as? Bool ?? true {
         didSet { UserDefaults.standard.set(notifyQuotaRecovery, forKey: "notifyQuotaRecovery") }
     }
+    @Published var notifyCreditExpiry = UserDefaults.standard.object(forKey: "notifyCreditExpiry") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notifyCreditExpiry, forKey: "notifyCreditExpiry") }
+    }
     var onOpenNotificationCenter: (() -> Void)?
     private var signalNotificationLedger = TiboSignalNotificationLedger(
         observedIDs: UserDefaults.standard.stringArray(forKey: "notifiedTiboSignalIDs")
     )
     private var didAttemptAutomaticNotificationAuthorization = false
+    private var creditExpiryLedger = CreditExpiryReminderLedger(
+        data: UserDefaults.standard.data(forKey: "creditExpiryReminderLedger"))
+    private var creditExpiryAccountGeneration = UUID()
     @Published private(set) var quotaNotificationStatus: QuotaNotificationStatus = .unknown
     @Published private(set) var codexSetupSnapshot: CodexSetupSnapshot?
     @Published private(set) var isSetupOnboardingComplete = false
@@ -146,10 +152,11 @@ final class MonitorStore: ObservableObject {
     private let quotaService = QuotaService()
     let claude = ClaudeCodeRuntime()
     private let sessionActivityService = SessionActivityService()
-    @Published private(set) var approvalRevision = 0
+    let approvalUpdates = PassthroughSubject<Void, Never>()
     private let nativeActivityObserver = NativeActivityObserver()
     var islandAnswerRequestIDs: Set<String> {
         Set(nativeActivityObserver.approvalSnapshots.values.flatMap(\.requests).map(\.identity))
+            .union(claude.requests.map(\.id))
     }
     func islandApproval(for row: ActivitySessionSnapshot) -> IslandApprovalContent {
         if row.provider == "Claude Code" {
@@ -161,7 +168,8 @@ final class MonitorStore: ObservableObject {
                 title: request.questions.isEmpty ? (request.tool == "Bash" ? "执行命令" : "申请权限") : "需要回答",
                 summary: request.questions.isEmpty ? (request.input["command"] as? String ?? request.tool) : "",
                 command: request.tool == "Bash", deadline: request.deadline, fallbackTitle: "回终端")
-            value.questions = request.questions.map { .init(id: $0.text, title: $0.text, options: $0.options) }
+            value.questions = request.questions.map { .init(id: $0.text, title: $0.text, options: $0.options,
+                allowsText: true, multiSelect: $0.multiSelect, descriptions: $0.descriptions) }
             if request.questions.isEmpty {
                 value.actions = [.init(id: "once", title: "允许一次")]
                 if !request.suggestions.isEmpty { value.actions.append(.init(id: "session", title: "本会话允许")) }
@@ -169,7 +177,8 @@ final class MonitorStore: ObservableObject {
             }
             value.submit = { [weak self] action, answers in
                 guard let self else { return "已交回 Claude Code 终端" }
-                guard request.questions.isEmpty || request.permitsIslandAnswers(answers) else { return "请选择有效选项" }
+                guard self.claude.requests.contains(where: { $0.id == request.id }), Date() < request.deadline else { return "请求已失效，请在 Claude Code 中查看" }
+                guard request.questions.isEmpty || request.permitsIslandAnswers(answers) else { return "请选择选项或输入有效回答" }
                 let choice: ClaudePermissionRequest.Choice
                 switch action { case "once", "answers": choice = .once; case "session": choice = .session; case "deny": choice = .deny; default: return "请在终端处理" }
                 self.claude.respond(request.id, choice: choice, answers: answers)
@@ -358,7 +367,8 @@ final class MonitorStore: ObservableObject {
 
     var continuityAccountSubtitle: String? {
         if let observedAccount {
-            return [observedAccount.info.maskedEmail, observedAccount.info.planType?.uppercased()]
+            return [observedAccount.info.maskedEmail,
+                    OpenAIPlanDisplayName.resolve(observedAccount.info.planType) ?? observedAccount.info.planType?.uppercased()]
                 .compactMap { $0 }
                 .joined(separator: " · ")
         }
@@ -398,7 +408,7 @@ final class MonitorStore: ObservableObject {
             guard let self else { return }
             self.quotaNotificationStatus = status
             if !self.didAttemptAutomaticNotificationAuthorization, NotificationAuthorizationPolicy.shouldRequest(status: status,
-                signals: self.notifyTiboSignals, recovery: self.notifyQuotaRecovery) {
+                signals: self.notifyTiboSignals, recovery: self.notifyQuotaRecovery, credits: self.notifyCreditExpiry) {
                 self.didAttemptAutomaticNotificationAuthorization = true
                 self.requestNotificationAuthorizationForSetup()
             }
@@ -424,9 +434,35 @@ final class MonitorStore: ObservableObject {
         }
         refreshQuota()
         refreshSessionActivity()
-        refreshCost()
         refreshTiboFeed()
-        refreshContinuity(forceInventory: true)
+        startupPageSelection = NotificationCenter.default.publisher(for: .monitorCenterSectionDidChange)
+            .sink { [weak self] notification in
+                guard let section = notification.object as? MonitorCenterSection else { return }
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    switch section {
+                    case .usage, .cost:
+                        if self.startupCostRefresh != nil { self.refreshCost() }
+                    case .continuity:
+                        if self.startupContinuityRefresh != nil { self.refreshContinuity(forceInventory: true) }
+                    case .claude:
+                        if self.claude.usage == nil { self.claude.refreshUsage() }
+                    default: break
+                    }
+                }
+            }
+        isContinuityLoading = true
+        isCostLoading = true
+        startupContinuityRefresh = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.refreshContinuity(forceInventory: true)
+        }
+        startupCostRefresh = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.refreshCost(startup: true)
+        }
         accountStateWatcher.start { [weak self] detectedAt in
             Task { @MainActor in
                 self?.handleAccountStateChange(detectedAt: detectedAt)
@@ -466,6 +502,8 @@ final class MonitorStore: ObservableObject {
         refreshAccountUsage()
         isRefreshingQuota = true
         let previous = quotaState.buckets
+        let creditAccount = hasPendingAccountStateRefresh || isContinuityLoading ? nil : observedAccount?.fingerprint
+        let creditGeneration = creditExpiryAccountGeneration
         if previous.isEmpty { quotaState = .loading }
         quotaService.fetch { [weak self] result in
             guard let self else { return }
@@ -478,6 +516,15 @@ final class MonitorStore: ObservableObject {
                 let now = Date()
                 self.quotaState = .loaded(snapshot.buckets, now)
                 self.quotaResetCredits = snapshot.resetCredits
+                if self.notifyCreditExpiry, creditGeneration == self.creditExpiryAccountGeneration,
+                   creditAccount == self.observedAccount?.fingerprint,
+                   !self.hasPendingAccountStateRefresh {
+                    let reminders = self.creditExpiryLedger.observe(snapshot.resetCredits, accountID: creditAccount, now: now)
+                    if !reminders.isEmpty {
+                        UserDefaults.standard.set(self.creditExpiryLedger.data, forKey: "creditExpiryReminderLedger")
+                        reminders.forEach { self.sendQuotaNotification($0) }
+                    }
+                }
                 let evaluation = self.quotaResetMonitor.evaluate(
                     buckets: snapshot.buckets,
                     feed: self.tiboFeed,
@@ -570,7 +617,14 @@ final class MonitorStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    func refreshCost() {
+    private var startupCostRefresh: Task<Void, Never>?
+    private var startupContinuityRefresh: Task<Void, Never>?
+    private var startupPageSelection: AnyCancellable?
+
+    func refreshCost(startup: Bool = false) {
+        if startupCostRefresh != nil { isCostLoading = false }
+        startupCostRefresh?.cancel()
+        startupCostRefresh = nil
         guard !isCostLoading else { return }
         isCostLoading = true
         let requestID = UUID()
@@ -579,6 +633,7 @@ final class MonitorStore: ObservableObject {
         let accountContext = accountContinuityStore.usageAccountContext()
         usageAccountOptions = accountContext.accounts
         costService.fetch(
+            qos: startup ? .background : .utility,
             sessionPathOverrides: overrides,
             accountContext: accountContext
         ) { [weak self] snapshot in
@@ -707,6 +762,9 @@ final class MonitorStore: ObservableObject {
         forceInventory: Bool = false,
         accountObservedAt: Date? = nil
     ) {
+        if startupContinuityRefresh != nil { isContinuityLoading = false }
+        startupContinuityRefresh?.cancel()
+        startupContinuityRefresh = nil
         guard !isContinuityLoading,
               !isContinuityRecovering,
               deletingContinuityThreadID == nil,
@@ -801,6 +859,7 @@ final class MonitorStore: ObservableObject {
     }
 
     private func handleAccountStateChange(detectedAt: Date) {
+        creditExpiryAccountGeneration = UUID()
         accountUsage = nil
         accountUsageRequestID = nil
         refreshAccountUsage()
@@ -2417,7 +2476,7 @@ final class MonitorStore: ObservableObject {
     func refreshSessionActivity(completion: (() -> Void)? = nil) {
         sessionActivityService.onChange = { [weak self] in self?.refreshSessionActivity() }
         nativeActivityObserver.onChange = { [weak self] in
-            self?.approvalRevision += 1
+            self?.approvalUpdates.send()
             self?.refreshSessionActivity()
         }
         guard !isReadingSession else {
@@ -2426,7 +2485,7 @@ final class MonitorStore: ObservableObject {
             return
         }
         isReadingSession = true
-        sessionActivityService.fetch(preferredSessionIDs: activeProjects.flatMap(\.sessions).map(\.id)) { [weak self] snapshots, threadNames in
+        sessionActivityService.fetch(preferredSessionIDs: activeProjects.flatMap(\.sessions).map(\.id)) { [weak self] snapshots, threadNames, catalog in
             guard let self else {
                 completion?()
                 return
@@ -2436,14 +2495,16 @@ final class MonitorStore: ObservableObject {
             let merged = self.nativeActivityObserver.merge(snapshots, names: threadNames)
             let snapshots = merged.snapshots
             let threadNames = merged.names
+            let status: String
             switch self.nativeActivityObserver.state {
             case .connected:
-                self.nativeActivityStatus = "桌面已连接 · \(snapshots.filter { $0.nativePhase != nil }.count) 个会话"
+                status = "桌面已连接 · \(snapshots.filter { $0.nativePhase != nil }.count) 个会话"
             case .connecting:
-                self.nativeActivityStatus = "本地日志 · 桌面连接中"
+                status = "本地日志 · 桌面连接中"
             case .disconnected:
-                self.nativeActivityStatus = "本地日志 · 桌面未连接"
+                status = "本地日志 · 桌面未连接"
             }
+            if self.nativeActivityStatus != status { self.nativeActivityStatus = status }
             if self.pendingSessionRefresh {
                 self.pendingSessionRefresh = false
                 DispatchQueue.main.async { [weak self] in self?.refreshSessionActivity() }
@@ -2452,7 +2513,6 @@ final class MonitorStore: ObservableObject {
                 if let usage = snapshot.turnTokenUsage { result[snapshot.sessionID] = usage }
             }
             if self.turnTokenUsages != usages { self.turnTokenUsages = usages }
-            let catalog = CodexProjectCatalog.loadState()
             let catalogChanged = self.lastProjectCatalogState.map { $0 != catalog } ?? false
             self.lastProjectCatalogState = catalog
             let discovered = ProjectActivityAggregator.projects(
@@ -2482,7 +2542,7 @@ final class MonitorStore: ObservableObject {
                 self.selectedProjectID = nil
             }
             completion?()
-            if catalogChanged { self.refreshCost() }
+            if catalogChanged, self.startupCostRefresh == nil { self.refreshCost() }
         }
     }
 

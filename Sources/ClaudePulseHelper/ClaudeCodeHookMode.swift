@@ -228,7 +228,8 @@ struct ClaudeCodeHookForwarder {
             payload["hook_process_name"] = owner.name
         }
 
-        let awaitsDecision = event == "PermissionRequest" && route.interactiveApprovals != false
+        let interactiveQuestion = event == "PreToolUse" && object["tool_name"] as? String == "AskUserQuestion"
+        let awaitsDecision = (event == "PermissionRequest" || interactiveQuestion) && route.interactiveApprovals != false
         let eventID = UUID().uuidString.lowercased()
         let envelope: [String: Any] = [
             "authenticationToken": route.authenticationToken,
@@ -248,7 +249,7 @@ struct ClaudeCodeHookForwarder {
               acknowledgement["accepted"] as? Bool == true else { return }
         guard awaitsDecision, acknowledgement["pending"] as? Bool == true else { return }
 
-        let timeout = min(max(route.decisionTimeoutSeconds ?? 3_540, 5), 86_400)
+        let timeout = min(max(route.decisionTimeoutSeconds ?? 120, 5), 120)
         guard let reply = client.readLine(until: Date().addingTimeInterval(timeout)),
               reply["eventID"] as? String == eventID,
               let decision = reply["decision"] as? [String: Any],
@@ -269,12 +270,19 @@ struct ClaudeCodeHookForwarder {
             // "passthrough": let Claude Code's own dialog decide.
             return
         }
-        let hookOutput: [String: Any] = [
-            "hookSpecificOutput": [
-                "hookEventName": "PermissionRequest",
-                "decision": output
-            ]
-        ]
+        let specific: [String: Any]
+        if interactiveQuestion {
+            var value: [String: Any] = ["hookEventName": "PreToolUse", "permissionDecision": behavior]
+            if behavior == "allow" {
+                guard let updated = output["updatedInput"] as? [String: Any], updated["answers"] is [String: String] else { return }
+                value["updatedInput"] = updated
+            }
+            if let message = output["message"] { value["permissionDecisionReason"] = message }
+            specific = value
+        } else {
+            specific = ["hookEventName": "PermissionRequest", "decision": output]
+        }
+        let hookOutput: [String: Any] = ["hookSpecificOutput": specific]
         guard JSONSerialization.isValidJSONObject(hookOutput),
               let encoded = try? JSONSerialization.data(withJSONObject: hookOutput) else { return }
         ClaudeCodeHookIO.writeStandardOutput(encoded)
@@ -299,7 +307,7 @@ struct ClaudeCodeStatusLineForwarder {
 
     private func record(_ object: [String: Any]) {
         var snapshot: [String: Any] = ["capturedAt": Date().timeIntervalSince1970]
-        for key in ["session_id", "version", "rate_limits", "cost", "model", "context_window", "exceeds_200k_tokens"] {
+        for key in ["session_id", "version", "rate_limits", "cost", "model", "context_window", "exceeds_200k_tokens", "fast_mode"] {
             if let value = ClaudeCodeHookIO.bounded(object[key], maximumBytes: 16_384) { snapshot[key] = value }
         }
         if let workspace = object["workspace"] as? [String: Any], let directory = workspace["current_dir"] as? String {

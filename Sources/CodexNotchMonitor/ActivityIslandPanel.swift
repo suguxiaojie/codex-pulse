@@ -7,12 +7,12 @@ import SwiftUI
 
 // Drawing-only margins; the original metrics and animation curves are unchanged.
 extension ActivityIslandPanelMetrics {
-    init(alertOver base: ActivityIslandPanelMetrics) {
-        hostSize = base.hostSize
+    init(alertOver base: ActivityIslandPanelMetrics, contentHeight: CGFloat) {
+        let height = min(base.maximumUsageHeight, max(1, contentHeight))
+        hostSize = CGSize(width: base.hostSize.width, height: max(base.hostSize.height, base.expandedRect.minY + height))
         compactRect = base.compactRect
-        let width: CGFloat = min(base.hostSize.width, 380)
-        expandedRect = CGRect(x: (base.hostSize.width - width) / 2, y: base.expandedRect.minY,
-            width: width, height: 156 + (base.hardwareGap > 0 ? base.compactRect.height : 0))
+        expandedRect = CGRect(x: base.expandedRect.minX, y: base.expandedRect.minY,
+            width: base.expandedRect.width, height: height)
         rowHeight = base.rowHeight; visibleRowCount = base.visibleRowCount
         hardwareGap = base.hardwareGap; maximumUsageHeight = base.maximumUsageHeight
     }
@@ -63,6 +63,7 @@ final class ActivityIslandSurface: NSView {
     let completionConfetti = ActivityIslandCompletionConfetti()
     private(set) var targetRect = CGRect.zero
     private var lastCompact: Bool?
+    private var contentVisibilityGenerations: [ObjectIdentifier: UInt] = [:]
     private(set) var transitionCount = 0
     private(set) var layoutCommitCount = 0
 
@@ -145,7 +146,7 @@ final class ActivityIslandSurface: NSView {
         targetRect = newRect; lastCompact = compact
         compactHost.setAccessibilityHidden(!compact)
         expandedHost.setAccessibilityHidden(compact)
-        expandedHost.layoutSubtreeIfNeeded()
+        if !compact { expandedHost.layoutSubtreeIfNeeded() }
     }
     private func animate(layer: CALayer, key: String, from: Any, to: Any, duration: Double) {
         let animation = CABasicAnimation(keyPath: key)
@@ -155,6 +156,10 @@ final class ActivityIslandSurface: NSView {
     }
     private func setContent(_ host: NSView, visible: Bool, animated: Bool) {
         guard let layer = host.layer else { return }
+        let key = ObjectIdentifier(host)
+        let generation = (contentVisibilityGenerations[key] ?? 0) &+ 1
+        contentVisibilityGenerations[key] = generation
+        if visible { host.isHidden = false }
         let previous = layer.presentation()?.opacity ?? layer.opacity
         let oldTransform = layer.presentation()?.transform ?? layer.transform
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -166,6 +171,19 @@ final class ActivityIslandSurface: NSView {
                     duration: ActivityIslandSurfaceMotion.contentDuration)
             animate(layer: layer, key: "transform", from: NSValue(caTransform3D: oldTransform),
                     to: NSValue(caTransform3D: layer.transform), duration: ActivityIslandSurfaceMotion.duration)
+        }
+        if !visible {
+            if animated {
+                // Retain the view and drafts, but stop drawing it after the outgoing fade.
+                // A reversal invalidates this callback before it can hide a visible host.
+                DispatchQueue.main.asyncAfter(deadline: .now() + ActivityIslandSurfaceMotion.duration) { [weak self, weak host] in
+                    guard let self, let host, self.contentVisibilityGenerations[key] == generation,
+                          host.layer?.opacity == 0 else { return }
+                    host.isHidden = true
+                }
+            } else {
+                host.isHidden = true
+            }
         }
     }
     func setVisible(_ visible: Bool, animated: Bool) {
@@ -320,7 +338,13 @@ final class ActivityIslandPanelPresenter {
             floatingUsage: model.floatingUsageEnabled && !model.privacyMode,
             usagePage: model.showsUsagePage || approvalHeight > 0, reservesUsagePage: true,
             usagePageHeight: model.showsUsagePage ? model.usagePageHeight : taskHeight, focusHeight: focusHeight)
-        let baseMetrics = model.alert == nil ? taskMetrics : ActivityIslandPanelMetrics(alertOver: taskMetrics)
+        let baseMetrics: ActivityIslandPanelMetrics
+        if let alert = model.alert {
+            let topInset = hardwareGap > 0 ? taskMetrics.compactRect.height : 0
+            let height = IslandAlertCard.fittingHeight(model: model, alert: alert,
+                width: taskMetrics.expandedRect.width, topInset: topInset)
+            baseMetrics = ActivityIslandPanelMetrics(alertOver: taskMetrics, contentHeight: height)
+        } else { baseMetrics = taskMetrics }
         let metrics = ActivityIslandPanelMetrics(shadowing: baseMetrics)
         if model.metrics != metrics { model.metrics = metrics }
         let x = screen.frame.midX - baseMetrics.hostSize.width / 2
@@ -338,7 +362,8 @@ final class ActivityIslandPanelPresenter {
         if let layer = surface.layer {
             surface.completionConfetti.update(serial: model.completionBurstSerial, in: layer,
                 rect: preferences.confettiIntensity == .light ? surface.targetRect : metrics.compactRect,
-                reduceMotion: reduced, visible: presentsWindows && !suspended && !NSApp.isHidden,
+                reduceMotion: reduced, visible: presentsWindows && !suspended && !NSApp.isHidden
+                    && preferences.confettiIntensity != .off,
                 intensity: preferences.confettiIntensity, islandWindow: panel, screen: screen)
         }
         if !panel.isVisible && presentsWindows {
