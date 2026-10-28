@@ -137,7 +137,7 @@ GitHub 仓库为 suguxiaojie/codex-pulse。v1.10.0（Build 32）已正式发布�
 
 ## 最近完成
 
-- 2026-10-29 03:05：v1.11.0（Build 33）双架构 DMG 已构建、校验，arm64 已备份覆盖安装。累计包含 Claude 流程／命令与公开摘要、Fast、岛内交互、渲染和日志降耗、重置卡到期提醒；本轮套餐显示更新为 Go／Plus／Pro100／Pro200／Pro500，修复官方价格表列顺序及 30m／12h 拆列导致的同步失败，统一“重置卡”文案。源码准备推送 main，未创建 tag 或 GitHub Release。产物：build/CodexNotchMonitor-v1.11.0-arm64.dmg、build/CodexNotchMonitor-v1.11.0-x86_64.dmg；校验值：build/SHA256SUMS-v1.11.0.txt。
+- 2026-10-29 03:05：v1.11.0（Build 33）双架构 DMG 已构建、校验，arm64 已备份覆盖安装。累计包含 Claude 流程／命令与公开摘要、Fast、岛内交互、渲染和日志降耗、重置卡到期提醒；本轮套餐显示更新为 Go／Plus／Pro100／Pro200／Pro500，修复官方价格表列顺序及 30m／12h 拆列导致的同步失败，统一“重置卡”文案。源码已推送 origin/main（7ae5ca1），远端提交核对一致；未创建 tag 或 GitHub Release。产物：build/CodexNotchMonitor-v1.11.0-arm64.dmg、build/CodexNotchMonitor-v1.11.0-x86_64.dmg；校验值：build/SHA256SUMS-v1.11.0.txt。
 
 - 2026-10-29 02:36：Claude Bash 流程节点补上命令摘要并备份覆盖安装。Hook／转录均读取 description，节点显示“运行命令 · 描述”，缺少公开进展时动作行也使用命令摘要；无描述重复事件不覆盖，终态保留、换轮清空、长标题悬停查看；不展示原始命令参数。证据：.tmp/claude-command-summary/summary.json。未改 Hook 配置，未提交／推送。
 
@@ -179,6 +179,8 @@ GitHub 仓库为 suguxiaojie/codex-pulse。v1.10.0（Build 32）已正式发布�
 
 ## 最近验证
 
+- 2026-10-29 03:06：v1.11.0 源码提交 7ae5ca1b8b42141531726e32f681a09719fb326b 已成功推送 origin/main，git ls-remote 与本地 HEAD 一致；打包后全部源码／资源输入哈希未变化。双 DMG 保留本机 build/，未上传 Release；本机交接笔记、design-qa.md、缓存及发布素材目录未提交。
+
 - 2026-10-29 03:05：最终完整 scripts/test.sh 通过；新旧官方价格表、按列名读取／列重排／异常数值及真实 HTTPS 更新验证通过，安装后的界面确认官方费率成功同步、“重置卡到期提醒”及 v1.11.0／Build 33。实际 Claude 任务已显示公开进展与命令描述。双架构 DMG 校验、只读挂载、主程序／Helper 架构、严格签名、逐文件 SHA-256 比对通过；未做 Intel 真机运行。证据：.tmp/release-1.11.0/artifacts.json、.tmp/plans-pricing/tests-final.log、.tmp/plans-pricing/live.log。回滚包：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-v1.11.0-20261029-030215.app。
 
 - 2026-10-29 02:36：命令摘要账本定向检查、完整 scripts/test.sh、arm64 Release、签名／备份及安装哈希通过。覆盖 Hook／日志补全、重复／终态、无效／空／长描述、运行态兜底与隐私；原生合成渲染确认节点及动作行显示命令描述。12 份近期日志尾部结构统计中 151 次 Bash 均有 description；安装后的真实 Claude 下一次命令尚未观察。回滚包：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-claude-command-summary-20261029-023629.app。
@@ -216,8 +218,6 @@ GitHub 仓库为 suguxiaojie/codex-pulse。v1.10.0（Build 32）已正式发布�
 - 2026-10-27 13:35：scripts/test.sh 完整退出 0，新增图表日期／时区／样式／空值与缓存重复读取／同大小同日期原子替换／归属更新／非法 JSON／恢复／删除检查通过；连续性 37、Native Activity 76、审批 350、Claude 核心 95 及 Runtime 通过。arm64 Debug／Release、主程序与 Helper 架构、deep／strict 签名、安装／构建及备份／原包哈希通过，验证输入未变。离屏前后 PNG 逐字节一致，独立样式切换触发重建并渲染为 K 单位；实机 AX 验证周／月切换及 7／30 根柱的数据和标签。首轮完整脚本因旧探针仍使用双参数回调编译失败，已适配新增后台目录返回值，以 full-tests-final.log 为准。证据：.tmp/cpu-fix-20261027/summary.json、chart-benchmark.json、chart-style-probe.log、full-tests-final.log、release-build.log、actual-after.log、actual-after-month.log、sample-after.txt、install.json。
 
 - 2026-10-26 16:53：scripts/test.sh 完整退出 0；流式读取 20、模型 128、桌面预览 59、面板 311、连续性 37、Claude 核心 95、审批 350 与 Runtime 通过；成本冒烟通过。arm64 Release／主程序与 Helper 架构、deep／strict 签名、安装／构建与备份／原包逐文件哈希通过，验证输入哈希未变。预览前后离屏图已检查；固定压缩输入首尾摘要 SHA-256 一致。旧真实历史探针两次超过 1.5 GiB 诊断上限，新版文件作用域完整扫描 90,914 条事件峰值 306 MiB；旧活动探针约 0.87 秒超过上限，拆行修复后完整活动扫描约 141 MiB。早期仅修复统计／共享读取的安装版仍有多 GiB 峰值，均未算验收通过；启动期完整采样和独立活动复现最终定位 COW。Allocations 录制未导出有效报告，已停止，不作为结论依据。最终证据：.tmp/performance-opt/performance-summary.json、full-tests-verified.log、release-build-verified.log、line-benchmark-summary.json、startup-summary-verified.json、install-verified.json。
-
-- 2026-10-26 15:45：scripts/test.sh 完整退出 0，面板 311/311（新增同宽、自然高度、刘海避让、长文案、按钮换行、恢复及屏幕高度边界）、连续性 37/37、审批 350 项、Claude 核心 95 项和 Runtime 通过，成本冒烟通过。宽／窄额度恢复、长关注信号离屏渲染已检查；arm64 Release、App／Helper 架构与 deep／strict 签名通过，构建期间源码／测试哈希未变，安装与构建、备份与原包逐文件哈希一致。真实外部提醒触发待事件验收。证据：.tmp/alert-layout/full-tests.log、release-build.log、install.json；截图：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/qa/alert-layout-20261026-034132 。首轮测量测试暴露宿主关闭固有尺寸导致返回 0，已修复并由完整回归覆盖。
 
 ## 验证与产物入口
 
