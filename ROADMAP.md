@@ -6,15 +6,14 @@
 
 ## 当前阶段
 
-GitHub 仓库为 suguxiaojie/codex-pulse。v1.10.0（Build 32）已正式发布为 Latest，源码提交 f8b05822aedc2a590a0c2c8a5f9f4c473580db67 与附注标签 v1.10.0 已推送。完整测试、双架构 Release、镜像／签名／包内文件比对通过，公开下载的两份 DMG 与 SHA256SUMS-v1.10.0.txt 哈希和 GitHub digest 均与本地一致。
+GitHub 仓库为 suguxiaojie/codex-pulse。v1.11.0（Build 33）已发布为 Latest，附注标签 v1.11.0 指向源码提交 c65481beef4bde401103f040f251d941370649d7。arm64／x86_64 DMG 与 SHA256SUMS-v1.11.0.txt 已上传，下载回验及 GitHub digest 均与本地一致。
 
-当前源码与本地双架构构建为 v1.11.0（Build 33），GitHub 最近公开 Release 仍为 v1.10.0。本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
+当前源码与本地双架构构建为 v1.11.0（Build 33），GitHub Latest 为 v1.11.0。本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
 本地开发交接笔记不随公开发行包上传；历史版本变化以 Git 历史为准。
 
 ## 进行中与待办
 
-- 2026-10-29 03:05：One 内异步选择题未出现在灵动岛，已定位当前桌面 IPC socket 连接返回 errno 61（Connection refused）；仅有本地日志监控，无法取得当前请求及可靠回传 handle。原生投影已支持 async questions，One 提问／回答通道适配尚未实施；不能仅从日志生成可操作按钮。证据：.tmp/plans-pricing/async-question-diagnosis.json。
 
 
 
@@ -137,7 +136,7 @@ GitHub 仓库为 suguxiaojie/codex-pulse。v1.10.0（Build 32）已正式发布�
 
 ## 最近完成
 
-- 2026-10-29 03:05：v1.11.0（Build 33）双架构 DMG 已构建、校验，arm64 已备份覆盖安装。累计包含 Claude 流程／命令与公开摘要、Fast、岛内交互、渲染和日志降耗、重置卡到期提醒；本轮套餐显示更新为 Go／Plus／Pro100／Pro200／Pro500，修复官方价格表列顺序及 30m／12h 拆列导致的同步失败，统一“重置卡”文案。源码已推送 origin/main（7ae5ca1），远端提交核对一致；未创建 tag 或 GitHub Release。产物：build/CodexNotchMonitor-v1.11.0-arm64.dmg、build/CodexNotchMonitor-v1.11.0-x86_64.dmg；校验值：build/SHA256SUMS-v1.11.0.txt。
+- 2026-10-29 03:18：v1.11.0（Build 33）已公开发布为 Latest；附注标签指向 c65481beef4bde401103f040f251d941370649d7，包含当前已验证的任务显示／交互、性能、重置卡提醒、套餐与官方费率修复。两份 DMG 和 SHA-256 校验文件已上传。发布地址：https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0。
 
 - 2026-10-29 02:36：Claude Bash 流程节点补上命令摘要并备份覆盖安装。Hook／转录均读取 description，节点显示“运行命令 · 描述”，缺少公开进展时动作行也使用命令摘要；无描述重复事件不覆盖，终态保留、换轮清空、长标题悬停查看；不展示原始命令参数。证据：.tmp/claude-command-summary/summary.json。未改 Hook 配置，未提交／推送。
 
@@ -179,9 +178,7 @@ GitHub 仓库为 suguxiaojie/codex-pulse。v1.10.0（Build 32）已正式发布�
 
 ## 最近验证
 
-- 2026-10-29 03:06：v1.11.0 源码提交 7ae5ca1b8b42141531726e32f681a09719fb326b 已成功推送 origin/main，git ls-remote 与本地 HEAD 一致；打包后全部源码／资源输入哈希未变化。双 DMG 保留本机 build/，未上传 Release；本机交接笔记、design-qa.md、缓存及发布素材目录未提交。
-
-- 2026-10-29 03:05：最终完整 scripts/test.sh 通过；新旧官方价格表、按列名读取／列重排／异常数值及真实 HTTPS 更新验证通过，安装后的界面确认官方费率成功同步、“重置卡到期提醒”及 v1.11.0／Build 33。实际 Claude 任务已显示公开进展与命令描述。双架构 DMG 校验、只读挂载、主程序／Helper 架构、严格签名、逐文件 SHA-256 比对通过；未做 Intel 真机运行。证据：.tmp/release-1.11.0/artifacts.json、.tmp/plans-pricing/tests-final.log、.tmp/plans-pricing/live.log。回滚包：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-v1.11.0-20261029-030215.app。
+- 2026-10-29 03:18：完整测试、双架构主程序／Helper／DMG、签名和包内逐文件比对通过；三个已上传附件重新下载，SHA-256 与本地及 GitHub digest 一致，Release 为非草稿／非预发布且为 Latest。arm64 已本机安装验收，官方费率同步成功；Intel 未真机运行。证据：.tmp/release-1.11.0/。
 
 - 2026-10-29 02:36：命令摘要账本定向检查、完整 scripts/test.sh、arm64 Release、签名／备份及安装哈希通过。覆盖 Hook／日志补全、重复／终态、无效／空／长描述、运行态兜底与隐私；原生合成渲染确认节点及动作行显示命令描述。12 份近期日志尾部结构统计中 151 次 Bash 均有 description；安装后的真实 Claude 下一次命令尚未观察。回滚包：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-claude-command-summary-20261029-023629.app。
 

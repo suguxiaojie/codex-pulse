@@ -6,7 +6,7 @@
 
 **Keep track of Codex and Claude Code quotas, tasks, and usage from your menu bar and notch.**
 
-[简体中文](README.md) · [Download v1.10.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0) · [MIT License](LICENSE)
+[简体中文](README.md) · [Download v1.11.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0) · [MIT License](LICENSE)
 
 macOS 13+ · Native SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -100,12 +100,12 @@ Large numbers use Chinese 万 (ten thousand) / 亿 (hundred million) units by de
 
 ## Download and install
 
-Current source and local build: **v1.11.0 (Build 33)**. Latest public release: **v1.10.0**. Download the installer for your Mac from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0):
+Current version: **v1.11.0 (Build 33)**. Download the installer for your Mac from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0):
 
 | Mac processor | Installer |
 |---|---|
-| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.10.0/CodexNotchMonitor-v1.10.0-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.10.0/CodexNotchMonitor-v1.10.0-x86_64.dmg) |
+| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.11.0/CodexNotchMonitor-v1.11.0-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.11.0/CodexNotchMonitor-v1.11.0-x86_64.dmg) |
 
 1. Open the DMG and drag the app into Applications.
 2. Launch the app. Make sure Codex / ChatGPT Desktop is installed and signed in.

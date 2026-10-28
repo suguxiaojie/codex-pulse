@@ -6,7 +6,7 @@
 
 **在菜单栏和刘海里，随时看清 Codex 与 Claude Code 的额度、任务和用量。**
 
-[English](README.en.md) · [下载 v1.10.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0) · [MIT License](LICENSE)
+[English](README.en.md) · [下载 v1.11.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0) · [MIT License](LICENSE)
 
 macOS 13+ · 原生 SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -106,12 +106,12 @@ Codex Pulse 是一个原生 macOS 菜单栏应用，有三个入口：
 
 ## 下载与安装
 
-当前源码与本地构建：**v1.11.0（Build 33）**。最近公开发布：**v1.10.0**。在 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0) 下载与你的 Mac 对应的安装包：
+当前版本：**v1.11.0（Build 33）**。在 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0) 下载与你的 Mac 对应的安装包：
 
 | Mac 处理器 | 安装包 |
 |---|---|
-| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.10.0/CodexNotchMonitor-v1.10.0-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.10.0/CodexNotchMonitor-v1.10.0-x86_64.dmg) |
+| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.11.0/CodexNotchMonitor-v1.11.0-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.11.0/CodexNotchMonitor-v1.11.0-x86_64.dmg) |
 
 1. 打开 DMG，把 App 拖进"应用程序"。
 2. 启动 App。确保 Codex／ChatGPT Desktop 已安装并登录。
