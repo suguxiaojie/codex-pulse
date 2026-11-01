@@ -50,8 +50,8 @@ struct IslandUsageProviderSwitch: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(IslandUsageProvider.allCases, id: \.self) { provider in
-                let disabled = (provider == .claude && !model.claudeEnabled) || model.resetBusy || model.resetConfirmationPresented
+            ForEach(IslandUsageProvider.allCases.filter { $0 != .grok || model.grokEnabled }, id: \.self) { provider in
+                let disabled = (provider == .claude && !model.claudeEnabled) || (provider == .grok && !model.grokEnabled) || model.resetBusy || model.resetConfirmationPresented
                 Button {
                     withAnimation(reduceMotion ? nil : FloatingSurfaceTheme.selectionMotion) { model.selectUsageProvider(provider) }
                 } label: {
@@ -61,6 +61,8 @@ struct IslandUsageProviderSwitch: View {
                                 Image(nsImage: icon).renderingMode(.template).resizable().scaledToFit()
                                     .frame(width: 13, height: 13).accessibilityHidden(true)
                             }
+                        } else if provider == .grok {
+                            Image(systemName: "sparkle").font(.system(size: 12)).accessibilityHidden(true)
                         } else {
                             ClaudeMarkShape().fill(Color(red: 0.851, green: 0.467, blue: 0.341))
                                 .frame(width: 13, height: 13)
@@ -86,7 +88,7 @@ struct IslandUsageProviderSwitch: View {
                     .accessibilityAddTraits(model.usageProvider == provider ? .isSelected : [])
                     .help(provider == .claude && !model.claudeEnabled ? "请先在监控中心启用 Claude Code" : "查看 " + provider.rawValue + " 用量")
             }
-        }.frame(width: 240, height: 28)
+        }.frame(width: model.grokEnabled ? 330 : 240, height: 28)
             .islandGlass(Capsule(), tint: .black.opacity(0.28))
             .animation(reduceMotion ? nil : FloatingSurfaceTheme.selectionMotion, value: model.usageProvider)
             .accessibilityElement(children: .contain).accessibilityLabel("用量来源")
@@ -112,6 +114,17 @@ struct IslandUsageSourceCard: View, IslandUsageFormatting {
                     heading("历史 · 本机全部会话（含子 Agent）")
                 }.frame(maxHeight: .infinity, alignment: .topLeading)
             }.help("历史为本机全部会话，含子 Agent；账号归属未推断。")
+        case .grok(let plan, let shared, let prepaid):
+            surface {
+                VStack(alignment: .leading, spacing: 8) {
+                    heading("Grok 官方额度")
+                    Text(plan).font(.system(size: 15, weight: .semibold))
+                    heading(shared == true ? "统一共享额度池" : "订阅额度")
+                    Spacer(minLength: 4)
+                    heading("预付余额 · " + (prepaid.map { String(format: "$%.2f", Double($0) / 100) } ?? "—"))
+                    heading("历史 · 本机记录，非订阅账单")
+                }.frame(maxHeight: .infinity, alignment: .topLeading)
+            }
         }
     }
     private func codexAccountCard(planName: String, balance: String?, resetCount: Int?) -> some View {

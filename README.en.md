@@ -4,9 +4,9 @@
 
 # Codex Pulse
 
-**Keep track of Codex and Claude Code quotas, tasks, and usage from your menu bar and notch.**
+**Keep track of Codex, Claude Code, and Grok CLI quotas, tasks, and usage from your menu bar and notch.**
 
-[简体中文](README.md) · [Download v1.11.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0) · [MIT License](LICENSE)
+[简体中文](README.md) · [Download v1.12.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.12.0) · [MIT License](LICENSE)
 
 macOS 13+ · Native SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -20,9 +20,11 @@ Codex Pulse is a native macOS menu bar app with three entry points:
 - **Glass menu bar panel**: check quotas at a glance;
 - **Monitor Center**: explore usage, costs, and sessions in detail.
 
-All data comes from your Mac: the Codex App Server, desktop IPC, and local session logs. No account credentials are read.
+Data is obtained through the local Codex App Server, desktop IPC, the official Grok CLI, and local session logs. Pulse never reads account credentials; the official Grok CLI handles its own billing authentication.
 
 ### Dynamic Island
+
+- **One Native async questions**: Reads native questions from the existing shared Codex daemon. Answer choices or custom text in the current active turn, with fresh question validation and an expected-turn precondition. Uncertain submissions are never retried automatically; completed turns return to One Native. No One Native or Codex configuration changes. See [integration boundaries](docs/one-native-questions.md).
 
 - **Fast mode**: Expanded cards show “Fast” alongside model details only when explicitly enabled; disabled or unknown states show no label. Claude uses its session status line’s `fast_mode`; Codex reads owned `thread_settings_applied` checkpoints and explicit per-turn tiers, including Codex CLI sessions in One. Missing evidence shows no label; global defaults are not treated as session evidence. Hidden in privacy mode.
 
@@ -49,7 +51,18 @@ All data comes from your Mac: the Codex App Server, desktop IPC, and local sessi
 - **Usage and costs**: view Token usage, caches, project rankings, and trends by period. Costs are estimated using public model prices: API-equivalent amounts, not subscription bills. Official Standard synchronization accepts the current and legacy table formats, uses the 30-minute cache-write rate, and retains the last valid prices on failure.
 - **Activity Center**: brings together official quotas, community updates, reset timelines, and local recovery records, with each source clearly identified.
 - **Session management**: search projects and sessions, inspect account ownership and exception summaries, and export Markdown / HTML, create raw backups, import, or migrate projects. The inventory caches metadata and short titles; full-text exports still read the original logs.
+- The project menu can rename a Codex project through the running desktop project service, verify the saved name, and refresh the session list without changing folders, paths, or membership. An open Codex sidebar may require reopening the client to refresh. Ambiguous paths, unavailable services, and ChatGPT-backed projects are rejected; state files are never edited directly.
+- Historical groups without a registered Codex project can save a Pulse-only display name, keyed by their exact path and retained across refreshes and restarts. This does not create projects or change logs, paths, or membership. Native project names take precedence; connection failures and duplicate registrations never trigger this fallback.
+- Project deletion can preserve files or move the selected project's independent folder and all contents to Trash. File deletion requires a unique project registration matching the original session working directory, a separate full-path confirmation, and typing the folder name. Shared or overlapping projects, symlinks, replaced directories, and uncertain ownership block file deletion. Scope is checked again before deleting sessions and before moving the folder.
 - **Claude Code**: separate connection controls, permission requests, official quotas, and local Token and cost history. The island shows the latest public progress text for the current turn alongside real tool steps, including Bash command descriptions, with running, waiting, success, failure, and ended states; up to three nodes prioritize calls still running or waiting. After the monitor restarts, verified busy sessions are recovered from Claude’s local registry; idle windows do not count as active tasks.
+
+### Grok CLI
+
+Enable the optional integration in Monitor Center → Grok CLI. The official xAI CLI supplies real subscription remaining percentages, reset times, shared-pool status, and separate prepaid balances. Quotas refresh every minute and on demand. Transient upstream and network failures receive short, bounded retries; persistent failures clearly mark the previous observation, and expired periods hide the old percentage. Context capacity is never used as a subscription quota.
+
+Local history shows tokens and CLI-reported costs, deduplicated by original prompt ID across inherited forks. Unknown costs remain unknown. Verified live processes and current-turn log evidence drive island tasks, tool steps, and completion feedback; idle terminals and old completions do not trigger activity. Monitoring installs no Hooks and never creates or resumes model sessions automatically. Automatic integration, when you turn it on, manages only the official shared-startup switch. See [integration details](docs/grok-cli-integration.md).
+
+**Automatic questions and approvals:** Enable automatic integration once, then run `grok` normally in any project. Pulse discovers sessions and projects without a folder picker or a new-terminal launcher. Setup preserves the previous shared-startup setting and manages only the official `cli.use_leader` flag; other configuration and account credentials are untouched. New settings apply to future normal launches without restarting or migrating current standalone tasks. New requests support choices, custom text, and explicit allow-once/reject-once decisions with native option IDs. No persistent grants are created. Terminal-first answers revoke controls; disconnects never cancel the original request or retry uncertain submissions. Older pending requests and unsupported interactions remain in the original terminal. Stopping Pulse monitoring leaves the shared-startup setting intact; its previous state is retained for rollback. See [interaction boundaries](docs/grok-island-questions.md).
 
 ### Number units
 
@@ -100,12 +113,12 @@ Large numbers use Chinese 万 (ten thousand) / 亿 (hundred million) units by de
 
 ## Download and install
 
-Current version: **v1.11.0 (Build 33)**. Download the installer for your Mac from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0):
+Current version: **v1.12.0 (Build 34)**. Download the installer for your Mac from [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.12.0):
 
 | Mac processor | Installer |
 |---|---|
-| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.11.0/CodexNotchMonitor-v1.11.0-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.11.0/CodexNotchMonitor-v1.11.0-x86_64.dmg) |
+| Apple Silicon (M series) | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.12.0/CodexNotchMonitor-v1.12.0-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.12.0/CodexNotchMonitor-v1.12.0-x86_64.dmg) |
 
 1. Open the DMG and drag the app into Applications.
 2. Launch the app. Make sure Codex / ChatGPT Desktop is installed and signed in.
@@ -122,7 +135,7 @@ The app was renamed from Codex Monitor. Its Bundle ID, `CodexNotchMonitor.app` f
 | Official quotas and account | Local Codex App Server; shows quota percentages and reset times, not remaining message counts |
 | Quota forecast | Extrapolated from the current window's used percentage and elapsed time; an estimate only, with no forecast during the first hour of a cycle |
 | Token and project statistics | Local structured session logs, including caches; covers only history still readable on this Mac |
-| Live tasks | Codex uses desktop IPC and local logs; Claude Code uses optional dedicated Hooks, transcripts, process fallback, and its local live-session registry at startup |
+| Live tasks | Codex uses desktop IPC and local logs; Claude Code uses dedicated Hooks and its local registry; Grok CLI uses local updates validated against process identity |
 | Costs | Token × public model prices; API-equivalent estimates, **not subscription bills**; unknown prices are explicitly marked |
 | Community updates and predictions | Third-party aggregator [codex-reset.com](https://codex-reset.com/zh/tibo); predictions do not guarantee a reset for your account |
 | Session account ownership | Uses only reliably observed evidence; records predating the baseline or lacking evidence remain “Unassigned” |
@@ -153,6 +166,7 @@ More documentation:
 
 - [In-island approvals](docs/island-approvals.md)
 - [Claude Code integration](docs/claude-code-integration.md)
+- [Grok CLI integration](docs/grok-cli-integration.md)
 - [Reading compressed session history](docs/compressed-rollouts.md)
 - [Project roadmap](ROADMAP.md)
 

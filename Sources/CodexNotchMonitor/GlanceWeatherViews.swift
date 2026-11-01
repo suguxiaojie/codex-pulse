@@ -142,17 +142,18 @@ struct GlanceWeatherStrip: View {
 
 struct GlanceProviderSwitch: View {
     @Binding var selection: GlanceProvider
+    var available: [GlanceProvider] = [.codex, .claude]
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var highlight
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(GlanceProvider.allCases, id: \.self) { provider in
+            ForEach(available, id: \.self) { provider in
                 Button {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { selection = provider }
                 } label: {
-                    Text(provider == .codex ? "Codex" : "Claude")
+                    Text(provider == .codex ? "Codex" : provider == .grok ? "Grok" : "Claude")
                         .font(.system(size: 10, weight: .medium))
                         .frame(maxWidth: .infinity).frame(height: 26)
                         .foregroundStyle(selection == provider ? FloatingSurfaceTheme.primary(colorScheme) : FloatingSurfaceTheme.secondary(colorScheme))
@@ -164,11 +165,11 @@ struct GlanceProviderSwitch: View {
                         }
                         .contentShape(Capsule())
                 }.buttonStyle(FloatingSurfaceButtonStyle())
-                    .accessibilityLabel(provider == .codex ? "Codex" : "Claude Code")
+                    .accessibilityLabel(provider == .codex ? "Codex" : provider == .grok ? "Grok CLI" : "Claude Code")
                     .accessibilityValue(selection == provider ? "已选择" : "未选择")
                     .accessibilityAddTraits(selection == provider ? .isSelected : [])
             }
-        }.frame(width: 126, height: 26)
+        }.frame(width: available.count > 2 ? 165 : 126, height: 26)
             .islandGlass(Capsule(), tint: FloatingSurfaceTheme.chipFill(colorScheme), solidTint: FloatingSurfaceTheme.surface(colorScheme))
             .accessibilityElement(children: .contain).accessibilityLabel("用量来源")
     }

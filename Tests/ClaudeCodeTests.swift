@@ -220,6 +220,8 @@ import Darwin
             if message.awaitsDecision { bridge.resolve(eventID: message.eventID, decision: ["behavior": "deny", "message": "fixture"]) }
         }, onDisconnect: { _ in })
         let permission: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": "fixture", "tool_name": "Bash", "tool_input": ["command": "echo fixture"]]
+        let foreign = try run(helper: installer.installedHelperURL, args: ["--claude-code", "--configuration", installer.routeURL.path], input: json(permission), grokEvent: "PermissionRequest")
+        expect(foreign.isEmpty, "Grok-compatible hook cannot receive a Claude permission decision")
         let output = try run(helper: installer.installedHelperURL, args: ["--claude-code", "--configuration", installer.routeURL.path], input: json(permission))
         let answer = try JSONSerialization.jsonObject(with: output) as! [String: Any]
         let decision = (answer["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any]
@@ -263,8 +265,12 @@ import Darwin
         expect(single.decision(.once, answers: ["Choose?": "custom"]) != nil, "detail window retains custom answers")
         print("Claude integration tests: \(checks) checks passed")
     }
-    static func run(helper: URL, args: [String], input: Data) throws -> Data {
+    static func run(helper: URL, args: [String], input: Data, grokEvent: String? = nil) throws -> Data {
         let process = Process(); process.executableURL = helper; process.arguments = args
+        if let grokEvent {
+            var environment = ProcessInfo.processInfo.environment; environment["GROK_HOOK_EVENT"] = grokEvent
+            process.environment = environment
+        }
         let stdin = Pipe(), stdout = Pipe(); process.standardInput = stdin; process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
         try process.run(); try stdin.fileHandleForWriting.write(contentsOf: input); try stdin.fileHandleForWriting.close()

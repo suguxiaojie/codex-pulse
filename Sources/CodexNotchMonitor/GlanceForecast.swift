@@ -151,10 +151,11 @@ enum GlanceStripMetric: String, CaseIterable {
 }
 
 enum GlanceProvider: String, CaseIterable {
-    case codex, claude
+    case codex, claude, grok
 
-    static func resolve(_ saved: String, claudeEnabled: Bool) -> Self {
-        claudeEnabled && saved == Self.claude.rawValue ? .claude : .codex
+    static func resolve(_ saved: String, claudeEnabled: Bool, grokEnabled: Bool = false) -> Self {
+        if grokEnabled && saved == Self.grok.rawValue { return .grok }
+        return claudeEnabled && saved == Self.claude.rawValue ? .claude : .codex
     }
 }
 

@@ -17,6 +17,8 @@ enum ClaudeCodeHookMode {
     static func handles(_ arguments: [String]) -> Bool {
         guard let mode = arguments.first,
               mode == "--claude-code" || mode == "--claude-statusline" else { return false }
+        // Grok imports Claude-compatible hooks by default. Its events belong to the Grok log reader.
+        if let event = ProcessInfo.processInfo.environment["GROK_HOOK_EVENT"], !event.isEmpty { return true }
         guard arguments.count == 3, arguments[1] == "--configuration",
               let route = ClaudeCodeRoute.read(from: arguments[2]) else {
             // A broken route must never block Claude Code.

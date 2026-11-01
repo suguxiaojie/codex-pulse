@@ -194,7 +194,7 @@ struct ActivityIslandFocusCard: View {
 
     private var metadataLine: some View {
         HStack(spacing: 8) {
-            Text((row.provider == "Codex" ? "" : "Claude · ") + (row.isPrivate ? "模型已隐藏" : Self.modelDisplayTitle(row))).lineLimit(1).truncationMode(.tail)
+            Text((row.provider == "Codex" ? "" : row.provider == "Grok CLI" ? "Grok · " : "Claude · ") + (row.isPrivate ? "模型已隐藏" : Self.modelDisplayTitle(row))).lineLimit(1).truncationMode(.tail)
                 .help(presentation.modelTitle)
             if !row.fastModeTitle.isEmpty {
                 Text(row.fastModeTitle).fixedSize().help("当前会话已开启 Fast 模式")

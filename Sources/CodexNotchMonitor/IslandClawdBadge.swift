@@ -23,10 +23,83 @@ enum IslandClawdBadgeState: Equatable, Hashable {
     }
 }
 
-/// Which pet stands in for the task's client: Clawd for Claude Code, the Prompt terminal for Codex.
+/// Which pet stands in for the task's client: Clawd for Claude Code, the Grok Bot pebble for Grok CLI,
+/// the Prompt terminal for Codex.
 enum IslandPetSpecies: Hashable {
-    case clawd, codex
-    init(provider: String) { self = provider == "Claude Code" ? .clawd : .codex }
+    case clawd, codex, grok
+    init(provider: String) {
+        switch provider {
+        case "Claude Code": self = .clawd
+        case "Grok CLI": self = .grok
+        default: self = .codex
+        }
+    }
+}
+
+/// One frame of the Grok pet: the Grok Bot pebble, a white round head with two black tilted capsule eyes and no mouth.
+/// All acting is done with the eyes and the body; props match the other pets.
+struct IslandGrokFrame: Equatable {
+    enum Eyes: Equatable { case open, look(CGFloat), wide, closed, squint, happy, cross }
+    var eyes: Eyes
+    var shift = CGSize.zero
+    var squashed = false
+    var dots = 0
+    var bang = false
+    /// `true` shows the cursor inside the speech bubble, `false` the bubble alone.
+    var speech: Bool?
+    var wrench: CGFloat?
+}
+
+struct IslandGrokClip {
+    var frames: [IslandGrokFrame]
+    var fps: Double
+    var loops: Bool
+    var duration: CFTimeInterval { Double(frames.count) / fps }
+}
+
+/// The same eight states and timing as Clawd and Prompt, so all three pets react in step.
+enum IslandGrokClips {
+    static func clip(_ state: IslandClawdBadgeState) -> IslandGrokClip {
+        switch state {
+        case .idle:
+            return .init(frames: [.init(eyes: .closed)], fps: 1, loops: true)
+        case .start:
+            return .init(frames: [.init(eyes: .closed), .init(eyes: .open)], fps: 3, loops: false)
+        case .think:
+            // Glances one way, then the other while the ellipsis fills, with a blink before it starts over.
+            return .init(frames: [.init(eyes: .look(-0.2)), .init(eyes: .look(-0.2), dots: 1), .init(eyes: .look(0.6), dots: 2),
+                                  .init(eyes: .look(0.6), dots: 3), .init(eyes: .closed, dots: 3), .init(eyes: .look(-0.2))],
+                         fps: 4, loops: true)
+        case .tool:
+            // Squints and jitters while a wrench taps beside it.
+            return .init(frames: [.init(eyes: .squint, shift: CGSize(width: 0.25, height: 0), wrench: 0),
+                                  .init(eyes: .squint, shift: CGSize(width: -0.25, height: 0), wrench: -0.8),
+                                  .init(eyes: .squint, shift: CGSize(width: 0.25, height: 0), wrench: 0),
+                                  .init(eyes: .squint, shift: CGSize(width: -0.25, height: 0), wrench: -0.8)],
+                         fps: 8, loops: true)
+        case .approve:
+            return .init(frames: [.init(eyes: .wide, shift: CGSize(width: 0, height: -1), bang: true), .init(eyes: .wide)],
+                         fps: 4, loops: true)
+        case .reply:
+            return .init(frames: [.init(eyes: .wide, speech: true), .init(eyes: .look(-0.3), speech: false)], fps: 2, loops: true)
+        case .done:
+            return .init(frames: [.init(eyes: .happy), .init(eyes: .happy, shift: CGSize(width: 0, height: -1))], fps: 4, loops: true)
+        case .fail:
+            return .init(frames: [.init(eyes: .cross, squashed: true)], fps: 1, loops: true)
+        }
+    }
+
+    /// Single frame for static card avatars; no props, expression only.
+    static func still(_ state: IslandClawdBadgeState) -> IslandGrokFrame {
+        switch state {
+        case .idle: return .init(eyes: .closed)
+        case .start, .think: return .init(eyes: .open)
+        case .tool: return .init(eyes: .squint)
+        case .approve, .reply: return .init(eyes: .wide)
+        case .done: return .init(eyes: .happy)
+        case .fail: return .init(eyes: .cross, squashed: true)
+        }
+    }
 }
 
 /// One frame of the Codex pet: a small terminal whose face is the ">_" prompt and whose cursor is its mouth.
@@ -216,7 +289,7 @@ enum IslandClawdBadgeRenderer {
 
     static func images(_ state: IslandClawdBadgeState, pixel: CGFloat, scale: CGFloat, gaze: Int,
                        species: IslandPetSpecies = .clawd) -> [CGImage] {
-        let key = Key(state: state, pixel: pixel, scale: scale, gaze: species == .codex ? 0 : gaze, species: species)
+        let key = Key(state: state, pixel: pixel, scale: scale, gaze: species == .clawd ? gaze : 0, species: species)
         if let hit = cache[key] { return hit }
         let made: [CGImage]
         switch species {
@@ -225,6 +298,10 @@ enum IslandClawdBadgeRenderer {
         case .codex:
             made = IslandCodexClips.clip(state).frames.compactMap { frame in
                 render(pixel: pixel, scale: scale) { drawCodex(frame, pixel: pixel, in: $0) }
+            }
+        case .grok:
+            made = IslandGrokClips.clip(state).frames.compactMap { frame in
+                render(pixel: pixel, scale: scale) { drawGrok(frame, pixel: pixel, in: $0) }
             }
         }
         cache[key] = made
@@ -241,6 +318,9 @@ enum IslandClawdBadgeRenderer {
         case .codex:
             let frame = IslandCodexClips.still(state)
             made = render(pixel: pixel, scale: scale) { drawCodex(frame, pixel: pixel, in: $0) }
+        case .grok:
+            let frame = IslandGrokClips.still(state)
+            made = render(pixel: pixel, scale: scale) { drawGrok(frame, pixel: pixel, in: $0) }
         }
         stillCache[key] = made
         return made
@@ -251,6 +331,7 @@ enum IslandClawdBadgeRenderer {
         switch species {
         case .clawd: let clip = IslandClawdBadgeClips.clip(state); return (clip.duration, clip.loops)
         case .codex: let clip = IslandCodexClips.clip(state); return (clip.duration, clip.loops)
+        case .grok: let clip = IslandGrokClips.clip(state); return (clip.duration, clip.loops)
         }
     }
 
@@ -321,6 +402,56 @@ enum IslandClawdBadgeRenderer {
         if let cursor = frame.speech {
             fill(3.2, -10, 3.6, 2, 0xF2F2F2); fill(3.6, -8, 0.8, 0.6, 0xF2F2F2)
             if cursor { fill(4.0, -9.7, 0.35, 1.3, 0x162030) }
+        }
+    }
+
+    /// The Grok pet, authored y-down with the feet at the origin: a 10×8 white pebble with black capsule eyes.
+    /// A cooler lower edge gives the round head volume against the black island.
+    static func drawGrok(_ frame: IslandGrokFrame, pixel px: CGFloat, in context: CGContext) {
+        context.saveGState(); defer { context.restoreGState() }
+        context.setShouldAntialias(false)
+        let dx = frame.shift.width, dy = frame.shift.height + (frame.squashed ? 1 : 0)
+        func fill(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ hex: UInt32) {
+            IslandClawdSprite.fillPixelBlock(CGRect(x: (x + dx) * px, y: (y + dy) * px, width: w * px, height: h * px),
+                                             color: srgb(hex), in: context)
+        }
+        let failed = frame.eyes == .cross
+        let body: UInt32 = failed ? 0xB4B5BE : 0xF2F2F5, shade: UInt32 = failed ? 0x8E8F99 : 0xC9CAD4
+        let eye: UInt32 = 0x141418
+        let rows: [(CGFloat, CGFloat)] = [(-3, 6), (-4, 8), (-5, 10), (-5, 10), (-5, 10), (-5, 10), (-4, 8), (-3, 6)]
+        let drawn = Array(rows.prefix(frame.squashed ? 7 : 8))
+        for (index, row) in drawn.enumerated() { fill(row.0, -8 + CGFloat(index), row.1, 1, body) }
+        // Shade the lower rim so the pebble reads as round rather than a flat disc.
+        if let last = drawn.last { fill(last.0, -8 + CGFloat(drawn.count - 1) + 0.4, last.1, 0.6, shade) }
+        fill(-5, -8 + CGFloat(drawn.count - 3) + 0.5, 0.6, 1, shade); fill(4.4, -8 + CGFloat(drawn.count - 3) + 0.5, 0.6, 1, shade)
+        fill(-2.6, -7.4, 1.2, 0.5, 0xFFFFFF)
+        let ey: CGFloat = -5.8
+        // Black capsule eyes lean right: the upper part sits a third of a pixel over.
+        func capsule(_ x: CGFloat, _ y: CGFloat, _ h: CGFloat) {
+            fill(x + 0.35, y, 1, h * 0.45, eye); fill(x, y + h * 0.45, 1, h * 0.55, eye)
+        }
+        for x in [CGFloat(-2), 1.4] {
+            switch frame.eyes {
+            case .open: capsule(x, ey - 0.2, 2.8)
+            case .look(let offset): capsule(x + offset, ey - 0.4, 2.6)
+            case .wide: capsule(x - 0.1, ey - 0.6, 3.2)
+            case .closed: fill(x - 0.2, ey + 1.6, 1.4, 0.5, eye)
+            case .squint: fill(x - 0.2, ey + 1.1, 1.4, 0.6, eye)
+            case .happy: fill(x - 0.5, ey + 1.2, 0.6, 0.6, eye); fill(x, ey + 0.6, 0.8, 0.6, eye); fill(x + 0.7, ey + 1.2, 0.6, 0.6, eye)
+            case .cross:
+                for (ox, oy) in [(-0.4, 0.4), (0.6, 0.4), (0.1, 1.0), (-0.4, 1.6), (0.6, 1.6)] as [(CGFloat, CGFloat)] {
+                    fill(x + ox, ey + oy, 0.6, 0.6, eye)
+                }
+            }
+        }
+        if frame.eyes == .happy { fill(-3.8, ey + 2.4, 1.2, 0.6, 0xF29CB0); fill(2.8, ey + 2.4, 1.2, 0.6, 0xF29CB0) }
+        // Props stay inside the 10-pixel headroom of the shared 14×12 grid.
+        for dot in 0..<frame.dots { fill(2.8 + CGFloat(dot) * 1.2, -9.8, 0.8, 0.8, 0xC9C6D6) }
+        if let lift = frame.wrench { fill(5.2, -7.6 + lift, 0.8, 2.6, 0x9AA4AE); fill(4.8, -8.4 + lift, 1.6, 0.9, 0x9AA4AE) }
+        if frame.bang { fill(4.6, -10, 0.8, 1.3, 0xFFB340); fill(4.6, -8.4, 0.8, 0.6, 0xFFB340) }
+        if let cursor = frame.speech {
+            fill(2.4, -10, 3.4, 1.9, 0xF2F2F2); fill(2.8, -8.1, 0.8, 0.6, 0xF2F2F2)
+            if cursor { fill(3.2, -9.7, 0.35, 1.3, 0x141418) }
         }
     }
 

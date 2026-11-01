@@ -84,7 +84,7 @@ enum CodexTranscriptParser {
 struct LocalThreadRecord: Identifiable, Equatable {
     let id: String
     let title: String
-    let projectName: String
+    var projectName: String
     let projectPath: String
     let rolloutURL: URL
     let isArchived: Bool
@@ -94,6 +94,7 @@ struct LocalThreadRecord: Identifiable, Equatable {
     let kind: LocalThreadKind
     var ownership: SessionOwnership
     var visibility: ThreadVisibility
+    var originalProjectPath: String? = nil
 
     var canRecover: Bool { kind == .userConversation && visibility == .localOnly }
 }
@@ -496,14 +497,20 @@ final class SessionContinuityService {
     private let queue = DispatchQueue(label: "com.coverai.codex-notch-monitor.continuity", qos: .utility)
     private let homeDirectory: URL
     private let threadService: CodexThreadService
+    private let liveProjectNames: () -> [String: String]
+    private let projectDisplayNames: () -> [String: String]
     private var envelopeCache: [String: CachedEnvelope] = [:]
 
     init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
-        threadService: CodexThreadService
+        threadService: CodexThreadService,
+        liveProjectNames: @escaping () -> [String: String] = { [:] },
+        projectDisplayNames: @escaping () -> [String: String] = { [:] }
     ) {
         self.homeDirectory = homeDirectory
         self.threadService = threadService
+        self.liveProjectNames = liveProjectNames
+        self.projectDisplayNames = projectDisplayNames
     }
 
     func fetch(
@@ -746,7 +753,16 @@ final class SessionContinuityService {
             byID[record.id] = record
         }
         envelopeCache = envelopeCache.filter { activeCacheKeys.contains($0.key) }
-        return (Array(byID.values), unreadable)
+        let names = liveProjectNames()
+        let displayNames = projectDisplayNames()
+        let threads = byID.values.map { thread -> LocalThreadRecord in
+            var thread = thread
+            if let name = names[thread.projectPath] { thread.projectName = name }
+            else if catalog.namesByPath[thread.projectPath] == nil,
+                    let name = displayNames[thread.projectPath] { thread.projectName = name }
+            return thread
+        }
+        return (threads, unreadable)
     }
 
     private func parseThread(
@@ -793,7 +809,8 @@ final class SessionContinuityService {
             readableMessages: envelope.readableMessages,
             kind: envelope.kind,
             ownership: .unknown,
-            visibility: .localOnly
+            visibility: .localOnly,
+            originalProjectPath: originalPath
         )
     }
 

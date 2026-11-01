@@ -74,8 +74,26 @@ struct IslandFloatingUsageCapsule: View {
             Color.clear
             if model.showsFloatingUsage && model.presentation != .hidden {
                 TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Group {
+                    if model.usageProvider == .grok {
+                        let quota = model.grokQuota
+                        let available = quota?.isAvailable(at: context.date) == true
+                        let stale = model.grokQuotaFailed || quota?.isStale(at: context.date) == true
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkle").accessibilityHidden(true)
+                            Text("Grok")
+                            Text(available ? "\(quota!.remainingPercent)%" : "—").monospacedDigit()
+                            Text(available ? IslandFloatingQuotaPeriods.countdown(until: quota?.resetsAt, now: context.date) + "重置" : "等待额度")
+                                .foregroundStyle(FloatingSurfaceTheme.secondary())
+                            if stale && available { Text("上次观测").foregroundStyle(FloatingSurfaceTheme.secondary()) }
+                        }.font(FloatingSurfaceTypography.control).foregroundStyle(FloatingSurfaceTheme.primary())
+                            .opacity(stale ? 0.55 : 1).padding(.horizontal, 12).frame(height: 32).fixedSize()
+                            .modifier(IslandNativeBackdropMaterial(shape: Capsule()))
+                    } else {
                     IslandUsageCapsuleContent(windows: IslandFloatingQuotaPeriods.windows(model.quotaState),
                         current: IslandFloatingQuotaPeriods.current(model.quotaState), now: context.date)
+                    }
+                    }
                         .modifier(IslandGlassChrome())
                         .modifier(IslandGlassAppearanceContext(appearance: model.glassAppearance, material: model.material))
                         .environment(\.islandLiquidGlassEnabled, model.material == .liquidGlass)

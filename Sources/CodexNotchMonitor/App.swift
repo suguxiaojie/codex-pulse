@@ -107,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         store.claude.stop()
+        store.grok.stop()
         statusCountdownTimer?.invalidate()
         statusRotationTimer?.invalidate()
         statusCapacityRecoveryWork?.cancel()

@@ -20,6 +20,7 @@ enum MonitorCenterSection: String, CaseIterable, Identifiable {
     case tibo = "动态中心"
     case continuity = "会话管理"
     case claude = "Claude Code"
+    case grok = "Grok CLI"
     case panelSettings = "面板设置"
     case setup = "安装与权限"
     case settings = "灵动岛设置"
@@ -40,6 +41,7 @@ enum MonitorCenterSection: String, CaseIterable, Identifiable {
         case .tibo: return "bolt.horizontal.circle"
         case .continuity: return "bubble.left.and.bubble.right"
         case .claude: return "terminal"
+        case .grok: return "sparkle"
         case .panelSettings: return "rectangle.on.rectangle"
         case .setup: return "checkmark.shield"
         case .settings: return "gearshape"
@@ -53,6 +55,7 @@ enum MonitorCenterSection: String, CaseIterable, Identifiable {
         case .tibo: return "官方额度、社区动态与本机恢复记录"
         case .continuity: return "本地会话连续性"
         case .claude: return "任务、权限请求与本机用量"
+        case .grok: return "官方额度、任务与本机用量"
         case .panelSettings: return "菜单栏内容与概览面板"
         case .setup: return "应用更新、通知权限与监控连接"
         case .settings: return "材质、隐私、任务特效与自动展开"
@@ -62,7 +65,7 @@ enum MonitorCenterSection: String, CaseIterable, Identifiable {
     var isSettings: Bool {
         switch self {
         case .panelSettings, .setup, .settings: return true
-        case .usage, .cost, .tibo, .continuity, .claude: return false
+        case .usage, .cost, .tibo, .continuity, .claude, .grok: return false
         }
     }
 }
@@ -167,7 +170,7 @@ private struct MonitorCenterShortcut: ViewModifier {
     }
 }
 
-private struct MonitorCenterEmptyState: View {
+struct MonitorCenterEmptyState: View {
     let symbol: String
     let title: String
     let detail: String
@@ -1452,6 +1455,8 @@ struct NotchView: View {
             continuityPage
         case .claude:
             ClaudeCodeView(runtime: store.claude)
+        case .grok:
+            GrokView(runtime: store.grok)
         case .panelSettings:
             GlanceContentSettingsView(store: store)
         case .setup:
@@ -1493,7 +1498,7 @@ struct NotchView: View {
         switch expandedPage {
         case .usage, .cost, .tibo, .continuity:
             return true
-        case .panelSettings, .setup, .settings, .claude:
+        case .panelSettings, .setup, .settings, .claude, .grok:
             return false
         }
     }
@@ -1506,7 +1511,7 @@ struct NotchView: View {
             return store.isTiboFeedLoading
         case .continuity:
             return store.isContinuityLoading
-        case .panelSettings, .setup, .settings, .claude:
+        case .panelSettings, .setup, .settings, .claude, .grok:
             return false
         }
     }
@@ -1525,7 +1530,7 @@ struct NotchView: View {
             store.refreshTiboFeed()
         case .continuity:
             store.refreshContinuity(forceInventory: true)
-        case .panelSettings, .setup, .settings, .claude:
+        case .panelSettings, .setup, .settings, .claude, .grok:
             break
         }
     }
@@ -1644,20 +1649,36 @@ struct NotchView: View {
             }
             Button("删除会话，保留项目文件", role: .destructive) {
                 pendingContinuityProjectDeletion = nil
-                store.deleteContinuityProject(
-                    project,
-                    deleteProjectDirectory: false
-                )
+                store.deleteContinuityProject(project)
             }
-            Button("删除会话并移走项目文件", role: .destructive) {
+            Button("删除会话及项目文件…", role: .destructive) {
                 pendingContinuityProjectDeletion = nil
-                store.deleteContinuityProject(
-                    project,
-                    deleteProjectDirectory: true
-                )
+                store.prepareProjectFileDeletion(project)
             }
         } message: { project in
             Text(projectDeletionMessage(project))
+        }
+        .sheet(item: $store.projectDeletionDraft) { draft in
+            ProjectDeletionConfirmationView(draft: draft) {
+                store.projectDeletionDraft = nil
+            } confirm: {
+                store.projectDeletionDraft = nil
+                store.deleteContinuityProject(draft.project, directoryPlan: draft.plan)
+            }
+        }
+        .sheet(item: $store.projectRenameDraft) { project in
+            ProjectRenameView(store: store, project: project)
+        }
+        .sheet(item: $store.projectDisplayNameDraft) { draft in
+            ProjectDisplayNameView(store: store, draft: draft)
+        }
+        .alert("重命名未完成", isPresented: Binding(
+            get: { store.projectRenameFailure != nil },
+            set: { if !$0 { store.projectRenameFailure = nil } }
+        )) {
+            Button("知道了") { store.projectRenameFailure = nil }
+        } message: {
+            Text(store.projectRenameFailure ?? "")
         }
         .alert(
             "删除失败",
@@ -2044,6 +2065,9 @@ struct NotchView: View {
         store.isSessionImportInspecting || store.isSessionImporting || store.isSessionExporting
             || store.isContinuityRecovering || store.deletingContinuityThreadID != nil
             || store.deletingContinuityProjectID != nil
+            || store.isContinuityLoading || store.isPreparingProjectDeletion || store.projectDeletionDraft != nil
+            || store.isProjectRenaming || store.projectRenameDraft != nil
+            || store.projectDisplayNameDraft != nil
     }
 
     private var continuityHasActiveOperation: Bool {
@@ -2857,6 +2881,13 @@ struct NotchView: View {
     @ViewBuilder
     private func continuityProjectActions(_ project: ContinuityProjectGroup) -> some View {
         Button {
+            store.prepareProjectRename(project)
+        } label: {
+            Label("重命名 Codex 项目…", systemImage: "pencil")
+        }
+        .disabled(continuityActionsAreBusy)
+        Divider()
+        Button {
             store.exportProject(project)
         } label: {
             Label("导出项目全部 \(project.threads.count) 条会话", systemImage: "square.and.arrow.up")
@@ -3041,8 +3072,8 @@ struct NotchView: View {
         let activeCount = project.threads.count - archivedCount
         return "将通过 Codex App Server 永久删除「\(project.name)」下的 \(project.threads.count) 条会话"
             + "（活动 \(activeCount) 条，已归档 \(archivedCount) 条），并清理 Codex 项目登记。\n\n"
-            + "“删除会话，保留项目文件”会保留磁盘目录：\(project.id)\n\n"
-            + "“删除会话并移走项目文件”会把该目录及其中全部文件移入 macOS 废纸篓，可在清空废纸篓前恢复。"
+            + "当前项目路径：\(project.id)\n\n"
+            + "选择保留项目文件时不会移动磁盘目录；选择删除项目文件后，会先检查是否为独立项目文件夹，再单独确认完整路径。范围不明确时不会删除会话或文件。\n\n"
             + "会话删除本身无法撤销；如需保留，请先导出完整项目迁移包。"
     }
 

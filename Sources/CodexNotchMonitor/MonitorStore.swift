@@ -54,6 +54,12 @@ struct PendingProjectSessionRepair: Codable, Equatable, Identifiable {
     let requestedAt: Date
 }
 
+struct ProjectDeletionDraft: Identifiable {
+    let id = UUID()
+    let project: ContinuityProjectGroup
+    let plan: ProjectDeletionSafety.Plan
+}
+
 @MainActor
 final class MonitorStore: ObservableObject {
     private struct QuotaResetAttempt {
@@ -120,6 +126,13 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var lastSessionExportURL: URL?
     @Published private(set) var isSessionExporting = false
     @Published private(set) var isContinuityLoading = false
+    @Published private(set) var isPreparingProjectDeletion = false
+    @Published var projectDeletionDraft: ProjectDeletionDraft?
+    @Published var projectRenameDraft: ProjectRenameRecord?
+    @Published private(set) var isProjectRenaming = false
+    @Published private(set) var projectRenameError: String?
+    @Published var projectRenameFailure: String?
+    @Published var projectDisplayNameDraft: ProjectDisplayNameDraft?
     @Published private(set) var isContinuityRecovering = false
     @Published private(set) var deletingContinuityThreadID: String?
     @Published private(set) var deletingContinuityProjectID: String?
@@ -151,14 +164,44 @@ final class MonitorStore: ObservableObject {
 
     private let quotaService = QuotaService()
     let claude = ClaudeCodeRuntime()
+    let grok = GrokRuntime()
     private let sessionActivityService = SessionActivityService()
     let approvalUpdates = PassthroughSubject<Void, Never>()
     private let nativeActivityObserver = NativeActivityObserver()
+    private let sharedQuestions = CodexSharedQuestions()
     var islandAnswerRequestIDs: Set<String> {
         Set(nativeActivityObserver.approvalSnapshots.values.flatMap(\.requests).map(\.identity))
             .union(claude.requests.map(\.id))
+            .union(sharedQuestions.snapshots.values.map(\.identity))
+            .union(grok.questions.map(\.id))
     }
     func islandApproval(for row: ActivitySessionSnapshot) -> IslandApprovalContent {
+        if row.provider == "Grok CLI" {
+            guard let request = grok.questions.first(where: { "grok:" + $0.sessionID == row.sessionID && $0.turnID == row.turnID && row.replyRequestIDs.contains($0.id) }) else {
+                return .init(id: row.id + "-terminal", provider: row.provider, title: "请在 Grok 终端处理", summary: row.actionText, fallbackTitle: "请在原终端处理")
+            }
+            var value = IslandApprovalContent(id: request.id, provider: row.provider, title: "需要回答", summary: "",
+                message: grok.submittedQuestions.contains(request.id) ? "回答已提交，请在 Grok 原终端确认；不会自动重发" : nil,
+                fallbackTitle: "回 Grok 终端")
+            if let permission = request.permission {
+                value = IslandApprovalContent(id: request.id, provider: row.provider, title: "请求使用工具",
+                    summary: permission.title + "\n" + permission.input, command: true,
+                    message: grok.submittedQuestions.contains(request.id) ? "决定已提交，请在 Grok 原终端确认" : nil, fallbackTitle: "回 Grok 终端")
+                if permission.allowOnce != nil { value.actions.append(.init(id: "once", title: "允许一次")) }
+                if permission.rejectOnce != nil { value.actions.append(.init(id: "deny", title: "拒绝", destructive: true)) }
+            }
+            value.questions = request.questions.map { q in
+                .init(id: q.text, title: q.text, options: q.options.map(\.label), allowsText: true, multiSelect: q.multiple,
+                    descriptions: Dictionary(q.options.map { ($0.label, $0.description + ($0.preview.map { "\n" + $0 } ?? "")) }, uniquingKeysWith: { _, last in last }))
+            }
+            value.submitDraft = { [weak self] action, draft in
+                guard let self else { return "请在 Grok 原终端处理" }
+                let selections = draft.selections.merging(draft.options.mapValues { [$0] }) { _, single in single }
+                return await self.grok.answer(request, action: action, selections: selections, texts: draft.texts)
+            }
+            value.fallback = { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")) }
+            return value
+        }
         if row.provider == "Claude Code" {
             guard let request = claude.requests.first(where: { $0.sessionID == row.sessionID }) else {
                 return .init(id: row.id + "-terminal", provider: row.provider, title: "待处理请求",
@@ -186,6 +229,21 @@ final class MonitorStore: ObservableObject {
             }
             value.fallback = { [weak self] in self?.claude.returnToTerminal(request.id) }
             value.details = { [weak self] in self?.claude.showRequests(for: row.sessionID) }
+            return value
+        }
+        if let request = sharedQuestions.snapshots[row.sessionID], request.turnID == row.turnID,
+           row.replyRequestIDs.contains(where: { $0.hasPrefix(request.identity + ":") }) {
+            let openOne = { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/OneNative.app")); () }
+            var value = IslandApprovalContent(id: request.identity, provider: "Codex · One Native", title: "需要回答",
+                summary: request.status == "inProgress" ? "" : "本轮已结束，请到 One Native 回答",
+                message: sharedQuestions.message(for: request), fallbackTitle: "在 One Native 中处理", fallback: openOne, details: openOne)
+            value.questions = request.pending.map { .init(id: $0.questionItemID, title: $0.question, options: $0.options, allowsText: true) }
+            if sharedQuestions.available(request) {
+                value.submit = { [weak self] action, answers in
+                    guard let self, action == "answers" else { return "请到 One Native 查看" }
+                    return await self.sharedQuestions.submit(request, answers: answers)
+                }
+            }
             return value
         }
         let snapshot = nativeActivityObserver.approvalSnapshots[row.sessionID]
@@ -257,7 +315,10 @@ final class MonitorStore: ObservableObject {
     private let sidebarCleanupService = CodexSidebarCleanupService()
     private let projectCleanupService = CodexProjectCleanupService()
     private let threadService = CodexThreadService()
-    private lazy var sessionContinuityService = SessionContinuityService(threadService: threadService)
+    private lazy var sessionContinuityService = SessionContinuityService(
+        threadService: threadService, liveProjectNames: ProjectRenameService.namesByPath,
+        projectDisplayNames: { ProjectDisplayNames.load() }
+    )
     private lazy var sessionRecoveryService = SessionRecoveryService(threadService: threadService)
     private var activeSessionImportPanel: NSOpenPanel?
     private var sessionImportInspectionID: UUID?
@@ -395,6 +456,8 @@ final class MonitorStore: ObservableObject {
         }
         claude.onRowsChanged = { [weak self] in self?.publishActivityRows() }
         claude.start()
+        grok.onRowsChanged = { [weak self] in self?.publishActivityRows() }
+        grok.start()
         do { try AppPaths.prepareDirectories() } catch { }
         observeCodexTerminationForSidebarCleanup()
         processPendingSidebarCleanups()
@@ -447,6 +510,8 @@ final class MonitorStore: ObservableObject {
                         if self.startupContinuityRefresh != nil { self.refreshContinuity(forceInventory: true) }
                     case .claude:
                         if self.claude.usage == nil { self.claude.refreshUsage() }
+                    case .grok:
+                        self.grok.refresh()
                     default: break
                     }
                 }
@@ -971,9 +1036,176 @@ final class MonitorStore: ObservableObject {
         }
     }
 
+    func prepareProjectRename(_ project: ContinuityProjectGroup) {
+        guard !isProjectRenaming else { return }
+        isProjectRenaming = true
+        projectRenameError = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { () throws -> ProjectRenameRecord in
+                let transport = try ProjectRenameService.connect()
+                defer { transport.close() }
+                return try ProjectRenameEngine(request: transport.request).select(path: project.id)
+            }
+            DispatchQueue.main.async {
+                self.isProjectRenaming = false
+                switch result {
+                case let .success(project): self.projectRenameDraft = project
+                case .failure(ProjectRenameError.notRegistered):
+                    self.projectDisplayNameDraft = .init(id: project.id, name: project.name)
+                case let .failure(error): self.projectRenameFailure = (error as? ProjectRenameError ?? .unavailable).localizedDescription
+                }
+            }
+        }
+    }
+
+    func saveProjectDisplayName(_ draft: ProjectDisplayNameDraft, name: String) {
+        guard !isProjectRenaming, projectDisplayNameDraft == draft else { return }
+        do { _ = try ProjectRenameEngine.validatedName(name) }
+        catch { projectRenameError = error.localizedDescription; return }
+        isProjectRenaming = true
+        projectRenameError = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { () throws -> Void in
+                let transport = try ProjectRenameService.connect()
+                defer { transport.close() }
+                do {
+                    _ = try ProjectRenameEngine(request: transport.request).select(path: draft.id)
+                } catch ProjectRenameError.notRegistered {
+                    try ProjectDisplayNames.save(name, for: draft.id)
+                    return
+                }
+                throw ProjectRenameError.changed
+            }
+            DispatchQueue.main.async {
+                self.isProjectRenaming = false
+                self.projectDisplayNameDraft = nil
+                switch result {
+                case .success:
+                    let saved = ProjectDisplayNames.load()[draft.id] ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    for index in self.continuitySnapshot.threads.indices where self.continuitySnapshot.threads[index].projectPath == draft.id {
+                        self.continuitySnapshot.threads[index].projectName = saved
+                    }
+                    self.continuityStatusMessage = "历史分组已显示为「\(saved)」。仅保存在 Pulse 中，原始会话、目录和 Codex 项目登记未改动。"
+                case let .failure(error): self.projectRenameFailure = (error as? ProjectRenameError ?? .unavailable).localizedDescription
+                }
+            }
+        }
+    }
+
+    func renameProject(_ project: ProjectRenameRecord, to name: String) {
+        guard !isProjectRenaming, projectRenameDraft == project else { return }
+        do { _ = try ProjectRenameEngine.validatedName(name) }
+        catch { projectRenameError = error.localizedDescription; return }
+        isProjectRenaming = true
+        projectRenameError = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { () throws -> ProjectRenameRecord in
+                let transport = try ProjectRenameService.connect()
+                defer { transport.close() }
+                return try ProjectRenameEngine(request: transport.request).rename(project, to: name)
+            }
+            DispatchQueue.main.async {
+                self.isProjectRenaming = false
+                switch result {
+                case let .success(updated):
+                    self.projectRenameDraft = nil
+                    for index in self.continuitySnapshot.threads.indices where updated.roots.contains(self.continuitySnapshot.threads[index].projectPath) {
+                        self.continuitySnapshot.threads[index].projectName = updated.name
+                    }
+                    self.continuityStatusMessage = "Codex 项目名称已保存为「\(updated.name)」。侧栏如未刷新，请重新打开 Codex；磁盘目录未改动。"
+                case let .failure(error):
+                    // Close the write form on unknown outcomes so a second click cannot replay it.
+                    self.projectRenameDraft = nil
+                    self.projectRenameFailure = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func prepareProjectFileDeletion(_ project: ContinuityProjectGroup) {
+        guard !isPreparingProjectDeletion, !isContinuityLoading, !isContinuityRecovering,
+              deletingContinuityThreadID == nil, deletingContinuityProjectID == nil else { return }
+        isPreparingProjectDeletion = true
+        continuityStatusMessage = "正在检查项目文件夹和其他项目的范围…"
+        sessionContinuityService.fetch { [weak self] result in
+            guard let self else { return }
+            self.isPreparingProjectDeletion = false
+            self.continuityStatusMessage = nil
+            do {
+                let snapshot = try result.get()
+                let fresh = try self.freshDeletionProject(project, snapshot: snapshot)
+                let plan = try self.projectDeletionPlan(fresh, snapshot: snapshot)
+                self.projectDeletionDraft = ProjectDeletionDraft(project: fresh, plan: plan)
+            } catch {
+                self.continuityDeletionFailure = error.localizedDescription
+            }
+        }
+    }
+
     func deleteContinuityProject(
         _ project: ContinuityProjectGroup,
-        deleteProjectDirectory: Bool
+        directoryPlan: ProjectDeletionSafety.Plan? = nil
+    ) {
+        guard !isPreparingProjectDeletion, !isContinuityLoading, !isContinuityRecovering,
+              deletingContinuityThreadID == nil, deletingContinuityProjectID == nil else { return }
+        guard let directoryPlan else {
+            executeProjectDeletion(project, directoryPlan: nil)
+            return
+        }
+        // Confirmation grants permission for this exact directory identity, not a path string.
+        isPreparingProjectDeletion = true
+        continuityStatusMessage = "正在重新核对已确认的项目文件夹…"
+        sessionContinuityService.fetch { [weak self] result in
+            guard let self else { return }
+            self.isPreparingProjectDeletion = false
+            self.continuityStatusMessage = nil
+            do {
+                let snapshot = try result.get()
+                let fresh = try self.freshDeletionProject(project, snapshot: snapshot)
+                let current = try self.projectDeletionPlan(fresh, snapshot: snapshot)
+                try ProjectDeletionSafety.revalidate(directoryPlan, current: current)
+                self.continuitySnapshot = snapshot.applyingOwnership(self.accountContinuityStore.ownershipByThread())
+                self.executeProjectDeletion(fresh, directoryPlan: directoryPlan)
+            } catch {
+                self.continuityDeletionFailure = error.localizedDescription
+            }
+        }
+    }
+
+    private func freshDeletionProject(
+        _ project: ContinuityProjectGroup, snapshot: SessionContinuitySnapshot
+    ) throws -> ContinuityProjectGroup {
+        guard let fresh = snapshot.projectGroups.first(where: { $0.id == project.id }),
+              fresh.name == project.name,
+              Set(fresh.threads.map(\.id)) == Set(project.threads.map(\.id)) else {
+            throw ProjectDeletionSafety.Failure(message: "项目或会话列表已变化，请刷新后重新确认")
+        }
+        return fresh
+    }
+
+    private func projectDeletionPlan(
+        _ project: ContinuityProjectGroup, snapshot: SessionContinuitySnapshot
+    ) throws -> ProjectDeletionSafety.Plan {
+        guard snapshot.unreadableFileCount == 0 else {
+            throw ProjectDeletionSafety.Failure(message: "存在无法读取的会话，暂时不能确定完整删除范围")
+        }
+        // Retain the selected sessions' evidence after their rollout files have been deleted.
+        let existingIDs = Set(snapshot.userThreads.map(\.id))
+        let evidence = snapshot.userThreads + project.threads.filter { !existingIDs.contains($0.id) }
+        let stateURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/.codex-global-state.json")
+        return try ProjectDeletionSafety.prepare(
+            projectPath: project.id, projectName: project.name,
+            threadIDs: Set(project.threads.map(\.id)),
+            threads: evidence.map {
+                .init(id: $0.id, path: $0.projectPath, originalPath: $0.originalProjectPath)
+            },
+            catalogData: Data(contentsOf: stateURL)
+        )
+    }
+
+    private func executeProjectDeletion(
+        _ project: ContinuityProjectGroup, directoryPlan: ProjectDeletionSafety.Plan?
     ) {
         let threads = project.threads.filter { thread in
             continuitySnapshot.userThreads.contains { $0.id == thread.id }
@@ -993,48 +1225,80 @@ final class MonitorStore: ObservableObject {
         var queuedSidebarCleanupCount = 0
         var failures: [(title: String, message: String)] = []
 
+        func finish(_ error: Error? = nil) {
+            self.deletingContinuityThreadID = nil
+            self.deletingContinuityProjectID = nil
+            if let error {
+                self.continuityStatusMessage = nil
+                self.continuityError = error.localizedDescription
+                self.continuityDeletionFailure = error.localizedDescription
+            }
+            self.refreshContinuity(forceInventory: true)
+        }
+
+        func finalize(_ currentPlan: ProjectDeletionSafety.Plan?) {
+            var movedDirectory = false
+            do {
+                if let directoryPlan, let currentPlan {
+                    try ProjectDeletionSafety.moveToTrash(directoryPlan, current: currentPlan)
+                    movedDirectory = true
+                }
+                let removedRegistrationCount = try self.finalizeDeletedProject(project)
+                self.continuityError = nil
+                var details = ["已删除「\(project.name)」的 \(deletedCount) 条会话"]
+                if residualTrashCount > 0 {
+                    details.append("\(residualTrashCount) 个会话残留已移入废纸篓")
+                }
+                if removedRegistrationCount > 0 { details.append("Codex 项目登记已移除") }
+                details.append(movedDirectory ? "已确认的项目文件夹及全部内容已移入废纸篓" : "磁盘项目文件已保留")
+                if queuedSidebarCleanupCount > 0 {
+                    details.append("\(queuedSidebarCleanupCount) 条会话侧栏残留将在完全退出 Codex 后自动清理")
+                }
+                self.continuityStatusMessage = details.joined(separator: "；")
+                finish()
+            } catch {
+                let files = movedDirectory ? "项目文件夹已移入废纸篓，可在 Finder 中放回" : "项目文件夹未移动"
+                finish(NSError(domain: "CodexProjectDeletion", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "会话已删除，\(files)，后续操作失败：\(error.localizedDescription)"
+                ]))
+            }
+        }
+
         func deleteNext(_ index: Int) {
             guard index < threads.count else {
-                self.deletingContinuityThreadID = nil
-                self.deletingContinuityProjectID = nil
-                if failures.isEmpty {
-                    do {
-                        let finalization = try self.finalizeDeletedProject(
-                            project,
-                            deleteProjectDirectory: deleteProjectDirectory
-                        )
-                        self.continuityError = nil
-                        var details = ["已删除「\(project.name)」的 \(deletedCount) 条会话"]
-                        if residualTrashCount > 0 {
-                            details.append("\(residualTrashCount) 个会话残留已移入废纸篓")
-                        }
-                        if finalization.removedRegistrationCount > 0 {
-                            details.append("Codex 项目登记已移除")
-                        }
-                        details.append(finalization.movedProjectDirectoryToTrash
-                            ? "项目目录已移入废纸篓"
-                            : "磁盘项目文件已保留")
-                        if queuedSidebarCleanupCount > 0 {
-                            details.append("\(queuedSidebarCleanupCount) 条会话侧栏残留将在完全退出 Codex 后自动清理")
-                        }
-                        self.continuityStatusMessage = details.joined(separator: "；")
-                    } catch {
-                        let message = "会话已删除，但项目收尾失败：\(error.localizedDescription)"
-                        self.continuityStatusMessage = nil
-                        self.continuityError = message
-                        self.continuityDeletionFailure = message
-                    }
-                } else {
-                    self.continuityStatusMessage = nil
+                guard failures.isEmpty else {
                     let first = failures[0]
-                    let message = "项目会话仅删除 \(deletedCount) / \(threads.count) 条；「\(first.title)」失败：\(first.message)"
-                    self.continuityError = message
-                    self.continuityDeletionFailure = message
+                    finish(NSError(domain: "CodexProjectDeletion", code: 4, userInfo: [
+                        NSLocalizedDescriptionKey: "项目会话仅删除 \(deletedCount) / \(threads.count) 条；项目文件夹未移动；「\(first.title)」失败：\(first.message)"
+                    ]))
+                    return
                 }
-                self.refreshContinuity(forceInventory: true)
+                guard let directoryPlan else { finalize(nil); return }
+                // Re-scan after asynchronous session deletion; a new child project/session must block trashing.
+                self.sessionContinuityService.fetch { result in
+                    do {
+                        let current = try self.projectDeletionPlan(project, snapshot: result.get())
+                        try ProjectDeletionSafety.revalidate(directoryPlan, current: current)
+                        finalize(current)
+                    } catch {
+                        finish(NSError(domain: "CodexProjectDeletion", code: 5, userInfo: [
+                            NSLocalizedDescriptionKey: "会话已删除，但最终范围检查失败，项目文件夹未移动：\(error.localizedDescription)"
+                        ]))
+                    }
+                }
                 return
             }
 
+            if let directoryPlan {
+                do {
+                    let current = try self.projectDeletionPlan(project, snapshot: self.continuitySnapshot)
+                    try ProjectDeletionSafety.revalidate(directoryPlan, current: current)
+                } catch {
+                    failures.append(("删除范围", error.localizedDescription))
+                    deleteNext(threads.count)
+                    return
+                }
+            }
             let thread = threads[index]
             self.deletingContinuityThreadID = thread.id
             self.continuityStatusMessage = "正在删除「\(project.name)」的 \(index + 1) / \(threads.count) 条会话…"
@@ -1059,10 +1323,7 @@ final class MonitorStore: ObservableObject {
         deleteNext(0)
     }
 
-    private func finalizeDeletedProject(
-        _ project: ContinuityProjectGroup,
-        deleteProjectDirectory: Bool
-    ) throws -> (removedRegistrationCount: Int, movedProjectDirectoryToTrash: Bool) {
+    private func finalizeDeletedProject(_ project: ContinuityProjectGroup) throws -> Int {
         let fileManager = FileManager.default
         let stateURL = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/.codex-global-state.json")
@@ -1100,63 +1361,13 @@ final class MonitorStore: ObservableObject {
             }
         }
 
-        guard deleteProjectDirectory else {
-            _ = try projectCleanupService.registerCleanup(
-                projectName: project.name,
-                projectPath: project.id
-            )
-            return (removedRegistrationCount, false)
-        }
-        let projectURL = URL(fileURLWithPath: project.id, isDirectory: true).standardizedFileURL
-        let protectedPaths: Set<String> = [
-            "/",
-            fileManager.homeDirectoryForCurrentUser.standardizedFileURL.path,
-            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Desktop").standardizedFileURL.path,
-            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Documents").standardizedFileURL.path,
-            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Downloads").standardizedFileURL.path,
-            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library").standardizedFileURL.path,
-            "/Applications",
-            "/Users",
-        ]
-        guard !protectedPaths.contains(projectURL.path) else {
-            if let originalState { try? originalState.write(to: stateURL, options: .atomic) }
-            throw NSError(
-                domain: "CodexProjectDeletion",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "拒绝删除过于宽泛的目录：\(projectURL.path)"]
-            )
-        }
-        var isDirectory = ObjCBool(false)
-        guard fileManager.fileExists(atPath: projectURL.path, isDirectory: &isDirectory) else {
-            _ = try projectCleanupService.registerCleanup(
-                projectName: project.name,
-                projectPath: project.id
-            )
-            return (removedRegistrationCount, false)
-        }
-        guard isDirectory.boolValue else {
-            if let originalState { try? originalState.write(to: stateURL, options: .atomic) }
-            throw NSError(
-                domain: "CodexProjectDeletion",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "项目路径不是文件夹：\(projectURL.path)"]
-            )
-        }
-        do {
-            try fileManager.trashItem(at: projectURL, resultingItemURL: nil)
-            _ = try projectCleanupService.registerCleanup(
-                projectName: project.name,
-                projectPath: project.id
-            )
-            return (removedRegistrationCount, true)
-        } catch {
-            if let originalState { try? originalState.write(to: stateURL, options: .atomic) }
-            throw NSError(
-                domain: "CodexProjectDeletion",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "项目目录移入废纸篓失败，Codex 项目登记已恢复：\(error.localizedDescription)"]
-            )
-        }
+        // A session grouping path may be a shared workspace. It is never authority
+        // to move or delete the directory, even when project registration is removed.
+        _ = try projectCleanupService.registerCleanup(
+            projectName: project.name,
+            projectPath: project.id
+        )
+        return removedRegistrationCount
     }
 
     func dismissContinuityDeletionFailure() {
@@ -2475,6 +2686,10 @@ final class MonitorStore: ObservableObject {
 
     func refreshSessionActivity(completion: (() -> Void)? = nil) {
         sessionActivityService.onChange = { [weak self] in self?.refreshSessionActivity() }
+        sharedQuestions.onChange = { [weak self] in
+            self?.approvalUpdates.send()
+            self?.refreshSessionActivity()
+        }
         nativeActivityObserver.onChange = { [weak self] in
             self?.approvalUpdates.send()
             self?.refreshSessionActivity()
@@ -2492,8 +2707,9 @@ final class MonitorStore: ObservableObject {
             }
             self.isReadingSession = false
             self.nativeActivityObserver.observe(snapshots)
+            self.sharedQuestions.observe(snapshots)
             let merged = self.nativeActivityObserver.merge(snapshots, names: threadNames)
-            let snapshots = merged.snapshots
+            let snapshots = self.sharedQuestions.merge(merged.snapshots)
             let threadNames = merged.names
             let status: String
             switch self.nativeActivityObserver.state {
@@ -2502,7 +2718,7 @@ final class MonitorStore: ObservableObject {
             case .connecting:
                 status = "本地日志 · 桌面连接中"
             case .disconnected:
-                status = "本地日志 · 桌面未连接"
+                status = self.sharedQuestions.isConnected ? "本地日志 · 共享 Codex 已连接" : "本地日志 · 桌面未连接"
             }
             if self.nativeActivityStatus != status { self.nativeActivityStatus = status }
             if self.pendingSessionRefresh {
@@ -2547,7 +2763,7 @@ final class MonitorStore: ObservableObject {
     }
 
     private func publishActivityRows() {
-        let combined = activitySessionState.rows + claude.rows
+        let combined = activitySessionState.rows + claude.rows + grok.rows
         if activitySessions != combined { activitySessions = combined }
     }
 

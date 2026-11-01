@@ -12,6 +12,20 @@ enum ActivitySessionStateTests {
     }
 
     static func main() throws {
+        for (path, expected) in [
+            ("Sources/Monitor.swift", "Monitor.swift"),
+            ("/tmp/中文.json", "中文.json"),
+            ("https://[invalid/file.json", "file.json"),
+            ("https://example.com:invalid/file.json", "file.json"),
+            ("https://[.json", "[.json"),
+            (String(repeating: "a", count: 8192) + "/file.md", "file.md")
+        ] {
+            let command = String(data: try JSONSerialization.data(withJSONObject: ["cmd": "cat " + path]), encoding: .utf8)!
+            expect(SessionActivityService.toolSummary(name: "exec", input: command) == "读取 " + expected, "file label accepts arbitrary tool text without file URL parsing")
+            expect(SessionActivityService.toolSummary(name: "exec", input: "tools.apply_patch *** Update File: " + path) == "修改 · " + expected, "patch label accepts arbitrary tool text without file URL parsing")
+        }
+        expect(SessionActivityService.toolSummary(name: "exec", input: "{\"cmd\":\"cat /tmp/no-extension\"}") == "读取 项目文件", "missing file label retains fallback")
+        expect(SessionActivityService.toolSummary(name: "exec", input: "tools.apply_patch *** Update File: /\n") == "修改 · 项目文件", "empty patch basename uses fallback")
         UserDefaults.standard.setVolatileDomain([CountStyle.preferenceKey: "western"], forName: UserDefaults.argumentDomain)
         expect(CodexActivityTokenUsageFormatter.string(for: 128_000) == "128K", "western forwarding")
         UserDefaults.standard.setVolatileDomain([CountStyle.preferenceKey: "chinese"], forName: UserDefaults.argumentDomain)

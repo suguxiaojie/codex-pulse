@@ -765,7 +765,7 @@ final class SessionActivityService {
         else { return nil }
         let rawPath = String(input[valueRange])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return URL(fileURLWithPath: rawPath).lastPathComponent
+        return displayFileName(from: rawPath)
     }
 
     private static func extractJSONString(after labelPattern: String, from input: String) -> String? {
@@ -815,7 +815,13 @@ final class SessionActivityService {
         guard let match = matches.last,
               let valueRange = Range(match.range(at: 1), in: command)
         else { return nil }
-        return URL(fileURLWithPath: String(command[valueRange])).lastPathComponent
+        return displayFileName(from: String(command[valueRange]))
+    }
+
+    private static func displayFileName(from value: String) -> String? {
+        // Tool input is arbitrary text, including malformed HTTP URLs. Extract a
+        // display label without invoking Foundation's file URL preconditions.
+        value.split(separator: "/", omittingEmptySubsequences: true).last.map(String.init)
     }
 
     private static func sanitize(_ value: String, limit: Int = 88) -> String {

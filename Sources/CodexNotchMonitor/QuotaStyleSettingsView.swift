@@ -183,7 +183,7 @@ struct QuotaStyleSettingsView: View {
     }
     private var clawdGroup: some View {
         PanelSettingsGroup(title: "桌宠", symbol: "pawprint") {
-            toggle("显示桌宠", symbol: "figure.climbing", detail: "Codex 任务显示终端仔，Claude Code 任务显示 Clawd，随任务状态做动作。", value: $clawdEnabled)
+            toggle("显示桌宠", symbol: "figure.climbing", detail: "Codex 任务显示终端仔，Claude Code 任务显示 Clawd，Grok 任务显示 Grok Bot，随任务状态做动作。", value: $clawdEnabled)
             SettingsRowDivider()
             SettingsRow(symbol: "arrow.up.left.and.arrow.down.right", title: "桌宠大小", detail: "按紧凑灵动岛高度限制大小，保持完整可见。") {
                 Picker("桌宠大小", selection: $clawdSize) {

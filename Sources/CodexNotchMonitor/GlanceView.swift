@@ -20,6 +20,7 @@ struct GlanceView: View {
     @AppStorage(CountStyle.preferenceKey) private var countStyle = CountStyle.chinese.rawValue
     @ObservedObject var store: MonitorStore
     @ObservedObject private var claude: ClaudeCodeRuntime
+    @ObservedObject private var grok: GrokRuntime
     @AppStorage("glance.provider") private var savedProvider = "codex"
     @State private var now = Date()
     let onQuit: () -> Void
@@ -50,12 +51,13 @@ struct GlanceView: View {
          onPreferredHeightChange: @escaping (CGFloat) -> Void) {
         self.store = store
         self.claude = store.claude
+        self.grok = store.grok
         self.onQuit = onQuit
         self.onOpenCenter = onOpenCenter
         self.onPreferredHeightChange = onPreferredHeightChange
     }
 
-    private var provider: GlanceProvider { .resolve(savedProvider, claudeEnabled: claude.enabled) }
+    private var provider: GlanceProvider { .resolve(savedProvider, claudeEnabled: claude.enabled, grokEnabled: grok.enabled) }
     private var claudeSnapshot: GlanceClaudeSnapshot {
         .init(limits: claude.limits, usage: claude.usage, statusLineEnabled: claude.statusLineEnabled, now: now)
     }
@@ -89,7 +91,13 @@ struct GlanceView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: primaryRemaining)
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { now = $0 }
         .onChange(of: claude.enabled) { enabled in
-            if !enabled { savedProvider = GlanceProvider.codex.rawValue }
+            if !enabled && savedProvider == GlanceProvider.claude.rawValue { savedProvider = GlanceProvider.codex.rawValue }
+        }
+        .onChange(of: grok.enabled) { enabled in
+            if !enabled && savedProvider == GlanceProvider.grok.rawValue { savedProvider = GlanceProvider.codex.rawValue }
+        }
+        .onChange(of: grok.refreshing) { busy in
+            if provider == .grok && !busy && refreshVisualState == .refreshing { finishManualRefresh() }
         }
         .onChange(of: provider) { _ in
             readingHeight = nil
@@ -117,7 +125,7 @@ struct GlanceView: View {
             if readingHeight.map({ abs($0 - next) > 0.5 }) ?? true { readingHeight = next }
         }
         .onAppear {
-            if !claude.enabled { savedProvider = GlanceProvider.codex.rawValue }
+            savedProvider = provider.rawValue
             now = Date()
         }
         .task(id: preferredHeight) {
@@ -145,6 +153,11 @@ struct GlanceView: View {
                 header
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: GlanceLayout.moduleSpacing) {
+                        if provider == .grok {
+                            GrokGlanceContent(runtime: grok, now: now, showQuota: showPrimaryQuota,
+                                showCost: showCostEstimate, showActivity: showTokenActivity,
+                                showDaily: showDailyTokens, showMonth: showThirtyDayTokens, metric: $stripMetric)
+                        } else {
                         if showPrimaryQuota { primaryQuota }
                         if provider == .claude {
                             if showCostEstimate || showTokenActivity { dayStrip }
@@ -160,6 +173,7 @@ struct GlanceView: View {
                             currentAccountHistoryEmptyState
                         }
                         if provider == .codex && showResetEntry { resetCreditCard(store.quotaResetCredits).weatherModule() }
+                        }
                     }
                     .id(provider)
                     .transition(.opacity)
@@ -357,8 +371,9 @@ struct GlanceView: View {
             CodexMark(size: 20)
             Text("Codex Pulse").font(.system(size: 13, weight: .semibold)).fixedSize()
             Spacer(minLength: 0)
-            if claude.enabled {
-                GlanceProviderSwitch(selection: Binding(get: { provider }, set: { savedProvider = $0.rawValue }))
+            if claude.enabled || grok.enabled {
+                GlanceProviderSwitch(selection: Binding(get: { provider }, set: { savedProvider = $0.rawValue }),
+                    available: [.codex] + (claude.enabled ? [.claude] : []) + (grok.enabled ? [.grok] : []))
                     .disabled(store.isConsumingQuotaResetCredit || showsResetConfirmation)
             } else { accountBadge }
         }
@@ -603,7 +618,8 @@ struct GlanceView: View {
                 refreshRotation = 360
             }
         }
-        if provider == .claude { claude.refreshUsage() }
+        if provider == .grok { grok.refresh() }
+        else if provider == .claude { claude.refreshUsage() }
         else { store.refreshAll() }
 
         let startedAt = refreshStartedAt
@@ -662,7 +678,8 @@ struct GlanceView: View {
     }
 
     private var primaryWindow: RateLimitWindow? {
-        provider == .claude ? claudeSnapshot.limitingWindow : primaryBucket?.limitingWindow
+        if provider == .grok { return nil }
+        return provider == .claude ? claudeSnapshot.limitingWindow : primaryBucket?.limitingWindow
     }
 
     private var currentAccountIndicatorColor: Color {
@@ -684,6 +701,7 @@ struct GlanceView: View {
     }
 
     private var footerUpdateText: String {
+        if provider == .grok { return grok.refreshing ? "正在查询" : grok.quotaStatus }
         if provider == .claude {
             guard let date = claudeSnapshot.updatedAt else { return "等待数据" }
             if now.timeIntervalSince(date) < 60 { return "刚刚更新" }
@@ -703,6 +721,7 @@ struct GlanceView: View {
     }
 
     private var footerStatusColor: Color {
+        if provider == .grok { return grok.quotaFailed || grok.quota == nil ? .orange : .green }
         if provider == .claude {
             return claudeSnapshot.updatedAt == nil || claudeSnapshot.isStale || !claudeSnapshot.usageReady ? .orange : .green
         }

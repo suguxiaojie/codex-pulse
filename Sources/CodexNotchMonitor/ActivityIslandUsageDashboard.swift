@@ -22,6 +22,8 @@ struct ActivityIslandUsageDashboard: View {
             usageCost: model.usageCost, resetCredits: model.resetCredits, now: now)
         case .claude: return .claude(usage: model.claudeUsage, limits: model.claudeLimits,
             statusLineEnabled: model.claudeStatusLineEnabled, now: now)
+        case .grok: return .grok(usage: model.grokUsage, quota: model.grokQuota,
+            failed: model.grokQuotaFailed, status: model.grokQuotaStatus, now: GrokDisplayClock.now(sampled: now))
         }
     }
     private var width: CGFloat { model.metrics.expandedRect.width }

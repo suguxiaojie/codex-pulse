@@ -16,6 +16,12 @@ update_test_binary="$(mktemp /tmp/codex-notch-update-tests.XXXXXX)"
 trap 'rm -f "$test_binary" "$cost_test_binary" "$catalog_test_binary" "$tibo_test_binary" "$reset_test_binary" "$continuity_test_binary" "$ripple_test_binary" "$activity_island_test_binary" "$activity_preferences_test_binary" "$setup_test_binary" "$update_test_binary"' EXIT
 
 cd "$project_dir"
+zsh scripts/test-grok.sh
+swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CodexProxyTransport.swift Sources/CodexNotchMonitor/CodexExecutableLocator.swift Sources/CodexNotchMonitor/ProjectRenameService.swift Tests/ProjectRenameTests.swift -o "$test_binary"
+"$test_binary"
+swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/ProjectDeletionSafety.swift Tests/ProjectDeletionSafetyTests.swift -o "$test_binary"
+"$test_binary"
+zsh scripts/test-shared-questions.sh
 swiftc -O -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/FastTimestamp.swift Tests/FastTimestampTests.swift -o "$test_binary"
 "$test_binary"
 swiftc -swift-version 5 -parse-as-library Sources/CodexNotchMonitor/CountFormatter.swift Sources/CodexNotchMonitor/AnalysisBarPresentation.swift Tests/AnalysisBarPresentationTests.swift -o "$test_binary"
@@ -134,6 +140,8 @@ swiftc Sources/CodexNotchMonitor/FastTimestamp.swift Sources/CodexNotchMonitor/C
   Sources/CodexNotchMonitor/IslandDashboardCost.swift \
   Sources/CodexNotchMonitor/IslandClaudeUsage.swift \
   Sources/CodexNotchMonitor/IslandUsagePresentation.swift \
+  Sources/CodexNotchMonitor/GrokData.swift \
+  Sources/CodexNotchMonitor/GrokPresentation.swift \
   Sources/CodexNotchMonitor/IslandUsageSections.swift \
   Sources/CodexNotchMonitor/ClaudeCodePricing.swift \
   Sources/CodexNotchMonitor/ClaudeCodeTranscript.swift \

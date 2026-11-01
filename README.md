@@ -4,9 +4,9 @@
 
 # Codex Pulse
 
-**在菜单栏和刘海里，随时看清 Codex 与 Claude Code 的额度、任务和用量。**
+**在菜单栏和刘海里，随时看清 Codex、Claude Code 与 Grok CLI 的额度、任务和用量。**
 
-[English](README.en.md) · [下载 v1.11.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0) · [MIT License](LICENSE)
+[English](README.en.md) · [下载 v1.12.0](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.12.0) · [MIT License](LICENSE)
 
 macOS 13+ · 原生 SwiftUI / AppKit · Apple Silicon / Intel
 
@@ -20,9 +20,11 @@ Codex Pulse 是一个原生 macOS 菜单栏应用，有三个入口：
 - **菜单栏玻璃面板**：随手查额度，个人付费套餐显示 Go／Plus／Pro100／Pro200／Pro500；
 - **监控中心**：深入分析用量、成本和会话。
 
-所有数据来自本机：Codex App Server、桌面 IPC 和本地会话日志。不读取任何账号凭据。
+数据通过本机 Codex App Server、桌面 IPC、官方 Grok CLI 和本地会话日志获取。Pulse 不读取账号凭据；Grok 官方 CLI 自行完成账单查询鉴权。
 
 ### 灵动岛
+
+- **One Native 异步提问**：通过现有共享 Codex daemon 获取真实提问，支持在当前活动轮次选择选项或输入自定义回答。提交前重新校验问题与轮次，回执未确认时不自动重发；已结束轮次回 One Native 处理。不修改 One Native 或 Codex 配置，详见[接入边界](docs/one-native-questions.md)。
 
 - **Fast 模式**：仅在明确开启时，于展开卡片的模型信息旁显示「Fast」；关闭或未知时不显示。Claude 使用会话状态栏的 `fast_mode`；Codex 读取属于当前会话的 `thread_settings_applied` 设置事件及明确的轮次字段，支持 One 中运行的 Codex CLI；缺少可靠记录时不显示，不以全局配置猜测。隐私模式下隐藏。
 
@@ -46,7 +48,7 @@ Codex Pulse 是一个原生 macOS 菜单栏应用，有三个入口：
 ### 菜单栏玻璃面板
 
 - **气象主区**：瓶颈额度窗口的剩余百分比用大号圆体数字显示，并按本周期的消耗速度给出预报：可用到重置，或大约多久后用完（明确标注为估算）。面板颜色跟随额度变化：充足时为冷青，偏紧时为琥珀，告急时为红色。
-- **Codex／Claude 切换**：启用 Claude Code 接入后，页眉可在两个来源之间切换。Claude 显示 5 小时额度和每周额度。
+- **来源切换**：启用 Claude Code 或 Grok CLI 接入后，页眉可切换对应来源。Claude 显示 5 小时和每周额度；Grok 显示服务端返回的真实订阅额度、周期结束时间与共享池标识。
 - **7 天条带**：标题本身就是"成本　Token"切换。柱子下只写星期，数值集中在下方一行；有未计价模型的日子标注为"金额未知"。
 - **玻璃质感**：保留液态玻璃效果，"面板不透明度"作用于整个面板；系统开启降低透明度或增强对比度时，自动改为不透明。
 
@@ -55,7 +57,18 @@ Codex Pulse 是一个原生 macOS 菜单栏应用，有三个入口：
 - **用量与成本**：按周期查看 Token、缓存、项目排行和趋势。成本按公开模型价格估算，是 API 等价金额，不是订阅账单。官方 Standard 费率同步兼容新旧价格表，缓存写入沿用 30 分钟费率，更新失败保留最后有效值。
 - **动态中心**：汇集官方额度、社区动态、重置时间轴和本地恢复记录，并标明各自的来源。
 - **会话管理**：搜索项目与会话，查看账号归属和异常摘要；支持导出 Markdown／HTML、原始备份、导入和项目迁移。列表盘点仅缓存元数据与短标题，正文导出仍读取原始日志。
+- 项目菜单支持“重命名 Codex 项目”：通过正在运行的桌面项目服务保存真实名称，回读确认后更新会话列表；不改文件夹、路径或会话绑定。Codex 已打开的侧栏可能需要重新打开客户端才刷新。路径对应多个项目、服务不可用或关联 ChatGPT 云端项目时拒绝代改；不直接修改状态文件。
+- 没有 Codex 项目登记的历史分组会进入“历史分组显示名称”窗口，按完整路径将名称保存在 Pulse 偏好中，刷新和重启后保留；不新建 Codex 项目，不改日志、路径或会话归属。原生项目名称优先，连接失败与重复登记不会回退为历史分组。
+- 删除项目时可保留文件，或将所选项目的独立文件夹及全部内容移入废纸篓。删除文件须核对唯一项目登记与原始工作目录，单独展示完整路径并输入文件夹名确认；共享／嵌套项目、符号链接、目录被替换或归属不明时拒绝文件删除。会话删除前与移动文件前均重新检查范围。
 - **Claude Code**：独立的连接开关、权限请求、官方额度，以及本机 Token 与成本历史。灵动岛显示本轮最新公开进展摘要，并展示真实工具步骤及 Bash 命令描述，区分执行、等待、成功、失败与结束；最多显示三个节点，优先保留仍在执行或等待的调用。监控重启后会恢复经本地登记确认仍忙碌的会话，空闲窗口不算运行任务。
+
+### Grok CLI
+
+在监控中心的“Grok CLI”页面开启接入，默认关闭。支持 xAI 官方 `grok`：每分钟通过独立短生命周期 CLI 查询真实订阅剩余比例，手动刷新可立即查询；显示周／月周期、重置时间、统一共享额度池和独立的预付余额。临时上游／网络故障会在总时限内短重试；持续失败时保留明确标记的上次观测，真正的周期结束后不继续显示旧比例；不会把上下文容量当作订阅额度。
+
+本机历史按原始 prompt ID 去重，展示 Token、CLI 报告成本与日期趋势；fork 继承记录不重复相加，缺失成本显示未知。活动会话经进程身份核对后进入灵动岛，显示公开进度、工具步骤和完成反馈；空闲终端不计入活动，旧完成记录不重放提醒。不安装 Hook，监控不自动创建或恢复模型会话。自动接入只在你开启时管理官方共享启动开关，见下文。详见 [Grok CLI 接入说明](docs/grok-cli-integration.md)。
+
+**自动接入问答与批准**：首次在 Grok CLI 页面开启自动接入后，照常在任意项目运行 `grok`，Pulse 自动识别会话与项目，无需选择目录或另建终端。配置仅管理官方 `cli.use_leader` 开关，先备份原设置；其余配置保持原样，不读取账号凭据。新设置影响之后正常启动的 Grok，当前独立任务不被重启或迁移。连接后收到的新问题支持单选、多选与文字回答；具备完整操作参数的工具请求可显式“允许一次”或“拒绝”，保留原生选项 ID，不生成长期授权。原端先答时撤销岛内控件，断线不取消原请求、不重发未知结果；旧待处理请求、计划批准等回原终端。关闭 Pulse 监控不撤销 Grok 的共享启动设置，原状态备份可用于回退。详见 [岛内问答边界](docs/grok-island-questions.md)。
 
 ### 数字单位
 
@@ -106,12 +119,12 @@ Codex Pulse 是一个原生 macOS 菜单栏应用，有三个入口：
 
 ## 下载与安装
 
-当前版本：**v1.11.0（Build 33）**。在 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0) 下载与你的 Mac 对应的安装包：
+当前版本：**v1.12.0（Build 34）**。在 [GitHub Releases](https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.12.0) 下载与你的 Mac 对应的安装包：
 
 | Mac 处理器 | 安装包 |
 |---|---|
-| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.11.0/CodexNotchMonitor-v1.11.0-arm64.dmg) |
-| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.11.0/CodexNotchMonitor-v1.11.0-x86_64.dmg) |
+| Apple Silicon（M 系列） | [arm64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.12.0/CodexNotchMonitor-v1.12.0-arm64.dmg) |
+| Intel | [x86_64 DMG](https://github.com/suguxiaojie/codex-pulse/releases/download/v1.12.0/CodexNotchMonitor-v1.12.0-x86_64.dmg) |
 
 1. 打开 DMG，把 App 拖进"应用程序"。
 2. 启动 App。确保 Codex／ChatGPT Desktop 已安装并登录。
@@ -128,8 +141,8 @@ Codex Pulse 是一个原生 macOS 菜单栏应用，有三个入口：
 | 官方额度与账号 | 本机 Codex App Server，显示额度比例和重置时间，不等于剩余消息条数 |
 | 额度预报 | 由当前窗口的已用比例和已过时间推算，只是估算；周期开始不足 1 小时时不预测 |
 | Token 与项目统计 | 本机结构化会话日志，包含缓存，只覆盖本机仍能读到的历史 |
-| 实时任务 | Codex 来自桌面 IPC 和本地日志；Claude Code 来自可选的专属 Hook、对话记录、进程兜底及启动时的本地活动登记 |
-| 成本 | Token × 公开模型价格，是 API 等价估值，**不是订阅账单**；价格未知时明确标注 |
+| 实时任务 | Codex 来自桌面 IPC 和本地日志；Claude Code 来自专属 Hook 与本地登记；Grok CLI 来自通过进程身份核对的本地通知流 |
+| 成本 | Codex／Claude 按 Token × 公开模型价格估算，Grok 使用 CLI 报告的轮次成本；**均不等于订阅账单**，未知金额明确标注 |
 | 社区动态与预测 | 第三方聚合 [codex-reset.com](https://codex-reset.com/zh/tibo)，预测不保证你的账号会重置 |
 | 会话账号归属 | 只采用可靠观察到的证据；基线之前或证据不足的记录保持"未归属" |
 
@@ -160,6 +173,7 @@ SKIP_COST_SMOKE_TESTS=1 ./scripts/test.sh # 不允许读取真实用量日志时
 
 - [灵动岛审批](docs/island-approvals.md)
 - [Claude Code 接入说明](docs/claude-code-integration.md)
+- [Grok CLI 接入说明](docs/grok-cli-integration.md)
 - [压缩历史会话读取](docs/compressed-rollouts.md)
 - [项目进度](ROADMAP.md)
 

@@ -26,10 +26,11 @@ struct IslandApprovalContent {
     var message: String?
     var fallbackTitle = "在 Codex 中处理"
     var submit: ((String, [String: String]) async -> String)?
+    var submitDraft: ((String, IslandAnswerDraft) async -> String)?
     var fallback: (() -> Void)?
     var details: (() -> Void)?
     var draft: IslandAnswerDraft?
-    var hasInlineControls: Bool { submit != nil && (!actions.isEmpty || !questions.isEmpty) }
+    var hasInlineControls: Bool { (submit != nil || submitDraft != nil) && (!actions.isEmpty || !questions.isEmpty) }
     var guardIdentity: String {
         id + summary + actions.map(\.id).joined(separator: "|")
             + questions.map { question in
@@ -41,7 +42,7 @@ struct IslandApprovalContent {
         guard privacy else { return self }
         var copy = self
         copy.summary = "有待处理请求"; copy.actions = []; copy.questions = []
-        copy.submit = nil; copy.details = nil
+        copy.submit = nil; copy.submitDraft = nil; copy.details = nil
         return copy
     }
 }
@@ -184,6 +185,8 @@ struct ActivityIslandApprovalCard: View {
                     if interaction.submitted && result == nil { ProgressView().controlSize(.small) }
                     if content.provider == "Claude Code" {
                         ClaudeMarkShape().fill(Color(red: 0.851, green: 0.467, blue: 0.341)).frame(width: 15, height: 15)
+                    } else if content.provider == "Grok CLI" {
+                        Image(systemName: "sparkle").font(.system(size: 14)).accessibilityHidden(true)
                     } else if let icon = ActivityIslandPreviewAssets.codexIcon {
                         Image(nsImage: icon).resizable().scaledToFit().frame(width: 15, height: 15)
                     }
@@ -343,9 +346,12 @@ struct ActivityIslandApprovalCard: View {
         interaction.submitted = true; content.fallback?()
     }
     private func send(_ action: String) {
-        guard !privacy, !interaction.disabled(now: Date(), deadline: content.deadline, message: content.message ?? result), let submit = display.submit else { return }
+        guard !privacy, !interaction.disabled(now: Date(), deadline: content.deadline, message: content.message ?? result), display.submit != nil || display.submitDraft != nil else { return }
         interaction.submitted = true
-        Task { result = await submit(action, draft.answers) }
+        Task {
+            if let submit = display.submitDraft { result = await submit(action, draft) }
+            else { result = await display.submit?(action, draft.answers) }
+        }
     }
 }
 

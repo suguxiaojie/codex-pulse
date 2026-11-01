@@ -6,13 +6,29 @@
 
 ## 当前阶段
 
-GitHub 仓库为 suguxiaojie/codex-pulse。v1.11.0（Build 33）已发布为 Latest，附注标签 v1.11.0 指向源码提交 c65481beef4bde401103f040f251d941370649d7。arm64／x86_64 DMG 与 SHA256SUMS-v1.11.0.txt 已上传，下载回验及 GitHub digest 均与本地一致。
+GitHub 仓库为 suguxiaojie/codex-pulse。当前源码为 v1.12.0（Build 34），包含 Grok CLI 额度、任务与岛内问答，以及 Codex 项目重命名、历史分组显示名和独立目录删除。双架构安装包随 v1.12.0 Release 发布。上一公开版 v1.11.0（Build 33）的标签仍指向 c65481beef4bde401103f040f251d941370649d7。
 
-当前源码与本地双架构构建为 v1.11.0（Build 33），GitHub Latest 为 v1.11.0。本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
+本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
 本地开发交接笔记不随公开发行包上传；历史版本变化以 Git 历史为准。
 
 ## 进行中与待办
+
+- 2026-11-01 13:13：Grok 岛内问答与工具允许一次／拒绝一次已实现并按本会话已授权的同一成本失败例外覆盖安装，目录选择启动方式随后被用户要求改成自动化，见最新设计记录。原生 1.0.70 共享启动／Swift 握手、会话回执 `result.result` 包装已核对；核心 47、交互与启动 40、运行时 31、Claude 核心 114 与运行时／审批 350 通过，arm64 Release／严格签名通过；完整脚本仍为唯一既有成本别名断言失败。安装与源包逐文件／链接清单一致，PID 46806 启动检查无新增崩溃报告。真实用户请求回传待下次共享任务验收，未向真实会话投递测试决定。回滚备份：build/backups/CodexNotchMonitor-before-grok-questions-20261101-131144.app；证据：.tmp/grok-questions/installation.json；说明：[Grok 岛内问答](docs/grok-island-questions.md)。未提交／推送／发布。
+
+- 2026-11-01 12:42：Grok CLI 已按用户本次明确例外授权备份覆盖安装并启动，原有成本排行侧栏别名断言失败继续保留，未弱化测试。安装包与源 App 逐文件／符号链接清单一致、deep／strict 签名通过，PID 22347 持续运行超过 1 分钟，未发现新增崩溃报告。官方额度、Token／报告成本、任务步骤与完成反馈已接入监控中心、菜单栏和岛内来源；默认关闭。界面导航因工具检测到用户／窗口切换而停止，未改 Grok 开关；启用与真实活动任务／完成提醒待用户正常操作验收。此前真实只读额度剩余 99%，4 份历史共 593,694 Token 与账本一致，空闲终端为 0 活动；最终核心 47 项、运行时 24 项、arm64 Release 通过，完整脚本被原有断言阻断的后续组已独立全部通过（连续性 41／41、Claude 核心 114 项与运行时／审批）。不安装 Hook／改 Grok 配置／读凭据／发送模型请求。回滚备份：build/backups/CodexNotchMonitor-before-grok-20261101-123809.app；安装证据：.tmp/grok-integration/installation.json；说明：[Grok CLI 接入](docs/grok-cli-integration.md)。未提交／推送／发布。
+
+- 2026-11-01 01:35：一次性离线名称修正仍待执行。用户重开 ChatGPT 后核对发现 worker 50121 持续存活、仍 waiting_for_apps_to_exit，Pulse 进程一直未退出，未创建备份或改写登记；客户端 13 个名称仍为原名。本轮已通过 Pulse 原生“退出”菜单正常退出该应用，只剩 ChatGPT 需用户完全退出，之后由已授权脚本自动备份／修正／重开。修正范围与隔离测试不变；30 分钟等待窗口仍从原启动时计时。计划：.tmp/offline-project-names/plan.json；状态：.tmp/offline-project-names/status.json；恢复入口：.tmp/offline-project-names/rollback.py。
+
+
+- 2026-11-01 01:09：项目重命名侧栏同步确认未实现，重启建议已证伪。用户重启后，project/list 与 project/read 侧的 13 个英文名仍保留，但客户端 list_projects 与 .codex-global-state.json 的 local-projects.name 均仍为原名。当前客户端源码 renameLocal 经 runProjectWrite 先更新 App Server，再调用本地 cache.updateProject，最后发布项目状态；插件只执行了前半段。不得再把重启当作同步方案或宣称侧栏已更新。需接入原生完整项目更新流程；当前无可用重命名连接器，Computer Use 禁止操作 Codex 客户端，项目规范禁止直接改写其状态文件。Pulse 名称与历史别名已生效、文件夹未改，侧栏同步仍待修复。证据：.tmp/sidebar-name-audit/result.log；原始更名记录：.tmp/batch-project-rename/rename-record.json。
+
+- 2026-11-01 00:48：会话删除范围修复已随项目重命名版本备份覆盖安装，实机确认窗及真实删除待验收。保留独立项目目录删除，唯一登记／原始 cwd／其他项目重叠／链接与真实路径／目录身份检查及文件夹名二次确认已实现；目录权限不依赖项目显示名称。最终安全 41 项、连续性 41／41 与 arm64 Release／签名通过；既有成本断言失败记录保留，用户明确授权覆盖安装。备份与启动证据：.tmp/project-rename/installation.json。
+
+- 2026-10-31 15:33：真实数据成本冒烟测试的项目排行名称与侧栏别名一致性断言失败，原因待查；用户已允许本次闪退修复例外安装，该失败未隐藏或放宽断言。证据：.tmp/startup-crash-20261031/tests.log。
+
+- 2026-10-31 15:50：One Native 异步提问已实现、验证并备份安装，真实岛内视觉与用户点击回传待验收。共享 Codex daemon 经 app-server proxy 提供当前原问题，生产只读探针生成 1 张带请求标识的待回复卡；显式回答前重新核对 epoch／轮次／问题，并用 turn/steer.expectedTurnId 限定活动轮次，结束轮次回原客户端，不自动重发。未改 One Native／Hook／Codex 配置。32 项状态检查、传输边界、arm64 Release 和签名通过；完整测试仍卡在已获例外安装授权的成本排行别名断言，后续组独立续跑通过。App／proxy 持续运行超过 1 分钟、stderr 为空，无新增崩溃；One Native 与原 daemon PID 未变。备份：build/backups/CodexNotchMonitor-before-one-native-questions-20261031-034934.app。说明：docs/one-native-questions.md；证据：.tmp/one-native-question/。未提交／推送。
+
 
 
 
@@ -136,6 +152,16 @@ GitHub 仓库为 suguxiaojie/codex-pulse。v1.11.0（Build 33）已发布为 Lat
 
 ## 最近完成
 
+- 2026-11-01 13:58：Grok 自动接入已按用户明确授权配置并备份覆盖安装。只新增官方 `cli.use_leader=true`，原来未声明该开关，其他配置保持原样；[原共享设置的最小备份](/Users/zuxinchen/.grok/config.toml.codex-pulse-shared-1793512235-FE38C268.json) 不复制其他模型参数。官方 grok inspect 原生解析退出 0，原 PID 23149 保持运行。Pulse 改连默认 leader.sock，移除目录选择与新建终端流程；实机已显示“自动接入问答与批准／检查连接”，并提示下次正常启动 Grok 生效，额度仍为 99%。定向核心 56、配置／交互 67、运行时 32、arm64 Release／严格签名通过；完整脚本保留唯一旧成本别名失败，后续组独立通过。App 与源包逐文件／链接一致，新 PID 62947 启动验收通过。App 回滚备份：build/backups/CodexNotchMonitor-before-grok-auto-20261101-135715.app；配置／安装记录：.tmp/grok-auto/。真实新共享任务的问答／批准回传仍待正常用户任务验收，不为验收启动模型。未提交／推送／发布。
+
+- 2026-11-01 13:36：Grok 官方额度刷新修复已覆盖安装并实机验收。已复现并区分上游 503 与旧页面时间误判新快照两类问题；增加 20 秒总期限内最多 3 次短重试，认证／不支持／无额度等不重试，补当前显示时钟与准确过期文案。核心 56、交互 40、运行时 31、arm64 Release 和签名通过；完整脚本仍为原有成本别名断言失败，后续组独立全部通过，按本会话同一已授权例外安装。实际 Grok 页显示剩余 99%，后续自动刷新观测时间更新至 01:35，仍显示 99% 且不再误报过期；PID 54547 已运行 3 分钟，安装与源 App 逐文件／链接一致。回滚备份：build/backups/CodexNotchMonitor-before-grok-quota-fix-20261101-133012.app；证据：.tmp/grok-questions/quota-installation.json。自动接入的真实 Grok 配置仍未改，待单独授权。
+
+- 2026-11-01 01:03：历史分组显示名称能力已完成、备份覆盖安装并在 Pulse 实机保存旧目录 /Users/zuxinchen/Documents/卡网搭建 → CoverAI Store。43 项名称／偏好回归、连续性 41／41、arm64 Release 与签名通过；完整测试既有成本排行断言失败保留，后续组全部通过，用户明确授权覆盖安装。刷新及重启后界面仍显示该旧目录 10 条会话为 CoverAI Store；全列表仍为 16 组／145 条，未合并会话。别名仅写本应用偏好，目录身份保持不变。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-history-display-name-20261101-010140.app；证据：.tmp/history-display-name/。未提交／推送。
+
+- 2026-11-01 00:48：项目管理修复版已按用户明确指令备份覆盖 /Applications/CodexNotchMonitor.app 并启动，包含项目目录删除范围保护和 Codex 原生项目重命名。保留既有成本测试失败记录，其余定向及后续组通过；真实重命名／侧栏同步和删除确认窗待验收。完整回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-project-management-20261101-004720.app。未提交／推送。
+
+- 2026-10-31 15:33：启动闪退已修复、备份覆盖安装并启动。SessionActivityService 命令／补丁文件标签改为纯字符串提取，避免 HTTP 文本触发文件 URL 解析致命断言；新增 14 项边界回归。原版启动复现崩溃，修复版同机持续运行超过 1 分钟、stderr 为空且无新增崩溃报告；完整界面交互未验证。用户明确允许成本排行测试失败情况下例外安装。备份：build/backups/CodexNotchMonitor-before-startup-crash-fix-20261031-033214.app；证据：.tmp/startup-crash-20261031/。未改写历史会话／账号数据，未提交／推送。
+
 - 2026-10-29 03:18：v1.11.0（Build 33）已公开发布为 Latest；附注标签指向 c65481beef4bde401103f040f251d941370649d7，包含当前已验证的任务显示／交互、性能、重置卡提醒、套餐与官方费率修复。两份 DMG 和 SHA-256 校验文件已上传。发布地址：https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.11.0。
 
 - 2026-10-29 02:36：Claude Bash 流程节点补上命令摘要并备份覆盖安装。Hook／转录均读取 description，节点显示“运行命令 · 描述”，缺少公开进展时动作行也使用命令摘要；无描述重复事件不覆盖，终态保留、换轮清空、长标题悬停查看；不展示原始命令参数。证据：.tmp/claude-command-summary/summary.json。未改 Hook 配置，未提交／推送。
@@ -166,17 +192,27 @@ GitHub 仓库为 suguxiaojie/codex-pulse。v1.11.0（Build 33）已发布为 Lat
 
 - 2026-10-26 16:53：高优先级性能优化已验证并备份安装。预览图片按 2560 px 上限即时解码并复用，设置预览外层不再重复订阅全 Store，内部实时面板保留订阅；历史统计按文件释放临时对象并复用日期解析器，流式读取按读取／解压块释放，会话目录按文件释放。关键 GB 级峰值定位到活动日志拆行：保留 Data 切片时逐行删除前缀造成整段缓冲反复 COW，改为单次遍历和独立行字节，保留半行、丢弃超长行及精确轮次／Token 规则。6,000 行与半行续写回归通过。60 次图片重绘三轮中位 5.7726→0.4051 秒；1,500 行固定日志峰值 400.39→6.86 MiB、状态与 Token 一致。最终 App 启动约 76 秒系统历史峰值 410.50 MiB、结束 219.75 MiB，未复现中间版 9–10 GiB 峰值；长期泄漏尚未做长时验证。回滚至本轮开始前：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-performance-opt-20261026-042050.app 。未提交／推送／发布。
 
-- 2026-10-26 15:45：修复提醒岛体固定 380 pt 收窄及正文／按钮留白失衡：沿用配置的展开宽度，生产 SwiftUI 卡片测量自然高度并计入刘海避让；左右留白 28 pt，顶部 20 pt、底部 16 pt，内容间距 12 pt，按钮空间不足时竖排。保留配色、光效、图标、文案、操作路由与提醒调度。已备份覆盖安装 arm64 App 并启动；回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-alert-layout-20261026-034452.app 。README 中英文及提醒规格同步，未提交／推送／发布。
-
-- 2026-10-26 01:19：Claude AskUserQuestion 新增 PreToolUse 接收、最多 4 题的单选／多选勾选／自定义回答、选项说明、按请求保留草稿及失效请求拦截。多选按原选项顺序以逗号分隔，回传保留完整原输入，PermissionRequest 与 PreToolUse 使用各自协议；超时／失联交回原客户端，不自动批准。已完整备份并覆盖安装 arm64 App，进程启动确认；回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-claude-island-choices-20261025-131911.app 。中英文 README 与接入说明同步，未提交／推送／发布。
-
-- 2026-10-24 03:54：修复已结束轮次的异步回答误用 steer-turn：活动轮次继续 steer，已结束轮次采用受限 start v2，并由 owner 继承原设置；补全 restoreMessage，只有回执对应轮次的实际回答内容匹配才确认成功。旧夹具加入真实拒绝规则后稳定复现 outcomeUnknown；新投递探针及隔离完整测试通过。已完整备份并安装 arm64 修复版，进程已确认。回滚 App：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-async-reply-delivery-20261023-155439.app 。说明：docs/island-async-question-fix.md。
-
-- 2026-10-24 03:23：v1.10.0 正式发布为 Latest。46 个相关文件已提交，main 与附注标签已推送，Apple Silicon／Intel DMG 和校验清单已上传；发布后重新下载三个附件，哈希与 GitHub digest 均一致，线上 README 与本地一致，发布标签的 133 个构建输入与打包快照一致。未安装。Release：https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.10.0 。
-
-- 2026-10-24 03:23：v1.10.0（Build 32）发行准备完成。纳入当前灵动岛提醒、文字回答／中文组字、跨轮次请求保留、三档礼花／提示音、通知与设置改进；中英文 README、版本和下载链接同步。双架构 DMG 与 SHA256SUMS-v1.10.0.txt 已生成。
-
 ## 最近验证
+
+- 2026-11-01 13:58：自动接入：原生普通 grok + CLI 共享开关的隔离 Socket 验证通过；实际配置仅追加目标设置，回读为 true、原生配置解析退出 0、旧进程仍存活。67 项包含缺省／false／true、注释／CRLF、幂等、权限与最小备份、并发／链接／长 Socket 路径拒绝；运行时 32 项包含异步配置不得覆盖后续显式停用。App 深度严格签名与安装清单一致；实机 Grok 页面无目录入口，显示“检查连接”和真实 99% 额度。完整脚本仍仅为旧成本排行别名断言失败，续跑连续性 41／41、Claude 114、运行时与审批 350 通过。证据：.tmp/grok-auto/installation.json、configuration.json、native-config-validation.json、grok-tests-delivery.log。
+
+- 2026-11-01 13:36：额度修复：实机 CUA 先核对“官方额度已同步”却显示“周期已结束”，官方日志确认周期仍在未来；修复后实际页面及下一轮自动刷新均显示 99%，进度条 0.99、观测时间由 01:33 更新至 01:35。原生只读查询成功，临时 503／网络的限次重试、旧页面时钟与真正过期边界共 56 项核心检查通过；交互 40、运行时 31 通过，原有续跑组包含连续性 41／41、Claude 114 与审批 350 全部通过。arm64 Release／深度严格签名、安装文件清单一致，PID 54547 持续运行。完整脚本唯一旧成本别名失败保留。自动化的一次性配置已在隔离 GROK_HOME 中验证普通 grok 启动创建共享 Socket；真实配置未写入。证据：.tmp/grok-questions/。
+
+- 2026-11-01 12:42：用户明确允许在保留既有成本别名断言失败的情况下安装 Grok 版本；源／旧 App／备份均先验签与核对哈希，正常退出旧进程后覆盖并启动。安装与源 App 的逐文件 SHA-256／符号链接清单一致，deep／strict 签名通过；新 PID 22347 持续运行 71 秒，无新增崩溃报告。已看到监控中心的 Grok CLI 入口，后续导航遇到窗口切换而停止；默认开关未修改，不宣称真实任务点击验收通过。备份：build/backups/CodexNotchMonitor-before-grok-20261101-123809.app；记录：.tmp/grok-integration/installation.json。
+
+- 2026-11-01 12:40：Grok 最终核心 47 项、运行时 24 项、arm64 Release 与 deep／strict 签名通过；生产 CLI 真实额度为剩余 99%，4 份记录共 593,694 Token 与持久化账本汇总一致，真实空闲终端为 0 活动。已检查监控中心／菜单栏离屏图（真实额度＋合成历史／任务）。完整 scripts/test.sh 仅卡在既有成本排行侧栏别名断言；后续定价、社区、通知、连续性 41／41、Claude 核心 114 项与运行时／审批组独立续跑退出 0。未放宽断言，未运行真实模型任务。源／目标及旧 App 完整备份签名与哈希核对通过，未覆盖安装。日志、快照及最终源码哈希：.tmp/grok-integration/。
+
+- 2026-11-01 01:03：历史别名实机验收通过：在 Pulse 原生表单中核对旧完整路径并保存 CoverAI Store；独立 defaults 回读及 App 重启后的会话列表均确认名称保留，旧目录 10 条基线会话及新目录 16 条会话保持独立。新旧目录 device／inode 前后一致；备份与旧 App、安装与构建产物清单一致，deep／strict 签名通过，重启 stderr 0 字节、无新增崩溃。自动检查为名称／偏好 43、连续性 41／41、删除安全 41；完整脚本在既有成本断言失败，后续组含 Claude Runtime／审批 350 续跑通过。证据：.tmp/history-display-name/installation.json。
+
+- 2026-11-01 00:48：本机覆盖安装核对源／目标均为 v1.11.0（Build 33）、arm64，签名通过；旧 App 与备份、新 App 与构建产物逐文件 SHA-256／符号链接清单一致。安装后 PID 42505 持续运行 69 秒，stderr 0 字节，无新增崩溃报告；未操作真实重命名或删除。证据：.tmp/project-rename/installation.json。
+
+- 2026-11-01 00:46：项目重命名：32 项协议逻辑回归通过，包含精确定位、分页、名称校验、目录／metadata 不变、同名零写入、并发变更拒绝及未知结果不重发；项目／提问传输白名单隔离通过。生产只读 project/list 与 project/read 确认 19 个项目及当前项目 ID／名称一致，未发送 update。连续性 41／41、删除安全 41 项、最终 arm64 Release、deep／strict 签名与差异检查通过。完整脚本在既有成本排行别名断言失败；后续组独立续跑退出 0。真实重命名与侧栏实时刷新未验证。日志与协议生成结果：.tmp/project-rename/。
+
+- 2026-11-01 00:28：会话删除范围最终安全测试 40 项通过：合法目标全目录移动、父目录与兄弟文件保留，共享／多根／嵌套／路径回退、链接路径及真实路径、改绑／目录替换均拒绝；使用隔离目录和注入移动操作，未操作真实废纸篓。连续性 41／41、最终 arm64 Release、deep／strict 签名与 git diff --check 通过。完整脚本仍在既有 runtime project ranking uses current sidebar alias 断言退出 1；后续价格／社区／提醒／Claude 组续跑退出 0（审批 350 项），策略补充后单独重跑 40 项与最终构建通过。界面未实机操作，尚未安装。证据：.tmp/project-delete-scope/。
+
+- 2026-10-31 15:50：One Native 接入新增 32 项问题状态回归及 WebSocket 握手／分片／ping／超限／断连／RPC 错误／方法白名单通过；生产只读 Swift 探针确认 1 个待答问题及 1 张待回复岛体模型。arm64 Release、严格签名、源文件哈希与安装／备份逐文件 SHA-256 通过。完整测试在既有成本排行别名断言失败；续跑后续组退出 0，含连续性 40／40、审批 350、Claude Runtime。安装版 PID 43575／proxy 43663 存活 62／60 秒，stderr 0 字节，无新增崩溃报告；AX 权限不可用，未验证真实界面或代用户回答。证据：.tmp/one-native-question/。
+
+- 2026-10-31 15:33：闪退修复会话状态 201／201，arm64 Release、deep／strict 签名、备份及安装逐文件 SHA-256 比对通过。完整脚本在真实数据成本排行别名断言退出 1；独立续跑剩余组退出 0，含连续性 40／40、审批 350 与 Claude Runtime。修复版 PID 33706 启动 62 秒仍存活，stderr 0 字节，无新增崩溃报告。日志及安装记录：.tmp/startup-crash-20261031/。
 
 - 2026-10-29 03:18：完整测试、双架构主程序／Helper／DMG、签名和包内逐文件比对通过；三个已上传附件重新下载，SHA-256 与本地及 GitHub digest 一致，Release 为非草稿／非预发布且为 Latest。arm64 已本机安装验收，官方费率同步成功；Intel 未真机运行。证据：.tmp/release-1.11.0/。
 
@@ -197,24 +233,6 @@ GitHub 仓库为 suguxiaojie/codex-pulse。v1.11.0（Build 33）已发布为 Lat
 - 2026-10-28 10:11：scripts/test.sh 与定向连续性均退出 0（40／40）；新增缓存失效、原始／压缩正文读取保真、冷暖盘点、错误文件进度与原文件不变检查通过。arm64 Release、架构／签名、安装及备份哈希通过，源测试输入未变。实机 174 条会话→搜索 12→归档 29→恢复 174，折叠状态恢复；同页各 60 秒 CPU 后接独立采样，平均基本不变，单轮峰值 26.6%→13.7% 仅作观察。943 MB 历史峰值未完整归因。证据：.tmp/session-page-perf/。
 
 - 2026-10-28 00:38：重启恢复 scripts/test.sh 退出 0，Claude 核心 112 项、启动恢复 Runtime（busy／idle、PID 生命周期、无审批、真实 Hook 接管）、连续性及审批 350 与既有 Runtime 均通过；独立恢复回归退出 0。arm64 Release／架构／签名、备份与旧包及安装与构建全文件哈希通过。实机重启监控后已有 Claude 任务立即恢复，随后正常收到 Bash；未重启 Claude、未发送测试任务或处理真实审批。首轮专项因补充进程复核时源码修改中止，以 full-tests.log 和 runtime-registry.log 为准。证据：.tmp/claude-restart-recovery/。
-
-- 2026-10-27 23:09：scripts/test.sh 退出 0，含面板常规 325、连续性 37、审批 350 与 Claude Runtime；最终可见面板专项 347／347，覆盖异步隐藏通知、减少动态、快速反向、原宿主复用、隐藏时 Metal 时钟和原生脉动停止、再次展开恢复。更新旧全卡渲染不适用的进度前沿断言，改验真实绘制时钟。arm64 Release、版本／架构／签名、安装与构建及备份与旧包哈希通过，源码输入未变。三档各 60 秒 CPU 后接 5 秒采样、不重叠；收起两次 30 秒均保留。单轮真实工作负载，未直接测 GPU／能耗。日志：.tmp/island-refresh-fix/。
-
-- 2026-10-27 19:46：One Fast 新回归旧代码失败 7 项，修复后会话状态 173／173；完整 scripts/test.sh、arm64 Release 退出 0，含 Native 76、面板 311、连续性 37、审批 350 与 Claude Runtime。真实日志 checkpoint priority 经生产解析得到 Fast，实机 AX 确认当前会话显示 Fast；关闭／再开启／跨轮／归属／非法值在隔离夹具验证。架构、签名、安装／备份全文件哈希与构建输入通过。证据：.tmp/one-fast-runtime/。
-
-- 2026-10-27 19:35：Fast 标签 scripts/test.sh 退出 0（会话状态 163、Native 76、面板 311、连续性 37、审批 350 与 Claude Runtime），arm64 Release、架构／签名、安装与备份逐文件哈希通过；实机 AX 当前会话模型文本不含 Fast 未知／关。One 源码与本机协议只读核对，未测试真实 Fast 开关识别。证据：.tmp/island-fast-label/。
-
-- 2026-10-27 19:25：Fast 显示最终 scripts/test.sh 退出 0（会话状态 163、Native 76、面板 311、连续性 37、审批 350 与 Claude Runtime），实际 Helper 合成状态栏开关、异常类型与跨会话测试通过；arm64 Release、架构、签名、安装／构建及备份／旧包逐文件哈希通过，源码输入未变。实机 AX 确认 Fast 未知；截图仅捕获收起状态，真实 Claude 开关与展开排版未验收。首轮脚本因编辑时编译中止，以 tests-final.log 为准。证据：.tmp/island-fast-mode/。
-
-- 2026-10-27 15:56：SwiftUI 刷新修复 scripts/test.sh 唯一一次退出 0（Tibo 68、额度恢复 18／18、连续性 37／37、面板 311／311、审批 350）；唯一一次 arm64 Release、源包／安装包签名与逐文件哈希通过，备份与原包一致。启动满 137.6 秒后完成一次 top／6 秒 sample；记录定位与场景限制，未追加界面 QA。证据：.tmp/swiftui-frame-loop/REPORT.md。
-
-- 2026-10-27 15:31：Clawd 岛内版 scripts/test.sh 完整一次退出 0（角色 541、面板 311、硬件黑 50、预览 59、连续性 37、审批 350），build-app.sh arm64 一次退出 0；主程序／Helper arm64、deep／strict 签名、完整备份与安装哈希均通过，git diff --check 通过。启动 129 秒后完成 13 次 top／6 秒 sample，帧表 8 张＋静态 7 张导出；单次 screencapture 失败，严格空闲对比与实机显示未验证。证据：.tmp/clawd-in-island/。
-
-- 2026-10-27 14:55：动效降耗 A：scripts/test.sh 完整退出 0，含面板 311、预览 59、连续性 37、Claude 核心 95、审批 350 与 Runtime；最终 arm64 Release、主程序／Helper 架构、deep／strict 签名通过，备份与旧包、安装与构建逐文件哈希一致，启动进程已确认。截图失败，锁屏／睡眠／低电量／过热切换未实机验收，受控性能未验证。证据：.tmp/island-effect-perf-a/REPORT.md、tests.log、build-final.log、install.json。
-
-- 2026-10-27 13:35：scripts/test.sh 完整退出 0，新增图表日期／时区／样式／空值与缓存重复读取／同大小同日期原子替换／归属更新／非法 JSON／恢复／删除检查通过；连续性 37、Native Activity 76、审批 350、Claude 核心 95 及 Runtime 通过。arm64 Debug／Release、主程序与 Helper 架构、deep／strict 签名、安装／构建及备份／原包哈希通过，验证输入未变。离屏前后 PNG 逐字节一致，独立样式切换触发重建并渲染为 K 单位；实机 AX 验证周／月切换及 7／30 根柱的数据和标签。首轮完整脚本因旧探针仍使用双参数回调编译失败，已适配新增后台目录返回值，以 full-tests-final.log 为准。证据：.tmp/cpu-fix-20261027/summary.json、chart-benchmark.json、chart-style-probe.log、full-tests-final.log、release-build.log、actual-after.log、actual-after-month.log、sample-after.txt、install.json。
-
-- 2026-10-26 16:53：scripts/test.sh 完整退出 0；流式读取 20、模型 128、桌面预览 59、面板 311、连续性 37、Claude 核心 95、审批 350 与 Runtime 通过；成本冒烟通过。arm64 Release／主程序与 Helper 架构、deep／strict 签名、安装／构建与备份／原包逐文件哈希通过，验证输入哈希未变。预览前后离屏图已检查；固定压缩输入首尾摘要 SHA-256 一致。旧真实历史探针两次超过 1.5 GiB 诊断上限，新版文件作用域完整扫描 90,914 条事件峰值 306 MiB；旧活动探针约 0.87 秒超过上限，拆行修复后完整活动扫描约 141 MiB。早期仅修复统计／共享读取的安装版仍有多 GiB 峰值，均未算验收通过；启动期完整采样和独立活动复现最终定位 COW。Allocations 录制未导出有效报告，已停止，不作为结论依据。最终证据：.tmp/performance-opt/performance-summary.json、full-tests-verified.log、release-build-verified.log、line-benchmark-summary.json、startup-summary-verified.json、install-verified.json。
 
 ## 验证与产物入口
 

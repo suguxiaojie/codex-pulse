@@ -99,6 +99,11 @@ final class ActivityIslandWindowController: NSObject {
             self.model.objectWillChange.send()
             self.rescheduleTransitions()
         }.store(in: &cancellables)
+        store.grok.$questions.receive(on: RunLoop.main).sink { [weak self] _ in
+            guard let self else { return }
+            self.model.discardAnswerDrafts(except: self.store.islandAnswerRequestIDs)
+            self.model.objectWillChange.send(); self.rescheduleTransitions()
+        }.store(in: &cancellables)
         model.onSelect = { [weak self] id in
             guard let self, let row = self.model.sessions.first(where: { $0.id == id }) else { return }
             self.focusHandoffTimer.update(deadline: nil, onExpire: {})
@@ -112,6 +117,7 @@ final class ActivityIslandWindowController: NSObject {
             guard let self else { return }
             if self.model.showsUsagePage {
                 if self.model.usageProvider == .claude { self.store.claude.refreshUsage() }
+                else if self.model.usageProvider == .grok { self.store.grok.refresh() }
                 else { self.store.refreshQuota(); self.store.refreshCost() }
             }
             else { self.store.refreshSessionActivity() }
@@ -156,6 +162,15 @@ final class ActivityIslandWindowController: NSObject {
                 lhs?.complete == rhs?.complete && lhs?.fileCount == rhs?.fileCount
         }.sink { [weak self] in self?.model.claudeUsage = $0 }.store(in: &cancellables)
         store.claude.$limits.removeDuplicates().sink { [weak self] in self?.model.claudeLimits = $0 }.store(in: &cancellables)
+        store.grok.$enabled.removeDuplicates().sink { [weak self] enabled in
+            guard let self else { return }
+            self.model.grokEnabled = enabled
+            if !enabled && self.model.usageProvider == .grok { self.model.selectUsageProvider(.codex) }
+        }.store(in: &cancellables)
+        store.grok.$quota.sink { [weak self] in self?.model.grokQuota = $0 }.store(in: &cancellables)
+        store.grok.$usage.sink { [weak self] in self?.model.grokUsage = $0 }.store(in: &cancellables)
+        store.grok.$quotaFailed.sink { [weak self] in self?.model.grokQuotaFailed = $0 }.store(in: &cancellables)
+        store.grok.$quotaStatus.sink { [weak self] in self?.model.grokQuotaStatus = $0 }.store(in: &cancellables)
         store.$costSnapshot.sink { [weak self] in self?.model.usageCost = $0 }.store(in: &cancellables)
         store.$accountUsage.sink { [weak self] in self?.model.accountUsage = $0 }.store(in: &cancellables)
         store.$quotaResetCredits.sink { [weak self] in self?.model.resetCredits = $0 }.store(in: &cancellables)

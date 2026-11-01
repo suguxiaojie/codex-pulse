@@ -41,6 +41,7 @@ struct IslandUsagePresentation: Equatable {
     enum Source: Equatable {
         case codex(planName: String, creditBalance: String?, resetCount: Int?)
         case claude
+        case grok(plan: String, shared: Bool?, prepaidCents: Int?)
     }
     let provider: IslandUsageProvider
     let quotas: [Quota]

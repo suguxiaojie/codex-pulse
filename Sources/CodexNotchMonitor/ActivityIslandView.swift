@@ -14,7 +14,7 @@ struct ActivityIslandSnapshot: Equatable {
 
 }
 
-enum IslandUsageProvider: String, CaseIterable { case codex = "Codex", claude = "Claude Code" }
+enum IslandUsageProvider: String, CaseIterable { case codex = "Codex", claude = "Claude Code", grok = "Grok CLI" }
 
 @MainActor
 final class ActivityIslandViewModel: ObservableObject {
@@ -77,14 +77,21 @@ final class ActivityIslandViewModel: ObservableObject {
     @Published var claudeStatusLineEnabled = false
     @Published var claudeUsage: ClaudeCodeUsageSummary?
     @Published var claudeLimits: ClaudeCodeRateLimits?
+    @Published var grokEnabled = false
+    @Published var grokQuota: GrokQuotaSnapshot?
+    @Published var grokUsage: GrokUsageSummary?
+    @Published var grokQuotaFailed = false
+    @Published var grokQuotaStatus = "尚未查询"
     func selectUsageProvider(_ provider: IslandUsageProvider) {
-        guard !resetBusy, !resetConfirmationPresented, provider != .claude || claudeEnabled else { return }
+        guard !resetBusy, !resetConfirmationPresented, provider != .claude || claudeEnabled,
+              provider != .grok || grokEnabled else { return }
         usageProvider = provider
     }
     func updateClaudeEnabled(_ enabled: Bool) {
         claudeEnabled = enabled
         if !enabled {
-            usageProvider = .codex; claudeUsage = nil; claudeLimits = nil
+            if usageProvider == .claude { usageProvider = .codex }
+            claudeUsage = nil; claudeLimits = nil
         }
     }
     @Published var showsUsagePage = false
@@ -302,7 +309,7 @@ struct IslandSessionPresentation {
         let action = row.actionText.trimmingCharacters(in: .whitespacesAndNewlines)
         if row.phase == .waitingApproval {
             if hasInlineApproval { return "在下方卡片中处理" }
-            return row.provider == "Claude Code" ? "请在 Claude Code 中确认" : "请在 Codex 中处理"
+            return row.provider == "Grok CLI" ? "请在 Grok 终端中处理" : row.provider == "Claude Code" ? "请在 Claude Code 中确认" : "请在 Codex 中处理"
         }
         if !action.isEmpty && action != row.phase.title && action != row.statusTitle { return action }
         return row.projectName.isEmpty ? "Codex 任务" : "项目 · " + row.projectName
@@ -629,7 +636,7 @@ struct ActivityIslandTaskCard: View {
     }
     private var metadataLine: some View {
         HStack(spacing: 8) {
-            Text((row.provider == "Codex" ? "" : "Claude · ") + (row.isPrivate ? "模型已隐藏" : row.modelDetailsTitle)).lineLimit(1).truncationMode(.tail)
+            Text((row.provider == "Codex" ? "" : row.provider == "Grok CLI" ? "Grok · " : "Claude · ") + (row.isPrivate ? "模型已隐藏" : row.modelDetailsTitle)).lineLimit(1).truncationMode(.tail)
                 .help(presentation.modelTitle)
             if !row.fastModeTitle.isEmpty {
                 Text(row.fastModeTitle).fixedSize().help("当前会话已开启 Fast 模式")

@@ -29,6 +29,7 @@ enum ContinuityTests {
         continuityCountsOnlyUserConversations()
         projectGroupsContainTheirConversations()
         try exactProjectBindingIsConservative()
+        try projectDeletionCannotMoveWorkspace()
         try accountStateWatcherTracksOnlyAccountFileMetadata()
         try sidebarCleanupIsExactAndRecoverable()
         try sidebarCleanupQueuesWhileCodexRuns()
@@ -50,7 +51,57 @@ enum ContinuityTests {
         try projectTransferP1PreservesGitAndAttachments()
         try projectTransferLargeGitOutputDoesNotDeadlock()
         projectImportDirectoryDefaultsToCodexProjectsContainer()
-        print("Continuity tests: 40/40 passed")
+        print("Continuity tests: 41/41 passed")
+    }
+
+    private static func projectDeletionCannotMoveWorkspace() throws {
+        // Guard the UI/store boundary: file deletion requires a validated directory plan.
+        let store = try String(contentsOfFile: "Sources/CodexNotchMonitor/MonitorStore.swift", encoding: .utf8)
+        let view = try String(contentsOfFile: "Sources/CodexNotchMonitor/NotchView.swift", encoding: .utf8)
+        expect(!store.contains("deleteProjectDirectory"), "项目删除接口不得接受磁盘目录删除选项")
+        expect(view.contains("store.prepareProjectFileDeletion(project)"), "文件删除入口必须先检查范围")
+        expect(view.contains("directoryPlan: draft.plan"), "文件删除必须使用单独确认的计划")
+        let start = store.range(of: "    func deleteContinuityProject(")!.lowerBound
+        let end = store.range(of: "    func dismissContinuityDeletionFailure()", range: start..<store.endIndex)!.lowerBound
+        let deletion = String(store[start..<end])
+        for operation in ["trashItem", "removeItem", "moveItem"] {
+            expect(!deletion.contains(operation), "项目删除调用链不得直接移动或删除工作区：\(operation)")
+        }
+
+        let root = temporaryDirectory("project-delete-preserves-workspace")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = root.appendingPathComponent("workspace")
+        let child = workspace.appendingPathComponent("other-project")
+        let home = root.appendingPathComponent("home")
+        let stateURL = home.appendingPathComponent(".codex/.codex-global-state.json")
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let files = [workspace.appendingPathComponent("notes.txt"), child.appendingPathComponent("source.swift")]
+        for file in files { try Data("must survive".utf8).write(to: file) }
+        let state: [String: Any] = ["local-projects": [
+            "workspace": ["id": "workspace", "name": "Workspace", "rootPaths": [workspace.path]],
+            "child": ["id": "child", "name": "Other", "rootPaths": [child.path]],
+        ]]
+        try JSONSerialization.data(withJSONObject: state).write(to: stateURL)
+        var running = true
+        let service = CodexProjectCleanupService(
+            homeDirectory: home,
+            pendingURL: root.appendingPathComponent("pending.json"),
+            backupRoot: root.appendingPathComponent("backups"),
+            codexIsRunning: { running }
+        )
+        _ = try service.registerCleanup(projectName: "Workspace", projectPath: workspace.path)
+        for file in files {
+            let data = try Data(contentsOf: file)
+            expect(data == Data("must survive".utf8), "排队清理不得移动工作区或子项目文件")
+        }
+        running = false
+        _ = try service.processPendingIfPossible()
+        _ = try service.registerCleanup(projectName: "Other", projectPath: child.path)
+        for file in files {
+            let data = try Data(contentsOf: file)
+            expect(data == Data("must survive".utf8), "即时与延迟登记清理都必须保留工作区和嵌套项目文件")
+        }
     }
 
     private static func sessionLibraryCachesDerivedData() {
@@ -129,10 +180,16 @@ enum ContinuityTests {
         expect(compressedFull.id == compressedMetadata.id && compressedFull.kind == compressedMetadata.kind
             && compressedMetadata.readableMessages.isEmpty, "压缩日志使用相同元数据口径")
         try Data("invalid".utf8).write(to: sessions.appendingPathComponent("broken.jsonl"))
+        var nativeNames = [project.path: "Native project name"]
         let service = SessionContinuityService(homeDirectory: root, threadService: CodexThreadService { _, _, _, completion in
             completion(.success(["data": []]))
-        })
-        for _ in 0..<2 {
+        }, liveProjectNames: { nativeNames }, projectDisplayNames: { [project.path: "History display name"] })
+        for iteration in 0..<3 {
+            if iteration > 0 { nativeNames = [:] }
+            if iteration == 2 {
+                let state: [String: Any] = ["local-projects": ["registered": ["id": "registered", "name": "Registered name", "rootPaths": [project.path]]]]
+                try JSONSerialization.data(withJSONObject: state).write(to: root.appendingPathComponent(".codex/.codex-global-state.json"))
+            }
             var result: Result<SessionContinuitySnapshot, Error>?
             var progress: [(Int, Int)] = []
             service.fetch(progress: { progress.append(($0, $1)) }, completion: { result = $0 })
@@ -141,6 +198,11 @@ enum ContinuityTests {
             guard let result else { fatalError("Inventory callback timed out") }
             let snapshot = try result.get()
             expect(snapshot.userThreads.count == 1 && snapshot.unreadableFileCount == 1, "盘点保留失败文件统计")
+            let expectedName = ["Native project name", "History display name", "Registered name"][iteration]
+            expect(snapshot.userThreads.first?.projectName == expectedName
+                && snapshot.userThreads.first?.projectPath == project.path
+                && snapshot.userThreads.first?.originalProjectPath == project.path,
+                "原生名称优先，历史别名仅用于未登记分组，目录保持不变")
             expect(snapshot.threads.first?.readableMessages.isEmpty == true && snapshot.threads.first?.title == String(prompt.prefix(60)),
                 "首次与缓存盘点都只发布元数据，标题保持原值")
             expect(progress.first?.0 == 1 && progress.last?.0 == 2 && progress.last?.1 == 2,
