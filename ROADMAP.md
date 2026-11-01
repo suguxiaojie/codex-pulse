@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-GitHub 仓库为 suguxiaojie/codex-pulse。当前源码为 v1.12.0（Build 34），包含 Grok CLI 额度、任务与岛内问答，以及 Codex 项目重命名、历史分组显示名和独立目录删除。双架构安装包随 v1.12.0 Release 发布。上一公开版 v1.11.0（Build 33）的标签仍指向 c65481beef4bde401103f040f251d941370649d7。
+GitHub 仓库为 suguxiaojie/codex-pulse。v1.12.0（Build 34）已公开发布为 Latest，标签指向 5d308a13f124059ed3e301cdfb41f5bbbc72de95，包含 Grok CLI 额度、任务与岛内问答，以及 Codex 项目重命名、历史分组显示名和独立目录删除。上一公开版 v1.11.0（Build 33）的标签仍指向 c65481beef4bde401103f040f251d941370649d7。
 
 本地开发包展示名称为 Codex Pulse，配套原创“脉点”品牌；Bundle ID、可执行文件、安装路径、偏好键与数据目录沿用 CodexNotchMonitor，不迁移现有配置和数据。
 
@@ -152,6 +152,8 @@ GitHub 仓库为 suguxiaojie/codex-pulse。当前源码为 v1.12.0（Build 34）
 
 ## 最近完成
 
+- 2026-11-01 15:30：v1.12.0（Build 34）已公开发布为 Latest；标签指向 5d308a13f124059ed3e301cdfb41f5bbbc72de95。包含 Grok CLI 官方额度、本机用量、进程核对任务与岛内问答，以及 Codex 项目重命名、历史分组显示名和独立目录删除。两份 DMG 与 SHA-256 校验文件已上传。arm64 SHA-256 为 4438a661d7c1d6bcc65c7cc21585ace0dd0cbd84e135d30f4e2bf1e5f389bb61，x86_64 SHA-256 为 ddcf2e92f060270345a1d6c00b9141b1ae767dccc53fa306477b263b7d25e023。发布地址：https://github.com/suguxiaojie/codex-pulse/releases/tag/v1.12.0。
+
 - 2026-11-01 13:58：Grok 自动接入已按用户明确授权配置并备份覆盖安装。只新增官方 `cli.use_leader=true`，原来未声明该开关，其他配置保持原样；[原共享设置的最小备份](/Users/zuxinchen/.grok/config.toml.codex-pulse-shared-1793512235-FE38C268.json) 不复制其他模型参数。官方 grok inspect 原生解析退出 0，原 PID 23149 保持运行。Pulse 改连默认 leader.sock，移除目录选择与新建终端流程；实机已显示“自动接入问答与批准／检查连接”，并提示下次正常启动 Grok 生效，额度仍为 99%。定向核心 56、配置／交互 67、运行时 32、arm64 Release／严格签名通过；完整脚本保留唯一旧成本别名失败，后续组独立通过。App 与源包逐文件／链接一致，新 PID 62947 启动验收通过。App 回滚备份：build/backups/CodexNotchMonitor-before-grok-auto-20261101-135715.app；配置／安装记录：.tmp/grok-auto/。真实新共享任务的问答／批准回传仍待正常用户任务验收，不为验收启动模型。未提交／推送／发布。
 
 - 2026-11-01 13:36：Grok 官方额度刷新修复已覆盖安装并实机验收。已复现并区分上游 503 与旧页面时间误判新快照两类问题；增加 20 秒总期限内最多 3 次短重试，认证／不支持／无额度等不重试，补当前显示时钟与准确过期文案。核心 56、交互 40、运行时 31、arm64 Release 和签名通过；完整脚本仍为原有成本别名断言失败，后续组独立全部通过，按本会话同一已授权例外安装。实际 Grok 页显示剩余 99%，后续自动刷新观测时间更新至 01:35，仍显示 99% 且不再误报过期；PID 54547 已运行 3 分钟，安装与源 App 逐文件／链接一致。回滚备份：build/backups/CodexNotchMonitor-before-grok-quota-fix-20261101-133012.app；证据：.tmp/grok-questions/quota-installation.json。自动接入的真实 Grok 配置仍未改，待单独授权。
@@ -193,6 +195,8 @@ GitHub 仓库为 suguxiaojie/codex-pulse。当前源码为 v1.12.0（Build 34）
 - 2026-10-26 16:53：高优先级性能优化已验证并备份安装。预览图片按 2560 px 上限即时解码并复用，设置预览外层不再重复订阅全 Store，内部实时面板保留订阅；历史统计按文件释放临时对象并复用日期解析器，流式读取按读取／解压块释放，会话目录按文件释放。关键 GB 级峰值定位到活动日志拆行：保留 Data 切片时逐行删除前缀造成整段缓冲反复 COW，改为单次遍历和独立行字节，保留半行、丢弃超长行及精确轮次／Token 规则。6,000 行与半行续写回归通过。60 次图片重绘三轮中位 5.7726→0.4051 秒；1,500 行固定日志峰值 400.39→6.86 MiB、状态与 Token 一致。最终 App 启动约 76 秒系统历史峰值 410.50 MiB、结束 219.75 MiB，未复现中间版 9–10 GiB 峰值；长期泄漏尚未做长时验证。回滚至本轮开始前：/Users/zuxinchen/Documents/ChatGPT/Codex额度监控macbook插件。/build/backups/CodexNotchMonitor-before-performance-opt-20261026-042050.app 。未提交／推送／发布。
 
 ## 最近验证
+
+- 2026-11-01 15:30：v1.12.0 源码 5d308a13f124059ed3e301cdfb41f5bbbc72de95 已在 origin/main。完整 scripts/test.sh 停在既有断言 runtime project ranking uses current sidebar alias，未放宽；SKIP_COST_SMOKE_TESTS=1 的同一脚本退出 0，含 Grok 核心 56、问答与权限 67、运行时 32，项目重命名 43，删除安全 41，共享提问 32，连续性 41/41，Claude 集成 114，审批 350。双架构 DMG 只读挂载核对 1.12.0（Build 34）、主程序与 Helper 架构、ad-hoc 严格签名；Intel 为交叉构建，未做真机运行。重新下载的三个附件 SHA-256 与本地及 GitHub digest 一致，Release 为非草稿、非预发布且为 Latest。design-qa.md 与发布物料目录未提交。本机 /Applications 仍为此前安装包，本轮未覆盖安装。
 
 - 2026-11-01 13:58：自动接入：原生普通 grok + CLI 共享开关的隔离 Socket 验证通过；实际配置仅追加目标设置，回读为 true、原生配置解析退出 0、旧进程仍存活。67 项包含缺省／false／true、注释／CRLF、幂等、权限与最小备份、并发／链接／长 Socket 路径拒绝；运行时 32 项包含异步配置不得覆盖后续显式停用。App 深度严格签名与安装清单一致；实机 Grok 页面无目录入口，显示“检查连接”和真实 99% 额度。完整脚本仍仅为旧成本排行别名断言失败，续跑连续性 41／41、Claude 114、运行时与审批 350 通过。证据：.tmp/grok-auto/installation.json、configuration.json、native-config-validation.json、grok-tests-delivery.log。
 
